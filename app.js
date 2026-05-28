@@ -1,0 +1,2276 @@
+/* ============================================================
+   Homeschool HQ — main app
+   Vanilla JS, no build step, no dependencies beyond jsPDF.
+   Loads window.CURRICULUM from curriculum.js
+============================================================ */
+
+/* ------------------------------------------------------------
+   STATE
+------------------------------------------------------------ */
+const STORAGE_KEY = "homeschoolHQ_v1";
+
+const DEFAULT_KIDS = {
+  aubrey: {
+    id: "aubrey",
+    name: "Aubrey",
+    age: 8,
+    gradeKey: "3",        // BC Grade 3 curriculum
+    interests: "",
+    notes: "",
+    difficulty: { math: 5, reading: 5, writing: 5 }, // 1–10 per subject
+    mastery: {}, // { standardId: "not_yet" | "emerging" | "developing" | "proficient" | "extending" }
+    references: { math: [], reading: [], writing: [] } // per-subject reference photos
+  },
+  makena: {
+    id: "makena",
+    name: "Makena",
+    age: 6,
+    gradeKey: "1",        // BC Grade 1 curriculum
+    interests: "",
+    notes: "",
+    difficulty: { math: 5, reading: 5, writing: 5 },
+    mastery: {},
+    references: { math: [], reading: [], writing: [] }
+  },
+  oakley: {
+    id: "oakley",
+    name: "Oakley",
+    age: 4,
+    gradeKey: "K",        // BC K + Pre-K bridge
+    interests: "",
+    notes: "",
+    difficulty: { math: 3, reading: 3, writing: 3 }, // start gentler for the 4yo
+    mastery: {},
+    references: { math: [], reading: [], writing: [] }
+  }
+};
+
+const DEFAULT_STATE = {
+  currentKidId: "aubrey",
+  currentTab: "dashboard",
+  kids: DEFAULT_KIDS,
+  worksheets: { aubrey: [], makena: [], oakley: [] },
+  gradings: { aubrey: [], makena: [], oakley: [] },
+  readingLog: { aubrey: [], makena: [], oakley: [] },
+  settings: {
+    apiKey: "",
+    model: "claude-sonnet-4-6"
+  }
+};
+
+let state = loadState();
+
+// Non-persistent UI state: which template is selected in each subject tab
+const uiTemplate = { math: null, reading: null, writing: null };
+
+/* ------------------------------------------------------------
+   STORAGE
+------------------------------------------------------------ */
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return structuredClone(DEFAULT_STATE);
+    const parsed = JSON.parse(raw);
+    // shallow-merge defaults so new fields don't break old data
+    const merged = { ...structuredClone(DEFAULT_STATE), ...parsed };
+    // Migrate kids to add new fields (references, etc.)
+    Object.keys(merged.kids || {}).forEach(kidId => {
+      const kid = merged.kids[kidId];
+      if (!kid.references) kid.references = { math: [], reading: [], writing: [] };
+      ["math", "reading", "writing"].forEach(s => {
+        if (!kid.references[s]) kid.references[s] = [];
+      });
+    });
+    return merged;
+  } catch (e) {
+    console.error("Failed to load state", e);
+    return structuredClone(DEFAULT_STATE);
+  }
+}
+
+function saveState() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.error("Failed to save state", e);
+    toast("Couldn't save data — storage may be full", "error");
+  }
+}
+
+/* ------------------------------------------------------------
+   TABS DEFINITION
+------------------------------------------------------------ */
+const TABS = [
+  { id: "dashboard",   label: "Dashboard",   icon: "📊", section: "" },
+  { id: "math",        label: "Math",        icon: "🔢", section: "Subjects" },
+  { id: "reading",     label: "Reading",     icon: "📖", section: "" },
+  { id: "writing",     label: "Writing",     icon: "✏️", section: "" },
+  { id: "standards",   label: "Standards",   icon: "📚", section: "Track" },
+  { id: "plan",        label: "Daily Plan",  icon: "📅", section: "" },
+  { id: "reading-log", label: "Reading Log", icon: "📕", section: "" },
+  { id: "portfolio",   label: "Portfolio",   icon: "🗂️", section: "" }
+];
+
+/* ------------------------------------------------------------
+   ENTRY POINT
+------------------------------------------------------------ */
+document.addEventListener("DOMContentLoaded", () => {
+  injectTracingFontCSS();
+  renderHeader();
+  renderSidebar();
+  renderContent();
+  attachGlobalListeners();
+});
+
+function injectTracingFontCSS() {
+  if (!window.TRACING_FONT_BASE64 || document.getElementById("tracingFontStyle")) return;
+  const style = document.createElement("style");
+  style.id = "tracingFontStyle";
+  style.textContent = `
+    @font-face {
+      font-family: '${window.TRACING_FONT_NAME || "TracingFont"}';
+      src: url('data:font/ttf;base64,${window.TRACING_FONT_BASE64}') format('truetype');
+      font-weight: normal;
+      font-style: normal;
+    }
+  `;
+  document.head.appendChild(style);
+}
+
+function attachGlobalListeners() {
+  document.getElementById("settingsBtn").addEventListener("click", openSettings);
+
+  // close-modal helpers
+  document.querySelectorAll("[data-close]").forEach(el => {
+    el.addEventListener("click", () => closeAllModals());
+  });
+
+  // Worksheet modal actions
+  document.getElementById("downloadWorksheetBtn").addEventListener("click", downloadCurrentWorksheetPDF);
+  document.getElementById("downloadAnswerKeyBtn").addEventListener("click", downloadCurrentAnswerKeyPDF);
+
+  // Grade modal
+  document.getElementById("gradeFileInput").addEventListener("change", onGradeFileChosen);
+  document.getElementById("runGradingBtn").addEventListener("click", runGrading);
+
+  // Settings actions
+  document.getElementById("saveSettingsBtn").addEventListener("click", saveSettings);
+  document.getElementById("exportDataBtn").addEventListener("click", exportData);
+  document.getElementById("importDataBtn").addEventListener("click", () => document.getElementById("importDataInput").click());
+  document.getElementById("importDataInput").addEventListener("change", importData);
+}
+
+/* ------------------------------------------------------------
+   HEADER & KID SWITCHER
+------------------------------------------------------------ */
+function renderHeader() {
+  const switcher = document.getElementById("kidSwitcher");
+  switcher.innerHTML = "";
+  Object.values(state.kids).forEach(kid => {
+    const btn = document.createElement("button");
+    btn.className = "kid-pill" + (kid.id === state.currentKidId ? " active" : "");
+    btn.innerHTML = `<span class="kid-name">${kid.name}</span><span class="age">${kid.age} • ${kid.gradeKey === "K" ? "K" : "Gr " + kid.gradeKey}</span>`;
+    btn.addEventListener("click", () => setCurrentKid(kid.id));
+    switcher.appendChild(btn);
+  });
+  // Apply kid theme to body
+  document.body.classList.remove("kid-aubrey", "kid-makena", "kid-oakley");
+  document.body.classList.add("kid-" + state.currentKidId);
+}
+
+function setCurrentKid(kidId) {
+  state.currentKidId = kidId;
+  saveState();
+  renderHeader();
+  renderSidebar();
+  renderContent();
+}
+
+/* ------------------------------------------------------------
+   SIDEBAR
+------------------------------------------------------------ */
+function renderSidebar() {
+  const sidebar = document.getElementById("sidebar");
+  sidebar.innerHTML = "";
+  let lastSection = null;
+  TABS.forEach(tab => {
+    if (tab.section && tab.section !== lastSection) {
+      const sec = document.createElement("div");
+      sec.className = "sidebar-section";
+      sec.textContent = tab.section;
+      sidebar.appendChild(sec);
+      lastSection = tab.section;
+    }
+    const btn = document.createElement("button");
+    btn.className = "sidebar-tab" + (tab.id === state.currentTab ? " active" : "");
+    btn.innerHTML = `<span class="tab-icon">${tab.icon}</span><span>${tab.label}</span>`;
+    btn.addEventListener("click", () => setCurrentTab(tab.id));
+    sidebar.appendChild(btn);
+  });
+}
+
+function setCurrentTab(tabId) {
+  state.currentTab = tabId;
+  saveState();
+  renderSidebar();
+  renderContent();
+}
+
+/* ------------------------------------------------------------
+   CONTENT ROUTER
+------------------------------------------------------------ */
+function renderContent() {
+  const c = document.getElementById("content");
+  const kid = state.kids[state.currentKidId];
+  switch (state.currentTab) {
+    case "dashboard":   c.innerHTML = renderDashboard(kid); attachDashboardListeners(kid); break;
+    case "math":        c.innerHTML = renderSubject(kid, "math"); attachSubjectListeners(kid, "math"); break;
+    case "reading":     c.innerHTML = renderSubject(kid, "reading"); attachSubjectListeners(kid, "reading"); break;
+    case "writing":     c.innerHTML = renderSubject(kid, "writing"); attachSubjectListeners(kid, "writing"); break;
+    case "standards":   c.innerHTML = renderStandards(kid); attachStandardsListeners(kid); break;
+    case "plan":        c.innerHTML = renderDailyPlan(kid); attachPlanListeners(kid); break;
+    case "reading-log": c.innerHTML = renderReadingLog(kid); attachReadingLogListeners(kid); break;
+    case "portfolio":   c.innerHTML = renderPortfolio(kid); attachPortfolioListeners(kid); break;
+    default:            c.innerHTML = "<div class='empty'>Unknown tab</div>";
+  }
+}
+
+/* ============================================================
+   DASHBOARD TAB
+============================================================ */
+function renderDashboard(kid) {
+  const worksheets = state.worksheets[kid.id] || [];
+  const gradings = state.gradings[kid.id] || [];
+  const recent = [...worksheets].sort((a, b) => b.generatedAt - a.generatedAt).slice(0, 5);
+  const recentGradings = [...gradings].sort((a, b) => b.gradedAt - a.gradedAt).slice(0, 5);
+
+  // Streak: consecutive days with at least one worksheet generated
+  const streak = computeStreak(worksheets);
+  const totalWorksheets = worksheets.length;
+  const avgScore = computeAvgScore(gradings);
+  const masteryCount = countMastery(kid);
+
+  // 30-day heatmap
+  const heatmap = build30DayHeatmap(worksheets);
+
+  return `
+    <div class="content-header">
+      <div>
+        <h2>${kid.name}'s Dashboard</h2>
+        <div class="subtitle">${gradeLabel(kid)} • BC Curriculum</div>
+      </div>
+    </div>
+
+    <div class="grid grid-4" style="margin-bottom: 1.5rem;">
+      <div class="card kpi-card">
+        <div class="kpi-value">${totalWorksheets}</div>
+        <div class="kpi-label">Worksheets done</div>
+      </div>
+      <div class="card kpi-card">
+        <div class="kpi-value">${streak}</div>
+        <div class="kpi-label">Day streak</div>
+      </div>
+      <div class="card kpi-card">
+        <div class="kpi-value">${avgScore === null ? "—" : avgScore + "%"}</div>
+        <div class="kpi-label">Avg. graded score</div>
+      </div>
+      <div class="card kpi-card">
+        <div class="kpi-value">${masteryCount.proficient + masteryCount.extending}</div>
+        <div class="kpi-label">Standards mastered</div>
+      </div>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">📈 Activity — last 30 days</div>
+        <div class="heatmap" id="heatmap">
+          ${heatmap.map(c => `<div class="heatmap-cell" data-activity="${c}" title=""></div>`).join("")}
+        </div>
+        <p class="muted" style="margin-top: 0.8rem;">Each square = one day. Darker = more worksheets that day.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">🎯 Difficulty levels</div>
+        <div class="stack">
+          ${["math","reading","writing"].map(subj => `
+            <div class="row-between">
+              <div><strong style="text-transform: capitalize;">${subj}</strong></div>
+              <div class="tag tag-accent">Level ${kid.difficulty[subj]} / 10</div>
+            </div>
+          `).join("")}
+        </div>
+        <p class="muted" style="margin-top: 0.8rem;">Auto-adjusted based on graded scores. You can override in Settings.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-title">📝 Recent worksheets</div>
+        ${recent.length === 0
+          ? `<div class="empty"><div class="empty-icon">📄</div>No worksheets yet. Generate one from the Math, Reading, or Writing tab.</div>`
+          : `<div class="history-list">${recent.map(w => historyItemHTML(w, findGrading(w.id))).join("")}</div>`}
+      </div>
+
+      <div class="card">
+        <div class="card-title">✅ Recent gradings</div>
+        ${recentGradings.length === 0
+          ? `<div class="empty"><div class="empty-icon">📥</div>No gradings yet. After ${kid.name} finishes a worksheet, upload a photo to mark it.</div>`
+          : `<div class="history-list">${recentGradings.map(g => gradingItemHTML(g)).join("")}</div>`}
+      </div>
+    </div>
+  `;
+}
+
+function attachDashboardListeners(kid) {
+  document.querySelectorAll("[data-action='open-ws']").forEach(el => {
+    el.addEventListener("click", () => {
+      const id = el.closest("[data-worksheet-id]").dataset.worksheetId;
+      openWorksheetModal(id);
+    });
+  });
+  document.querySelectorAll("[data-action='grade']").forEach(el => {
+    el.addEventListener("click", () => openGradeModal(el.dataset.worksheetId));
+  });
+  document.querySelectorAll("[data-action='del-ws']").forEach(el => {
+    el.addEventListener("click", (e) => { e.stopPropagation(); deleteWorksheet(el.dataset.worksheetId); });
+  });
+}
+
+function gradeLabel(kid) {
+  if (kid.gradeKey === "K") return "BC Kindergarten" + (kid.age < 5 ? " (Pre-K bridge)" : "");
+  return "BC Grade " + kid.gradeKey;
+}
+
+function historyItemHTML(w, grading) {
+  const score = grading ? grading.score : null;
+  const scoreClass = score === null ? "" : score >= 85 ? "score-high" : score >= 65 ? "score-mid" : "score-low";
+  const arrow = grading ? difficultyArrow(grading.recommendation) : "";
+  return `
+    <div class="history-item" data-worksheet-id="${w.id}">
+      <div class="meta" data-action="open-ws" style="cursor:pointer; flex:1;">
+        <div class="meta-title">${escapeHtml(w.title)}</div>
+        <div class="meta-sub">${formatDate(w.generatedAt)} • ${capitalize(w.subject)} • Difficulty ${w.difficulty}</div>
+      </div>
+      ${score !== null ? `<span class="score-badge ${scoreClass}">${score}%</span>` : `<button class="btn btn-ghost" data-action="grade" data-worksheet-id="${w.id}" title="Upload completed photo to mark">Mark</button>`}
+      ${arrow}
+      <button class="icon-btn" data-action="del-ws" data-worksheet-id="${w.id}" title="Delete">✕</button>
+    </div>
+  `;
+}
+
+function gradingItemHTML(g) {
+  const score = g.score;
+  const scoreClass = score >= 85 ? "score-high" : score >= 65 ? "score-mid" : "score-low";
+  const arrow = difficultyArrow(g.recommendation);
+  const ws = findWorksheet(g.worksheetId);
+  return `
+    <div class="history-item">
+      <div class="meta">
+        <div class="meta-title">${escapeHtml(ws ? ws.title : "Worksheet")}</div>
+        <div class="meta-sub">Marked ${formatDate(g.gradedAt)} • ${capitalize(g.recommendation)}</div>
+      </div>
+      <span class="score-badge ${scoreClass}">${score}%</span>
+      ${arrow}
+    </div>
+  `;
+}
+
+function difficultyArrow(rec) {
+  if (rec === "harder") return '<span class="diff-arrow up">▲ harder</span>';
+  if (rec === "easier") return '<span class="diff-arrow down">▼ easier</span>';
+  if (rec === "reteach") return '<span class="diff-arrow">↻ reteach</span>';
+  return '<span class="diff-arrow">→ same</span>';
+}
+
+function computeStreak(worksheets) {
+  if (!worksheets.length) return 0;
+  const days = new Set(worksheets.map(w => new Date(w.generatedAt).toDateString()));
+  let streak = 0;
+  let day = new Date();
+  while (days.has(day.toDateString())) {
+    streak++;
+    day.setDate(day.getDate() - 1);
+  }
+  return streak;
+}
+
+function computeAvgScore(gradings) {
+  if (!gradings.length) return null;
+  return Math.round(gradings.reduce((s, g) => s + g.score, 0) / gradings.length);
+}
+
+function countMastery(kid) {
+  const counts = { not_yet: 0, emerging: 0, developing: 0, proficient: 0, extending: 0 };
+  Object.values(kid.mastery).forEach(s => { if (counts[s] !== undefined) counts[s]++; });
+  return counts;
+}
+
+function build30DayHeatmap(worksheets) {
+  const days = [];
+  const today = new Date();
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toDateString();
+    const count = worksheets.filter(w => new Date(w.generatedAt).toDateString() === key).length;
+    days.push(count === 0 ? 0 : count >= 4 ? 4 : count >= 3 ? 3 : count >= 2 ? 2 : 1);
+  }
+  return days;
+}
+
+/* ============================================================
+   SUBJECT TAB (Math / Reading / Writing)
+============================================================ */
+function renderSubject(kid, subject) {
+  const curriculum = getCurriculumForKid(kid, subject);
+  const topics = getTopicsForSubject(curriculum, subject);
+  const recent = (state.worksheets[kid.id] || [])
+    .filter(w => w.subject === subject)
+    .sort((a, b) => b.generatedAt - a.generatedAt)
+    .slice(0, 8);
+
+  const templates = window.getTemplatesForSubjectGrade(subject, kid.gradeKey);
+  if (uiTemplate[subject] === null && templates.length > 0) {
+    uiTemplate[subject] = templates[0].id;
+  }
+  const selectedTemplate = templates.find(t => t.id === uiTemplate[subject]);
+  const isAiMode = uiTemplate[subject] === "__ai__" || !selectedTemplate;
+
+  return `
+    <div class="content-header">
+      <div>
+        <h2>${subjectLabel(subject)}</h2>
+        <div class="subtitle">${kid.name} • ${gradeLabel(kid)} • Difficulty ${kid.difficulty[subject]}/10</div>
+      </div>
+      <button class="btn btn-secondary" id="uploadGradeBtn">📤 Upload completed worksheet</button>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">⚡ Generate a worksheet</div>
+        <div class="form-group">
+          <label>Worksheet style</label>
+          <select id="templatePicker">
+            ${templates.map(t => `<option value="${t.id}" ${t.id === uiTemplate[subject] ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("")}
+            <option value="__ai__" ${isAiMode ? "selected" : ""}>✨ AI custom (open-ended Claude prompt)</option>
+          </select>
+        </div>
+
+        <div id="modifierArea">
+          ${isAiMode ? renderAiModeControls(kid, subject, topics) : renderTemplateModifiers(selectedTemplate)}
+        </div>
+
+        <button class="btn btn-primary btn-block" id="generateBtn" style="margin-top: 0.6rem;">${isAiMode ? "✨ Generate with AI" : "📄 Generate worksheet"}</button>
+        ${isAiMode && !state.settings.apiKey ? `<p class="muted" style="margin-top:0.6rem;">⚠️ AI mode needs a Claude API key — using mock generator. Add a key in Settings.</p>` : ""}
+        ${!isAiMode ? `<p class="muted" style="margin-top:0.6rem;">📐 Template mode — generates locally, no API needed. Same Scholastic-style layout every time.</p>` : ""}
+      </div>
+
+      <div class="card">
+        <div class="card-title">📂 Recent ${subjectLabel(subject)} worksheets</div>
+        ${recent.length === 0
+          ? `<div class="empty"><div class="empty-icon">📄</div>No ${subjectLabel(subject)} worksheets yet. Worksheets save here once you download them.</div>`
+          : `<div class="history-list">${recent.map(w => `
+              <div class="history-item">
+                <div class="meta">
+                  <div class="meta-title">${escapeHtml(w.title)}</div>
+                  <div class="meta-sub">${formatDate(w.generatedAt)} • ${w.templateId ? "Template" : "AI"} • ${w.questions ? w.questions.length + " qs" : ""}</div>
+                </div>
+                <button class="btn btn-ghost" data-action="open" data-worksheet-id="${w.id}" title="View">View</button>
+                <button class="btn btn-secondary" data-action="grade" data-worksheet-id="${w.id}" title="Upload completed photo to mark">Mark</button>
+                <button class="icon-btn" data-action="del-ws" data-worksheet-id="${w.id}" title="Delete (skipped or made by accident)">✕</button>
+              </div>
+            `).join("")}</div>`}
+      </div>
+    </div>
+
+    <div class="card" style="margin-top: 1.2rem;">
+      <div class="card-title">🖼️ Reference photos <span class="muted" style="font-size: 0.8rem; font-weight: 400;">— upload worksheets you want the AI to mimic in style</span></div>
+      ${renderReferenceGallery(kid, subject)}
+    </div>
+  `;
+}
+
+function renderReferenceGallery(kid, subject) {
+  const refs = (kid.references && kid.references[subject]) || [];
+  return `
+    <div class="drop-zone" id="refDropZone" style="margin-bottom: 0.8rem;">
+      <input type="file" id="refFileInput" accept="image/*" multiple hidden />
+      <label for="refFileInput" class="drop-zone-label">
+        <span class="drop-icon">📸</span>
+        <span>Click or drop worksheet photos here</span>
+        <span class="muted">PNG, JPG, HEIC — auto-resized to keep storage light</span>
+      </label>
+    </div>
+    ${refs.length === 0
+      ? `<p class="muted" style="margin: 0;">No references yet for ${kid.name}'s ${subjectLabel(subject)}. Upload examples of worksheets you like — AI mode will attach them as visual style references.</p>`
+      : `<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.6rem; margin-top: 0.5rem;">${refs.map(r => `
+          <div style="position: relative; border: 1px solid var(--border); border-radius: 6px; padding: 4px; background: white;">
+            <img src="${r.dataUrl}" style="width: 100%; height: 110px; object-fit: cover; border-radius: 4px; display: block;" />
+            <div style="font-size: 0.72rem; padding: 4px 2px 0; color: #666; truncate">${escapeHtml(r.label || r.id.slice(-6))}</div>
+            <button class="icon-btn" data-action="del-ref" data-ref-id="${r.id}" style="position: absolute; top: 4px; right: 4px; background: rgba(255,255,255,0.9); padding: 2px 6px; font-size: 0.8rem;" title="Remove">✕</button>
+          </div>
+        `).join("")}</div>`}
+  `;
+}
+
+function renderAiModeControls(kid, subject, topics) {
+  return `
+    <div class="form-group">
+      <label>Topic / focus</label>
+      <select id="genTopic">
+        <option value="">Auto — pick what ${kid.name} needs most</option>
+        ${topics.map(t => `<option value="${t.id}">${escapeHtml(t.label)}</option>`).join("")}
+      </select>
+    </div>
+    <div class="grid grid-2">
+      <div class="form-group">
+        <label># of questions</label>
+        <input type="number" id="genCount" min="3" max="40" value="${subject === "writing" ? 3 : 10}" />
+      </div>
+      <div class="form-group">
+        <label>Difficulty (1–10)</label>
+        <input type="number" id="genDifficulty" min="1" max="10" value="${kid.difficulty[subject]}" />
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Custom notes <span class="muted">(e.g. "use animal names")</span></label>
+      <textarea id="genNotes" placeholder="Optional — anything specific you want this worksheet to do."></textarea>
+    </div>
+  `;
+}
+
+function renderTemplateModifiers(template) {
+  return template.modifiers.map(m => {
+    if (m.type === "select") {
+      return `
+        <div class="form-group">
+          <label>${escapeHtml(m.label)}</label>
+          <select data-mod-id="${m.id}">
+            ${m.options.map(o => `<option value="${o.value}" ${o.value === m.default ? "selected" : ""}>${escapeHtml(o.label)}</option>`).join("")}
+          </select>
+        </div>
+      `;
+    }
+    if (m.type === "number") {
+      return `
+        <div class="form-group">
+          <label>${escapeHtml(m.label)}</label>
+          <input type="number" data-mod-id="${m.id}" min="${m.min || 1}" max="${m.max || 100}" value="${m.default}" />
+        </div>
+      `;
+    }
+    if (m.type === "text") {
+      return `
+        <div class="form-group">
+          <label>${escapeHtml(m.label)}</label>
+          <input type="text" data-mod-id="${m.id}" value="${escapeAttr(m.default || "")}" />
+        </div>
+      `;
+    }
+    if (m.type === "boolean") {
+      return `
+        <div class="form-group" style="display:flex; align-items:center; gap:0.5rem;">
+          <input type="checkbox" data-mod-id="${m.id}" ${m.default ? "checked" : ""} id="mod_${m.id}" style="width:auto;" />
+          <label for="mod_${m.id}" style="margin:0;">${escapeHtml(m.label)}</label>
+        </div>
+      `;
+    }
+    if (m.type === "shape_picker") {
+      const def = m.default || {};
+      return `
+        <div class="form-group">
+          <label>${escapeHtml(m.label)}</label>
+          <div class="letter-picker" data-mod-id="${m.id}">
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+              ${m.shapes.map(shapeId => {
+                const shape = window.SHAPES[shapeId];
+                if (!shape) return "";
+                const rows = def[shapeId] || 0;
+                return `<button type="button" class="letter-chip shape-chip ${rows > 0 ? "selected" : ""}" data-char="${shapeId}" data-rows="${rows}" title="${escapeHtml(shape.label)}">
+                  <svg width="22" height="22" viewBox="0 0 24 24" style="display:block; color: currentColor;">${shape.icon}</svg>
+                  <span class="chip-badge" ${rows > 0 ? "" : "style='display:none;'"}>${rows}</span>
+                </button>`;
+              }).join("")}
+            </div>
+          </div>
+          <div style="display: flex; gap: 0.4rem; margin-top: 0.4rem;">
+            <button type="button" class="btn btn-ghost" data-picker-action="all-1" data-picker-id="${m.id}" style="font-size: 0.78rem; padding: 0.3rem 0.6rem;">Set all selected → 1 row</button>
+            <button type="button" class="btn btn-ghost" data-picker-action="clear" data-picker-id="${m.id}" style="font-size: 0.78rem; padding: 0.3rem 0.6rem;">Clear all</button>
+            <span class="muted" style="font-size: 0.78rem; align-self: center; margin-left: auto;" id="pickerCount_${m.id}">0 shapes / 0 rows total</span>
+          </div>
+        </div>
+      `;
+    }
+    if (m.type === "letter_picker") {
+      const def = m.default || {};
+      return `
+        <div class="form-group">
+          <label>${escapeHtml(m.label)}</label>
+          <div class="letter-picker" data-mod-id="${m.id}">
+            ${m.groups.map(g => `
+              <div style="margin-bottom: 0.7rem;">
+                <div class="muted" style="margin-bottom: 0.3rem; font-weight: 500;">${escapeHtml(g.label)}</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                  ${g.chars.map(c => {
+                    const rows = def[c] || 0;
+                    return `<button type="button" class="letter-chip ${rows > 0 ? "selected" : ""}" data-char="${escapeAttr(c)}" data-rows="${rows}" title="Click to add rows (cycles 1→2→3→4→0)">
+                      <span class="chip-char">${escapeHtml(c)}</span>
+                      <span class="chip-badge" ${rows > 0 ? "" : "style='display:none;'"}>${rows}</span>
+                    </button>`;
+                  }).join("")}
+                </div>
+              </div>
+            `).join("")}
+          </div>
+          <div style="display: flex; gap: 0.4rem; margin-top: 0.4rem;">
+            <button type="button" class="btn btn-ghost" data-picker-action="all-1" data-picker-id="${m.id}" style="font-size: 0.78rem; padding: 0.3rem 0.6rem;">Set all selected → 1 row</button>
+            <button type="button" class="btn btn-ghost" data-picker-action="clear" data-picker-id="${m.id}" style="font-size: 0.78rem; padding: 0.3rem 0.6rem;">Clear all</button>
+            <span class="muted" style="font-size: 0.78rem; align-self: center; margin-left: auto;" id="pickerCount_${m.id}">0 letters / 0 rows total</span>
+          </div>
+        </div>
+      `;
+    }
+    return "";
+  }).join("");
+}
+
+function attachSubjectListeners(kid, subject) {
+  document.getElementById("generateBtn").addEventListener("click", () => generateWorksheet(kid, subject));
+  document.getElementById("uploadGradeBtn").addEventListener("click", () => openGradeModal());
+  const picker = document.getElementById("templatePicker");
+  if (picker) {
+    picker.addEventListener("change", (e) => {
+      uiTemplate[subject] = e.target.value;
+      renderContent();
+    });
+  }
+  document.querySelectorAll("[data-action='open']").forEach(el => {
+    el.addEventListener("click", () => openWorksheetModal(el.dataset.worksheetId));
+  });
+  document.querySelectorAll("[data-action='grade']").forEach(el => {
+    el.addEventListener("click", () => openGradeModal(el.dataset.worksheetId));
+  });
+  document.querySelectorAll("[data-action='del-ws']").forEach(el => {
+    el.addEventListener("click", () => deleteWorksheet(el.dataset.worksheetId));
+  });
+
+  // Letter picker chips
+  document.querySelectorAll(".letter-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      let rows = parseInt(chip.dataset.rows, 10) || 0;
+      rows = (rows + 1) % 5; // 0 → 1 → 2 → 3 → 4 → 0
+      chip.dataset.rows = rows;
+      chip.classList.toggle("selected", rows > 0);
+      const badge = chip.querySelector(".chip-badge");
+      if (badge) {
+        badge.textContent = rows;
+        badge.style.display = rows > 0 ? "" : "none";
+      }
+      updateLetterPickerCount(chip.closest(".letter-picker"));
+    });
+  });
+  document.querySelectorAll("[data-picker-action]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.pickerId;
+      const wrap = document.querySelector(`.letter-picker[data-mod-id="${id}"]`);
+      if (!wrap) return;
+      const action = btn.dataset.pickerAction;
+      wrap.querySelectorAll(".letter-chip").forEach(chip => {
+        let rows = parseInt(chip.dataset.rows, 10) || 0;
+        if (action === "clear") rows = 0;
+        else if (action === "all-1") rows = rows > 0 ? 1 : 0;
+        chip.dataset.rows = rows;
+        chip.classList.toggle("selected", rows > 0);
+        const badge = chip.querySelector(".chip-badge");
+        if (badge) { badge.textContent = rows; badge.style.display = rows > 0 ? "" : "none"; }
+      });
+      updateLetterPickerCount(wrap);
+    });
+  });
+  // Initial count
+  document.querySelectorAll(".letter-picker").forEach(wrap => updateLetterPickerCount(wrap));
+
+  // Reference photo upload/delete
+  const refInput = document.getElementById("refFileInput");
+  if (refInput) {
+    refInput.addEventListener("change", (e) => handleReferenceUpload(kid, subject, e.target.files));
+  }
+  const refDrop = document.getElementById("refDropZone");
+  if (refDrop) {
+    refDrop.addEventListener("dragover", (e) => { e.preventDefault(); refDrop.classList.add("dragover"); });
+    refDrop.addEventListener("dragleave", () => refDrop.classList.remove("dragover"));
+    refDrop.addEventListener("drop", (e) => {
+      e.preventDefault();
+      refDrop.classList.remove("dragover");
+      handleReferenceUpload(kid, subject, e.dataTransfer.files);
+    });
+  }
+  document.querySelectorAll("[data-action='del-ref']").forEach(el => {
+    el.addEventListener("click", () => deleteReference(kid, subject, el.dataset.refId));
+  });
+}
+
+async function handleReferenceUpload(kid, subject, fileList) {
+  if (!fileList || !fileList.length) return;
+  const files = Array.from(fileList).filter(f => f.type.startsWith("image/"));
+  if (!files.length) { toast("Only image files supported", "error"); return; }
+
+  toast(`Uploading ${files.length} reference${files.length > 1 ? "s" : ""}…`);
+  let added = 0;
+  for (const file of files) {
+    try {
+      const dataUrl = await resizeImageToDataUrl(file, 1024, 0.85);
+      const ref = {
+        id: "ref_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+        dataUrl,
+        label: file.name.replace(/\.[^/.]+$/, "").slice(0, 30),
+        createdAt: Date.now()
+      };
+      if (!state.kids[kid.id].references) state.kids[kid.id].references = { math: [], reading: [], writing: [] };
+      if (!state.kids[kid.id].references[subject]) state.kids[kid.id].references[subject] = [];
+      state.kids[kid.id].references[subject].push(ref);
+      added++;
+    } catch (e) {
+      console.error("Failed to add reference", e);
+      toast("Couldn't add " + file.name + ": " + e.message, "error");
+    }
+  }
+  // Try to save; if quota exceeded, undo last adds
+  try {
+    saveState();
+    toast(`Added ${added} reference photo${added !== 1 ? "s" : ""}`, "success");
+  } catch (e) {
+    toast("Storage full — try removing older references", "error");
+  }
+  renderContent();
+}
+
+function deleteReference(kid, subject, refId) {
+  state.kids[kid.id].references[subject] = state.kids[kid.id].references[subject].filter(r => r.id !== refId);
+  saveState();
+  renderContent();
+}
+
+function updateLetterPickerCount(wrap) {
+  if (!wrap) return;
+  const id = wrap.dataset.modId;
+  const countEl = document.getElementById("pickerCount_" + id);
+  if (!countEl) return;
+  let letters = 0, rows = 0;
+  wrap.querySelectorAll(".letter-chip").forEach(chip => {
+    const r = parseInt(chip.dataset.rows, 10) || 0;
+    if (r > 0) { letters++; rows += r; }
+  });
+  countEl.textContent = `${letters} letter${letters !== 1 ? "s" : ""} / ${rows} row${rows !== 1 ? "s" : ""} total`;
+}
+
+function deleteWorksheet(worksheetId) {
+  const ws = findWorksheet(worksheetId);
+  if (!ws) return;
+  if (!confirm(`Delete "${ws.title}"?\n\nThis also removes any related gradings.`)) return;
+  state.worksheets[ws.kidId] = state.worksheets[ws.kidId].filter(w => w.id !== worksheetId);
+  // Cascade: also remove any gradings tied to this worksheet
+  state.gradings[ws.kidId] = (state.gradings[ws.kidId] || []).filter(g => g.worksheetId !== worksheetId);
+  saveState();
+  toast("Worksheet deleted", "success");
+  renderContent();
+}
+
+function resizeImageToDataUrl(file, maxDim, quality) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+          else { width = Math.round(width * maxDim / height); height = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, width, height); // flatten transparency
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", quality);
+        resolve(dataUrl);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function subjectLabel(s) {
+  return s === "math" ? "Math" : s === "reading" ? "Reading" : "Writing";
+}
+
+function getCurriculumForKid(kid, subject) {
+  if (subject === "math") return window.CURRICULUM.math[kid.gradeKey];
+  return window.CURRICULUM.ela[kid.gradeKey]; // reading + writing share ELA
+}
+
+function getTopicsForSubject(curriculum, subject) {
+  // Filter ELA content into reading vs writing buckets
+  const items = curriculum.content;
+  let filtered;
+  if (subject === "reading") {
+    filtered = items.filter(i => ["Story","Reading","Vocabulary","Phonics","Print"].includes(i.topic));
+  } else if (subject === "writing") {
+    filtered = items.filter(i => ["Writing","Handwriting","Grammar","Conventions","Letters"].includes(i.topic));
+  } else {
+    filtered = items;
+  }
+  return filtered.map(i => ({ id: i.id, label: i.topic + " — " + i.text }));
+}
+
+/* ============================================================
+   WORKSHEET GENERATION
+============================================================ */
+async function generateWorksheet(kid, subject) {
+  const generateBtn = document.getElementById("generateBtn");
+  generateBtn.disabled = true;
+  generateBtn.innerHTML = '<span class="spinner"></span> Generating…';
+
+  try {
+    const templateId = uiTemplate[subject];
+    const isAiMode = templateId === "__ai__" || !window.TEMPLATES[templateId];
+
+    let worksheet;
+    if (isAiMode) {
+      const topicId = document.getElementById("genTopic").value;
+      const count = parseInt(document.getElementById("genCount").value, 10) || 10;
+      const difficulty = parseInt(document.getElementById("genDifficulty").value, 10) || kid.difficulty[subject];
+      const notes = document.getElementById("genNotes").value.trim();
+      worksheet = await callClaudeForWorksheet({ kid, subject, topicId, count, difficulty, notes });
+    } else {
+      worksheet = generateFromTemplate(kid, subject, templateId);
+    }
+
+    // DON'T save yet — only save when user downloads (signals they're actually using it)
+    worksheet._unsaved = true;
+    openWorksheetModal(worksheet);
+    toast("Worksheet ready — preview below. It will save to your list when you download.", "success");
+  } catch (e) {
+    console.error(e);
+    toast("Worksheet generation failed: " + e.message, "error");
+  } finally {
+    generateBtn.disabled = false;
+    generateBtn.innerHTML = "📄 Generate worksheet";
+  }
+}
+
+function generateFromTemplate(kid, subject, templateId) {
+  const template = window.TEMPLATES[templateId];
+  // Read modifier values from the form
+  const mods = {};
+  template.modifiers.forEach(m => {
+    if (m.type === "letter_picker" || m.type === "shape_picker") {
+      const wrap = document.querySelector(`.letter-picker[data-mod-id="${m.id}"]`);
+      const selection = {};
+      if (wrap) {
+        wrap.querySelectorAll(".letter-chip").forEach(chip => {
+          const rows = parseInt(chip.dataset.rows, 10) || 0;
+          if (rows > 0) selection[chip.dataset.char] = rows;
+        });
+      }
+      mods[m.id] = selection;
+      return;
+    }
+    const el = document.querySelector(`[data-mod-id="${m.id}"]`);
+    if (!el) { mods[m.id] = m.default; return; }
+    if (m.type === "boolean") mods[m.id] = el.checked;
+    else mods[m.id] = el.value;
+  });
+
+  const content = template.generate(mods);
+  return {
+    id: "ws_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    kidId: kid.id,
+    subject,
+    templateId: template.id,
+    modifiers: mods,
+    content,
+    title: titleFromTemplate(template, mods, kid),
+    standards: [], // could enrich via template.topicHint mapping later
+    questions: contentToQuestions(content, template), // for legacy display + grading
+    answerKey: contentToAnswers(content, template),
+    difficulty: kid.difficulty[subject],
+    notes: "",
+    generatedAt: Date.now()
+  };
+}
+
+function titleFromTemplate(template, m, kid) {
+  // Build a descriptive title from modifiers
+  if (template.id === "vertical_arithmetic") {
+    const op = m.operation === "addition" ? "Adding" : m.operation === "subtraction" ? "Subtracting" : "Adding & Subtracting";
+    const digits = ["", "One", "Two", "Three", "Four"][parseInt(m.digits, 10)];
+    const stack = m.stackHeight === "2" ? "" : (m.stackHeight + " ");
+    const regroup = m.regrouping === "yes" ? " with Regrouping" : m.regrouping === "no" ? " (No Regrouping)" : "";
+    return `${op} ${stack}${digits}-Digit Numbers${regroup}`;
+  }
+  if (template.id === "place_value_expanded") {
+    return parseInt(m.digits, 10) === 2 ? "Tens and Ones"
+         : parseInt(m.digits, 10) === 3 ? "Hundreds, Tens, and Ones"
+         : "Thousands, Hundreds, Tens, and Ones";
+  }
+  if (template.id === "tracing_letters_numbers") {
+    return m.mode === "uppercase" ? "Tracing Uppercase Letters"
+         : m.mode === "lowercase" ? "Tracing Lowercase Letters"
+         : m.mode === "uppercase_lowercase" ? "Tracing Letters (Both Cases)"
+         : m.mode === "numbers" ? "Tracing Numbers 0–9"
+         : m.mode === "name" ? `Tracing ${kid?.name || ""}'s Name`
+         : "Tracing Practice";
+  }
+  if (template.id === "tracing_shapes") {
+    return `Shape Tracing — ${kid?.name || ""}`;
+  }
+  return template.label;
+}
+
+function contentToQuestions(content, template) {
+  // Flatten template content into a generic question list (for legacy display + grading)
+  if (template.id === "vertical_arithmetic") {
+    return content.problems.map(p => ({
+      q: p.numbers.join(` ${p.op} `) + " = ___",
+      answer: String(p.answer),
+      type: "fill_in"
+    }));
+  }
+  if (template.id === "balance_equations") {
+    return content.problems.map(p => {
+      const unk = p.unknownSide === "left" ? p.left[p.unknownPos] : p.right[p.unknownPos];
+      const eqStr = `${p.left.join(" + ")} = ${p.right.join(" + ")}`;
+      return { q: eqStr + " (find the missing number)", answer: String(unk), type: "fill_in" };
+    });
+  }
+  if (template.id === "number_order") {
+    return content.problems.map(p => ({
+      q: `Order from least to greatest: ${p.numbers.join(", ")}`,
+      answer: p.sorted.join(", "),
+      type: "short_response"
+    }));
+  }
+  if (template.id === "add_subtract_10") {
+    return [...(content.adds || []), ...(content.subs || [])].map(p => ({
+      q: `${p.a} ${p.op} 10 = ___`,
+      answer: String(p.answer),
+      type: "fill_in"
+    }));
+  }
+  if (template.id === "place_value_expanded") {
+    return content.numbers.map(n => ({
+      q: `Break ${n} into hundreds, tens, ones; write expanded form`,
+      answer: String(n),
+      type: "short_response"
+    }));
+  }
+  if (template.id === "tracing_letters_numbers") {
+    return (content.items || []).map(ch => ({
+      q: `Trace: ${ch}`,
+      answer: ch,
+      type: "trace"
+    }));
+  }
+  if (template.id === "tracing_shapes") {
+    return (content.items || []).map(s => ({
+      q: `Trace shape: ${window.SHAPES[s]?.label || s}`,
+      answer: s,
+      type: "trace"
+    }));
+  }
+  return [];
+}
+
+function contentToAnswers(content, template) {
+  return contentToQuestions(content, template).map(q => q.answer);
+}
+
+/* ============================================================
+   CLAUDE API WRAPPER
+   - Real API call if apiKey is set
+   - Otherwise returns mock data so the app is fully testable
+============================================================ */
+async function callClaudeForWorksheet({ kid, subject, topicId, count, difficulty, notes }) {
+  const curriculum = getCurriculumForKid(kid, subject);
+  const standard = topicId ? curriculum.content.find(c => c.id === topicId) : null;
+  const standardText = standard ? `${standard.id}: ${standard.text}` : "Auto-select based on the student's profile.";
+
+  const refs = (kid.references && kid.references[subject]) || [];
+  const prompt = buildWorksheetPrompt({ kid, subject, standardText, count, difficulty, notes, hasReferences: refs.length > 0 });
+
+  let response;
+  if (state.settings.apiKey) {
+    if (refs.length > 0) {
+      // Vision call: attach reference images plus the prompt
+      const content = [];
+      content.push({ type: "text", text: `Below are ${refs.length} reference worksheet${refs.length > 1 ? "s" : ""} that show the style, format, and difficulty calibration I want you to match:` });
+      refs.slice(0, 5).forEach(r => {
+        const match = r.dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+        if (match) {
+          content.push({ type: "image", source: { type: "base64", media_type: match[1], data: match[2] } });
+        }
+      });
+      content.push({ type: "text", text: prompt });
+      response = await callClaudeAPI(null, { content, max_tokens: 4096 });
+    } else {
+      response = await callClaudeAPI(prompt, { max_tokens: 4096 });
+    }
+  } else {
+    response = mockWorksheetResponse({ kid, subject, standard, count, difficulty });
+  }
+
+  // Parse JSON from response
+  const parsed = parseWorksheetJSON(response);
+  return {
+    id: "ws_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    kidId: kid.id,
+    subject,
+    topicId: topicId || null,
+    standards: parsed.standards || (standard ? [standard.id] : []),
+    title: parsed.title,
+    instructions: parsed.instructions,
+    questions: parsed.questions,
+    answerKey: parsed.questions.map(q => q.answer || ""),
+    difficulty,
+    notes,
+    referencesUsed: refs.length,
+    generatedAt: Date.now()
+  };
+}
+
+function buildWorksheetPrompt({ kid, subject, standardText, count, difficulty, notes, hasReferences }) {
+  const isPreK = kid.gradeKey === "K" && kid.age < 5;
+  return `You are a BC-curriculum-aligned worksheet generator for a homeschooled child.
+
+CHILD: ${kid.name}, age ${kid.age}, ${kid.gradeKey === "K" ? "Kindergarten" : "Grade " + kid.gradeKey} level${isPreK ? " (Pre-K bridge — keep it gentle and playful)" : ""}.
+INTERESTS: ${kid.interests || "general"}
+PARENT NOTES: ${kid.notes || "none"}
+
+SUBJECT: ${subject}
+TARGET BC LEARNING STANDARD: ${standardText}
+DIFFICULTY (1=easiest, 10=hardest within this grade): ${difficulty}
+NUMBER OF QUESTIONS: ${count}
+CUSTOM NOTES FROM PARENT: ${notes || "none"}
+
+${hasReferences ? `STYLE REFERENCES: I have attached reference worksheets above. Match their:
+- Question format and wording style
+- Visual layout cues (e.g., stacked vertical math, fill-in-the-blank boxes, multi-part prompts)
+- Difficulty calibration and number of questions per section
+- Tone and instruction phrasing
+Generate fresh questions in the SAME style as those references, never copy their exact problems.
+
+` : ""}Return ONLY valid JSON with this exact shape (no markdown, no commentary):
+{
+  "title": "<short title>",
+  "instructions": "<one or two sentence instructions for the child>",
+  "standards": ["<BC standard id>"],
+  "questions": [
+    { "q": "<question text>", "answer": "<correct answer>", "type": "<fill_in|multiple_choice|short_response|trace|draw>" }
+  ]
+}
+
+GUIDELINES:
+- Calibrate to BC curriculum for ${kid.gradeKey === "K" ? "Kindergarten" : "Grade " + kid.gradeKey}.
+- For age 4 (Pre-K bridge), favor tracing, matching, picture-based questions.
+- For age 6 (Grade 1), favor short, concrete questions with visual or sentence-level scaffolding.
+- For age 8 (Grade 3), allow short word problems and multi-step thinking.
+- Questions should be printable on paper — avoid relying on color, audio, or interactivity.
+- If subject is "writing", focus on letter formation, sentence building, or short paragraph prompts depending on grade.
+- If subject is "reading", include a short passage if appropriate, followed by questions.
+- Difficulty 1-3 = easier than grade average; 4-6 = grade average; 7-10 = stretch.`;
+}
+
+async function callClaudeAPI(userPrompt, options = {}) {
+  const apiKey = state.settings.apiKey;
+  if (!apiKey) throw new Error("No API key set");
+
+  const body = {
+    model: state.settings.model || "claude-sonnet-4-6",
+    max_tokens: options.max_tokens || 4096,
+    messages: [
+      { role: "user", content: options.content || userPrompt }
+    ]
+  };
+
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(body)
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error("Claude API error " + res.status + ": " + txt);
+  }
+  const data = await res.json();
+  return data.content?.[0]?.text || "";
+}
+
+function parseWorksheetJSON(text) {
+  // Try to extract JSON from response (in case model wrapped in code fences)
+  const cleaned = text.replace(/^```json\n?|```$/g, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    // Try to find first { ... } block
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) {
+      try { return JSON.parse(match[0]); } catch (e2) {}
+    }
+    throw new Error("Could not parse worksheet JSON from response");
+  }
+}
+
+/* ------------------------------ MOCK GENERATOR (no API key) */
+function mockWorksheetResponse({ kid, subject, standard, count, difficulty }) {
+  const grade = kid.gradeKey;
+  const standardText = standard ? standard.text : "general practice";
+  let questions = [];
+
+  if (subject === "math") {
+    if (grade === "K") {
+      // simple counting / addition within 5
+      for (let i = 0; i < count; i++) {
+        const a = Math.floor(Math.random() * 5);
+        const b = Math.floor(Math.random() * (5 - a));
+        questions.push({ q: `Count the objects: ${"🐸".repeat(a + b)} = ___`, answer: String(a + b), type: "fill_in" });
+      }
+    } else if (grade === "1") {
+      // addition/subtraction within 20
+      for (let i = 0; i < count; i++) {
+        const a = Math.floor(Math.random() * 15) + 1;
+        const b = Math.floor(Math.random() * Math.min(20 - a, 10)) + 1;
+        const op = Math.random() < 0.5 ? "+" : "-";
+        const [x, y] = op === "+" ? [a, b] : [a + b, b];
+        questions.push({ q: `${x} ${op} ${y} = ___`, answer: String(op === "+" ? x + y : x - y), type: "fill_in" });
+      }
+    } else {
+      // grade 3: mix of multi-digit + multiplication
+      for (let i = 0; i < count; i++) {
+        const kind = Math.random();
+        if (kind < 0.5) {
+          const a = Math.floor(Math.random() * 800) + 100;
+          const b = Math.floor(Math.random() * 200) + 50;
+          const op = Math.random() < 0.5 ? "+" : "-";
+          const [x, y] = op === "+" ? [a, b] : [Math.max(a, b), Math.min(a, b)];
+          questions.push({ q: `${x} ${op} ${y} = ___`, answer: String(op === "+" ? x + y : x - y), type: "fill_in" });
+        } else {
+          const a = Math.floor(Math.random() * 9) + 2;
+          const b = Math.floor(Math.random() * 9) + 2;
+          questions.push({ q: `${a} × ${b} = ___`, answer: String(a * b), type: "fill_in" });
+        }
+      }
+    }
+  } else if (subject === "reading") {
+    if (grade === "K") {
+      const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+      for (let i = 0; i < count; i++) {
+        const l = letters[Math.floor(Math.random() * 26)];
+        questions.push({ q: `What sound does the letter "${l}" make? Say it out loud.`, answer: l + " sound", type: "short_response" });
+      }
+    } else if (grade === "1") {
+      const sights = ["the","and","you","said","was","with","they","have","this","from"];
+      for (let i = 0; i < count; i++) {
+        const w = sights[i % sights.length];
+        questions.push({ q: `Use "${w}" in a sentence: _________________________`, answer: "Any sentence using '" + w + "'", type: "short_response" });
+      }
+    } else {
+      questions.push({ q: `Read this passage and answer the questions below.\n\nThe black bear walked carefully along the river. She was looking for salmon. The fish were jumping in the water, glistening in the sun.\n\n1. Where was the bear walking?`, answer: "Along the river", type: "short_response" });
+      for (let i = 1; i < count; i++) {
+        questions.push({ q: `${i + 1}. ${["What was the bear looking for?","What were the fish doing?","Describe one word the author used to paint a picture.","Why might the bear be at the river?","What do you predict happens next?"][i % 5]}`, answer: "Open response", type: "short_response" });
+      }
+    }
+  } else {
+    // writing
+    if (grade === "K") {
+      const letters = "abcdefghij".split("");
+      for (let i = 0; i < count; i++) {
+        const l = letters[i % letters.length];
+        questions.push({ q: `Trace and copy: ${l} ${l} ${l} ${l} ${l}     ____ ____ ____`, answer: "letter " + l, type: "trace" });
+      }
+    } else if (grade === "1") {
+      for (let i = 0; i < count; i++) {
+        questions.push({ q: `Finish the sentence: I love ____________ because ____________.`, answer: "Open response", type: "short_response" });
+      }
+    } else {
+      questions = [
+        { q: "Write a short paragraph (3–5 sentences) about your favourite season. Use one simile.", answer: "Open response", type: "short_response" },
+        { q: "Use 'because' and 'but' in two sentences about your day.", answer: "Open response", type: "short_response" },
+        { q: "Write three compound sentences about an animal you'd like to learn about.", answer: "Open response", type: "short_response" }
+      ].slice(0, count);
+      while (questions.length < count) {
+        questions.push({ q: "Free write — tell me about something that happened this week.", answer: "Open response", type: "short_response" });
+      }
+    }
+  }
+
+  const titles = {
+    math: { K: "Counting Critters", "1": "Adding Up", "3": "Number Power" },
+    reading: { K: "Letter Sounds", "1": "Sight Word Stories", "3": "River Reading" },
+    writing: { K: "Trace & Write", "1": "Sentence Builders", "3": "Paragraph Practice" }
+  };
+  const titleBase = titles[subject][grade] || "Practice";
+  const json = {
+    title: `${titleBase} — ${kid.name}`,
+    instructions: `Complete the ${count} questions below. Take your time and do your best work!`,
+    standards: standard ? [standard.id] : [],
+    questions: questions.slice(0, count)
+  };
+  return JSON.stringify(json);
+}
+
+/* ============================================================
+   WORKSHEET MODAL + PDF
+============================================================ */
+let currentWorksheetForModal = null;
+
+/* ============================================================
+   HTML PREVIEW RENDERERS (mirror the PDF layout for each template)
+============================================================ */
+function renderTemplatePreviewHTML(ws) {
+  const content = ws.content;
+  if (ws.templateId === "vertical_arithmetic") return previewVerticalArithmetic(content, ws.modifiers);
+  if (ws.templateId === "balance_equations")   return previewBalanceEquations(content, ws.modifiers);
+  if (ws.templateId === "number_order")        return previewNumberOrder(content, ws.modifiers);
+  if (ws.templateId === "add_subtract_10")     return previewAddSubtract10(content, ws.modifiers);
+  if (ws.templateId === "place_value_expanded") return previewPlaceValue(content, ws.modifiers);
+  if (ws.templateId === "tracing_letters_numbers") return previewTracing(content, ws.modifiers, ws.kidId);
+  if (ws.templateId === "tracing_shapes") return previewTracingShapes(content, ws.modifiers);
+  return "<p class='muted'>Preview not available for this template — but the PDF will render correctly.</p>";
+}
+
+function previewTracingShapes(content, m) {
+  const items = content.items || [];
+  if (items.length === 0) {
+    return `<p class="muted">No shapes selected. Click shape tiles above to add rows.</p>`;
+  }
+  const copies = parseInt(m.copiesPerRow, 10);
+  const shapeSize = items.length <= 6 ? 60 : 50;
+  const rowH = shapeSize + 24;
+  const demoW = 80;
+  const totalW = 800;
+  const tracingW = totalW - demoW;
+  const slotW = tracingW / copies;
+
+  return items.map(shapeId => {
+    const shape = window.SHAPES[shapeId];
+    if (!shape) return "";
+    const cyRow = rowH / 2;
+    const topY = cyRow - shapeSize / 2 - 4;
+    const botY = cyRow + shapeSize / 2 + 4;
+    const guideLines = m.showGuideLines ? `
+      <line x1="0" y1="${topY}" x2="${totalW}" y2="${topY}" stroke="#bbb" stroke-width="0.8"/>
+      <line x1="0" y1="${botY}" x2="${totalW}" y2="${botY}" stroke="#bbb" stroke-width="0.8"/>
+    ` : "";
+    const demo = shape.drawSVG({ cx: demoW / 2, cy: cyRow, size: shapeSize, mode: "solid" });
+    const dot = m.showStartDot ? `<circle cx="${demoW / 2 - shapeSize * 0.4}" cy="${cyRow - shapeSize * 0.4}" r="3" fill="#b53c3c"/>` : "";
+    const divider = `<line x1="${demoW - 4}" y1="${topY - 2}" x2="${demoW - 4}" y2="${botY + 2}" stroke="#999" stroke-width="0.5" stroke-dasharray="2 2"/>`;
+    const ghosts = Array.from({length: copies}).map((_, c) => {
+      const cx = demoW + c * slotW + slotW / 2;
+      return shape.drawSVG({ cx, cy: cyRow, size: shapeSize, mode: "dashed" });
+    }).join("");
+    return `
+      <div style="margin-bottom: 2px;">
+        <svg width="100%" viewBox="0 0 ${totalW} ${rowH}" preserveAspectRatio="xMinYMid meet" style="display:block;">
+          ${guideLines}
+          ${divider}
+          ${demo}
+          ${dot}
+          ${ghosts}
+        </svg>
+      </div>
+    `;
+  }).join("");
+}
+
+function previewTracing(content, m, kidId) {
+  const items = content.items || [];
+  if (items.length === 0) {
+    return `<p class="muted">No letters or numbers selected. Click letter tiles above to add rows.</p>`;
+  }
+  const copies = parseInt(m.lettersPerRow, 10);
+  const fontSize = items.length <= 6 ? 50 : 42;
+  const padTop = 4;
+  const baseline = padTop + fontSize * 0.82;
+  const topLine = padTop + fontSize * 0.12;
+  const midLine = padTop + fontSize * 0.55;
+  const rowH = baseline + fontSize * 0.18;
+  const demoW = 70;
+  const totalW = 800;
+  const tracingW = totalW - demoW;
+  const slotW = tracingW / copies;
+
+  const guideLines = m.showGuideLines ? `
+    <line x1="0" y1="${topLine}" x2="${totalW}" y2="${topLine}" stroke="#bbb" stroke-width="0.8"/>
+    <line x1="0" y1="${midLine}" x2="${totalW}" y2="${midLine}" stroke="#bbb" stroke-width="0.8" stroke-dasharray="3 3"/>
+    <line x1="0" y1="${baseline}" x2="${totalW}" y2="${baseline}" stroke="#bbb" stroke-width="0.8"/>
+  ` : "";
+
+  return items.map(ch => {
+    const safe = escapeHtml(ch);
+    const ghosts = Array.from({length: copies}).map((_, c) => {
+      const cx = demoW + c * slotW + slotW / 2;
+      return `<text x="${cx}" y="${baseline}" font-family="KGPrimaryDots, Helvetica, Arial, sans-serif" font-size="${fontSize * 1.05}" text-anchor="middle" fill="#555">${safe}</text>`;
+    }).join("");
+    return `
+      <div style="margin-bottom: 2px;">
+        <svg width="100%" viewBox="0 0 ${totalW} ${rowH}" preserveAspectRatio="xMinYMid meet" style="display:block;">
+          ${guideLines}
+          <line x1="${demoW - 8}" y1="${topLine - 4}" x2="${demoW - 8}" y2="${baseline + 4}" stroke="#999" stroke-width="0.6" stroke-dasharray="2 2"/>
+          <text x="14" y="${baseline}" font-family="Helvetica, Arial, sans-serif" font-weight="bold" font-size="${fontSize}" fill="#1f2024">${safe}</text>
+          ${ghosts}
+        </svg>
+      </div>
+    `;
+  }).join("");
+}
+
+function previewVerticalArithmetic(content, m) {
+  const cols = parseInt(m.columns, 10);
+  const renderProblem = (p) => {
+    const digits = Math.max(...p.numbers.map(n => String(n).length));
+    const padded = p.numbers.map((n, i) => {
+      const numStr = String(n).padStart(digits, " ");
+      const prefix = i === p.numbers.length - 1 ? (p.op === "+" ? "+ " : "- ") : "  ";
+      return prefix + numStr;
+    }).join("\n");
+    return `<div style="display:inline-block; min-width: 80px;"><pre style="font-family: 'Courier New', monospace; font-size: 18px; line-height: 1.2; margin: 0; padding: 6px 0; text-align: left;">${escapeHtml(padded)}</pre><div style="border-top: 1.5px solid #222; margin-top: -2px; padding-top: 14px;"></div></div>`;
+  };
+
+  let html = "";
+  if (content.example) {
+    const ex = content.example;
+    html += `<div style="border: 1.5px solid #222; border-radius: 4px; padding: 12px; margin-bottom: 16px;">
+      <div style="font-weight:600; font-size: 12px; color: #444; margin-bottom: 6px;">Worked example</div>
+      ${renderProblem(ex)}
+      <div style="font-family: 'Courier New', monospace; font-size: 16px; padding-left: 30px; color: #333;">${ex.answer}</div>
+    </div>`;
+  }
+  html += `<div style="display: grid; grid-template-columns: repeat(${cols}, 1fr); gap: 18px 12px; padding: 8px 0;">`;
+  content.problems.forEach((p, i) => {
+    html += `<div style="text-align: center;"><span style="color:#888; font-size: 11px; display:block; margin-bottom: 2px;">${i + 1}.</span>${renderProblem(p)}</div>`;
+  });
+  html += `</div>`;
+  return html;
+}
+
+function previewBalanceEquations(content, m) {
+  const renderEq = (p) => {
+    const boxStyle = "display:inline-block; min-width: 32px; height: 24px; border: 1.5px solid #222; vertical-align: middle; margin: 0 4px;";
+    const num = (n) => `<span style="margin: 0 4px;">${n}</span>`;
+    const bx = `<span style="${boxStyle}"></span>`;
+    let parts;
+    if (p.unknownSide === "left") {
+      if (p.unknownPos === 0) parts = [bx, "+", num(p.left[1]), "=", num(p.right[0]), "+", num(p.right[1])];
+      else parts = [num(p.left[0]), "+", bx, "=", num(p.right[0]), "+", num(p.right[1])];
+    } else {
+      if (p.unknownPos === 0) parts = [num(p.left[0]), "+", num(p.left[1]), "=", bx, "+", num(p.right[1])];
+      else parts = [num(p.left[0]), "+", num(p.left[1]), "=", num(p.right[0]), "+", bx];
+    }
+    return `<div style="font-size: 17px; padding: 10px 0;">${parts.join(" ")}</div>`;
+  };
+  let html = "";
+  if (content.example) {
+    const ex = content.example;
+    html += `<div style="border: 1.5px solid #222; border-radius: 4px; padding: 14px; margin-bottom: 16px; text-align:center;">
+      <div style="font-size:17px;">[${ex.left[ex.unknownPos]}] + ${ex.left[1 - ex.unknownPos]} = ${ex.right[0]} + ${ex.right[1]}</div>
+      <div style="font-size:13px; color:#666; margin-top: 8px;">${ex.total} = ${ex.total}</div>
+    </div>`;
+  }
+  html += `<div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 24px;">`;
+  content.problems.forEach(p => { html += renderEq(p); });
+  html += `</div>`;
+  return html;
+}
+
+function previewNumberOrder(content, m) {
+  const renderRow = (p) => {
+    const circles = p.numbers.map(n => `<span style="display:inline-block; width: 36px; height: 36px; border: 1.5px solid #222; border-radius: 50%; line-height: 36px; text-align: center; margin: 4px; font-size: 14px;">${n}</span>`).join("");
+    const lines = p.sorted.map(() => `<span style="display:inline-block; border-bottom: 1.5px dashed #555; width: 50px; margin: 0 6px; height: 24px;"></span>`).join("");
+    return `<div style="display: flex; align-items: center; gap: 20px; padding: 14px 0; border-bottom: 1px solid #eee;">
+      <div style="flex: 1;">${circles}</div>
+      <div style="flex: 1; text-align: center;">${lines}</div>
+    </div>`;
+  };
+  let html = "";
+  if (content.example) html += renderRow(content.example);
+  content.problems.forEach(p => { html += renderRow(p); });
+  return html;
+}
+
+function previewAddSubtract10(content, m) {
+  const renderEq = (p) => `<div style="font-size:17px; padding:8px 0;">${p.a} ${p.op === "+" ? "+" : "−"} 10 = <span style="display:inline-block; min-width: 50px; height: 24px; border: 1.5px solid #222; vertical-align: middle; margin-left: 6px;"></span></div>`;
+  let html = "";
+  if (content.adds.length) {
+    html += `<h4 style="margin: 0 0 8px;">Add 10.</h4><div style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 4px 30px;">`;
+    content.adds.forEach(p => html += renderEq(p));
+    html += `</div>`;
+  }
+  if (content.subs.length) {
+    html += `<h4 style="margin: 14px 0 8px;">Subtract 10.</h4><div style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 4px 30px;">`;
+    content.subs.forEach(p => html += renderEq(p));
+    html += `</div>`;
+  }
+  return html;
+}
+
+function previewPlaceValue(content, m) {
+  const digits = content.digits;
+  const labels = digits === 2 ? ["tens?", "ones?"] : digits === 3 ? ["hundreds?", "tens?", "ones?"] : ["thousands?", "hundreds?", "tens?", "ones?"];
+  const box = `<span style="display:inline-block; min-width: 30px; height: 22px; border: 1.5px solid #222; vertical-align: middle; margin: 0 4px;"></span>`;
+  const renderRow = (n) => `
+    <div style="display: flex; align-items: flex-start; gap: 16px; padding: 14px 0; border-bottom: 1px solid #eee;">
+      <div style="background: #ddd; padding: 8px 16px; font-weight:600; font-size: 22px; min-width: 70px; text-align: center;">${n}</div>
+      <div>
+        ${labels.map(l => `<div style="margin: 2px 0;">${box} <span style="color:#444; font-size:12px;">${l}</span></div>`).join("")}
+      </div>
+      <div style="flex: 1; text-align: right;">
+        ${labels.map((_, i) => `${box}${i < labels.length - 1 ? " + " : " = "}`).join("")}${box}
+      </div>
+    </div>
+  `;
+  let html = "";
+  if (content.example) html += renderRow(content.example);
+  content.numbers.forEach(n => html += renderRow(n));
+  return html;
+}
+
+
+function openWorksheetModal(worksheetIdOrObject) {
+  // Accepts either a worksheet ID (saved) or a worksheet object (unsaved preview)
+  let ws;
+  if (typeof worksheetIdOrObject === "string") {
+    ws = findWorksheet(worksheetIdOrObject);
+  } else {
+    ws = worksheetIdOrObject;
+  }
+  if (!ws) return;
+  currentWorksheetForModal = ws;
+  document.getElementById("worksheetModalTitle").textContent = ws.title;
+
+  if (ws.templateId) {
+    // Template worksheet — render a real visual preview matching the PDF layout
+    const template = window.TEMPLATES[ws.templateId];
+    document.getElementById("worksheetPreview").innerHTML = `
+      <div class="ws-header" style="background:#dcdcdc; padding: 0.8rem 1rem; border-radius: 8px;">
+        <h3 style="margin:0;">${escapeHtml(ws.title)}</h3>
+      </div>
+      <p class="muted" style="margin-top: 0.5rem;">Template: ${escapeHtml(template.label)} • Generated locally • The PDF will render this exact layout, just on a printable page.</p>
+      ${renderTemplatePreviewHTML(ws)}
+    `;
+  } else {
+    // AI-generated worksheet — give it the same Scholastic-style header treatment
+    document.getElementById("worksheetPreview").innerHTML = `
+      <div class="ws-header" style="background:#dcdcdc; padding: 0.8rem 1rem; border-radius: 8px;">
+        <h3 style="margin:0;">${escapeHtml(ws.title)}</h3>
+      </div>
+      <p style="font-size: 0.85rem; color: #666; margin-top: 0.6rem;">Name: ______________________________     Date: ______________</p>
+      ${ws.instructions ? `<p style="margin-top: 0.6rem;"><em>${escapeHtml(ws.instructions)}</em></p>` : ""}
+      <hr style="border:0; border-top:1px solid #ccc; margin: 1rem 0;"/>
+      <div style="display: grid; gap: 0.6rem;">
+        ${(ws.questions || []).map((q, i) => `
+          <div style="padding: 0.6rem 0; border-bottom: 1px dashed #ddd;">
+            <span style="font-weight: 600; color: #444; margin-right: 0.6rem;">${i + 1}.</span>
+            <span>${escapeHtml(q.q).replace(/\n/g, "<br>")}</span>
+          </div>
+        `).join("")}
+      </div>
+    `;
+  }
+  document.getElementById("worksheetModal").hidden = false;
+}
+
+function downloadCurrentWorksheetPDF() {
+  if (!currentWorksheetForModal) return;
+  commitWorksheetIfNew(currentWorksheetForModal);
+  buildPDF(currentWorksheetForModal, { includeAnswers: false });
+}
+
+function downloadCurrentAnswerKeyPDF() {
+  if (!currentWorksheetForModal) return;
+  commitWorksheetIfNew(currentWorksheetForModal);
+  buildPDF(currentWorksheetForModal, { includeAnswers: true });
+}
+
+function commitWorksheetIfNew(ws) {
+  // If this worksheet has the _unsaved flag, save it now to state
+  if (ws._unsaved) {
+    delete ws._unsaved;
+    state.worksheets[ws.kidId].push(ws);
+    saveState();
+    toast("Saved to recent worksheets", "success");
+    // Re-render so the new worksheet appears in the list behind the modal
+    renderContent();
+  }
+}
+
+function buildPDF(ws, { includeAnswers }) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+
+  // If this is a template-based worksheet, dispatch to template renderer
+  if (ws.templateId && window.TEMPLATES[ws.templateId]) {
+    const template = window.TEMPLATES[ws.templateId];
+    const kid = state.kids[ws.kidId];
+    template.renderPDF(doc, ws.content, ws.modifiers, kid, { showAnswers: includeAnswers });
+    const filename = (includeAnswers ? "answer_key_" : "worksheet_") + slugify(ws.title) + ".pdf";
+    doc.save(filename);
+    return;
+  }
+
+  // Legacy AI-generated worksheet: simple question list
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 50;
+  let y = margin;
+
+  doc.setFont("times", "bold");
+  doc.setFontSize(18);
+  doc.text((includeAnswers ? "ANSWER KEY — " : "") + ws.title, margin, y);
+  y += 24;
+
+  doc.setFont("times", "normal");
+  doc.setFontSize(11);
+  doc.text("Name: ______________________________     Date: ____________", margin, y);
+  y += 20;
+
+  doc.setFontSize(12);
+  const instructions = doc.splitTextToSize(ws.instructions, pageW - margin * 2);
+  doc.text(instructions, margin, y);
+  y += instructions.length * 14 + 12;
+
+  doc.setDrawColor(120);
+  doc.line(margin, y, pageW - margin, y);
+  y += 18;
+
+  ws.questions.forEach((q, i) => {
+    const isWriteLine = ["fill_in", "short_response", "trace"].includes(q.type);
+    const qText = `${i + 1}. ${q.q}`;
+    const lines = doc.splitTextToSize(qText, pageW - margin * 2);
+    if (y + lines.length * 14 + 30 > doc.internal.pageSize.getHeight() - margin) {
+      doc.addPage();
+      y = margin;
+    }
+    doc.setFont("times", "normal");
+    doc.setFontSize(12);
+    doc.text(lines, margin, y);
+    y += lines.length * 14 + 6;
+
+    if (includeAnswers) {
+      doc.setFont("times", "italic");
+      doc.setTextColor(80, 110, 80);
+      doc.text("✓ " + (q.answer || ""), margin + 14, y);
+      doc.setTextColor(0, 0, 0);
+      y += 16;
+    } else {
+      // Leave space for the kid's answer
+      if (q.type === "short_response") {
+        for (let k = 0; k < 3; k++) {
+          y += 18;
+          doc.setDrawColor(180);
+          doc.line(margin + 14, y, pageW - margin, y);
+        }
+        y += 8;
+      } else {
+        y += 22;
+      }
+    }
+  });
+
+  doc.setFont("times", "italic");
+  doc.setFontSize(9);
+  doc.setTextColor(140);
+  doc.text("Generated by Homeschool HQ • BC Curriculum aligned", margin, doc.internal.pageSize.getHeight() - 24);
+
+  const filename = (includeAnswers ? "answer_key_" : "worksheet_") + slugify(ws.title) + ".pdf";
+  doc.save(filename);
+}
+
+/* ============================================================
+   GRADE UPLOAD + MARKING
+============================================================ */
+let currentGradeFile = null;
+let currentGradeWorksheetId = null;
+
+function openGradeModal(worksheetId) {
+  currentGradeWorksheetId = worksheetId || null;
+  currentGradeFile = null;
+  document.getElementById("gradePreview").hidden = true;
+  document.getElementById("gradeResult").hidden = true;
+  document.getElementById("runGradingBtn").disabled = true;
+  document.getElementById("gradeFileInput").value = "";
+  document.getElementById("gradeModal").hidden = false;
+}
+
+function onGradeFileChosen(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  currentGradeFile = file;
+  document.getElementById("runGradingBtn").disabled = false;
+  const preview = document.getElementById("gradePreview");
+  preview.hidden = false;
+  if (file.type.startsWith("image/")) {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      preview.innerHTML = `<img src="${ev.target.result}" style="max-width: 100%; max-height: 320px; border-radius: 6px; margin-top: 1rem;" />`;
+    };
+    reader.readAsDataURL(file);
+  } else {
+    preview.innerHTML = `<p class="muted" style="margin-top:1rem;">📎 ${escapeHtml(file.name)} — ready to upload.</p>`;
+  }
+}
+
+async function runGrading() {
+  if (!currentGradeFile) return;
+  const btn = document.getElementById("runGradingBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Marking…';
+
+  try {
+    const worksheet = currentGradeWorksheetId ? findWorksheet(currentGradeWorksheetId) : null;
+    const grading = await callClaudeForGrading(currentGradeFile, worksheet);
+
+    // Persist
+    const kidId = state.currentKidId;
+    state.gradings[kidId].push(grading);
+
+    // Update difficulty + mastery based on recommendation
+    applyGradingFeedback(kidId, worksheet, grading);
+    saveState();
+
+    // Show result
+    const resultDiv = document.getElementById("gradeResult");
+    resultDiv.hidden = false;
+    resultDiv.innerHTML = `
+      <hr/>
+      <h3>Result</h3>
+      <div class="row-between" style="margin-bottom: 0.8rem;">
+        <div>
+          <div class="kpi-value">${grading.score}%</div>
+          <div class="kpi-label">Score</div>
+        </div>
+        <div>
+          ${difficultyArrow(grading.recommendation)}
+          <p class="muted" style="margin-top: 0.3rem;">Next worksheet: <strong>${grading.recommendation}</strong></p>
+        </div>
+      </div>
+      <p><strong>Claude's notes:</strong> ${escapeHtml(grading.notes || "—")}</p>
+    `;
+    toast("Marked! Difficulty adjusted.", "success");
+    renderContent(); // refresh dashboards/subject pages
+  } catch (e) {
+    console.error(e);
+    toast("Grading failed: " + e.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = "Mark It";
+  }
+}
+
+async function callClaudeForGrading(file, worksheet) {
+  if (state.settings.apiKey && file.type.startsWith("image/")) {
+    // Real API call with vision
+    const base64 = await fileToBase64(file);
+    const content = [
+      { type: "image", source: { type: "base64", media_type: file.type, data: base64.split(",")[1] } },
+      { type: "text", text: buildGradingPrompt(worksheet) }
+    ];
+    const response = await callClaudeAPI(null, { content, max_tokens: 2048 });
+    const parsed = parseGradingJSON(response);
+    return assembleGrading(parsed, worksheet);
+  }
+  // Mock grading
+  return assembleGrading(mockGradingResponse(worksheet), worksheet);
+}
+
+function buildGradingPrompt(worksheet) {
+  const ws = worksheet
+    ? `The worksheet had ${worksheet.questions.length} questions:\n${worksheet.questions.map((q, i) => `${i + 1}. ${q.q}\n   Answer key: ${q.answer}`).join("\n")}\n`
+    : "The worksheet structure is unknown — infer it from the photo.";
+
+  return `You are marking a homeschool worksheet completed by a child.
+
+${ws}
+
+Look at the photo and assess the child's work. Return ONLY valid JSON:
+{
+  "score": <0-100 integer>,
+  "perQuestion": [
+    { "correct": <true|false>, "kidAnswer": "<what they wrote>", "feedback": "<short note>" }
+  ],
+  "confidence": "<high|medium|low>",
+  "recommendation": "<harder|same|reteach|easier>",
+  "notes": "<1-2 sentence summary for the parent>",
+  "weakStandards": ["<BC standard id if applicable>"]
+}
+
+RECOMMENDATION RULES:
+- score >= 90 AND confidence high → "harder"
+- score 70-89 → "same"
+- score 50-69 → "reteach" (same difficulty, same standard, different angle)
+- score < 50 → "easier"
+
+Be encouraging but honest. Note any handwriting concerns, erasures, or hesitation as confidence signals.`;
+}
+
+function parseGradingJSON(text) {
+  const cleaned = text.replace(/^```json\n?|```$/g, "").trim();
+  try { return JSON.parse(cleaned); } catch (e) {}
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) {
+    try { return JSON.parse(match[0]); } catch (e2) {}
+  }
+  throw new Error("Could not parse grading JSON");
+}
+
+function mockGradingResponse(worksheet) {
+  // Random-ish but realistic mock
+  const score = Math.floor(Math.random() * 40) + 55; // 55–95
+  const rec = score >= 90 ? "harder" : score >= 70 ? "same" : score >= 50 ? "reteach" : "easier";
+  return {
+    score,
+    perQuestion: worksheet ? worksheet.questions.map((q, i) => ({
+      correct: Math.random() > 0.25,
+      kidAnswer: "(mock) " + (q.answer || ""),
+      feedback: ""
+    })) : [],
+    confidence: score >= 80 ? "high" : score >= 60 ? "medium" : "low",
+    recommendation: rec,
+    notes: "(mock grading — add a Claude API key for real photo-based marking) Score is randomized for testing.",
+    weakStandards: []
+  };
+}
+
+function assembleGrading(parsed, worksheet) {
+  return {
+    id: "gr_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    worksheetId: worksheet ? worksheet.id : null,
+    score: parsed.score,
+    perQuestion: parsed.perQuestion || [],
+    confidence: parsed.confidence,
+    recommendation: parsed.recommendation,
+    notes: parsed.notes,
+    weakStandards: parsed.weakStandards || [],
+    gradedAt: Date.now()
+  };
+}
+
+function applyGradingFeedback(kidId, worksheet, grading) {
+  const kid = state.kids[kidId];
+  if (!worksheet) return;
+  const subject = worksheet.subject;
+
+  // Adjust difficulty
+  const delta = grading.recommendation === "harder" ? 1
+              : grading.recommendation === "easier" ? -1
+              : 0;
+  kid.difficulty[subject] = Math.max(1, Math.min(10, kid.difficulty[subject] + delta));
+
+  // Update mastery for touched standards
+  (worksheet.standards || []).forEach(stdId => {
+    const current = kid.mastery[stdId] || "not_yet";
+    let next = current;
+    if (grading.score >= 90) next = upgradeState(current, 2);
+    else if (grading.score >= 75) next = upgradeState(current, 1);
+    else if (grading.score >= 50) next = current === "not_yet" ? "emerging" : current;
+    else next = "emerging";
+    kid.mastery[stdId] = next;
+  });
+}
+
+function upgradeState(current, steps) {
+  const order = ["not_yet", "emerging", "developing", "proficient", "extending"];
+  const idx = Math.min(order.length - 1, order.indexOf(current) + steps);
+  return order[idx];
+}
+
+/* ============================================================
+   STANDARDS TAB
+============================================================ */
+function renderStandards(kid) {
+  const subjects = [
+    { key: "math", label: "Math", curriculum: window.CURRICULUM.math[kid.gradeKey] },
+    { key: "ela",  label: "Reading & Writing", curriculum: window.CURRICULUM.ela[kid.gradeKey] }
+  ];
+  return `
+    <div class="content-header">
+      <div>
+        <h2>BC Standards — ${kid.name}</h2>
+        <div class="subtitle">${gradeLabel(kid)} • Tap a status pill to update mastery manually</div>
+      </div>
+    </div>
+
+    ${subjects.map(s => `
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-title">${s.label}</div>
+        <p class="muted" style="margin-bottom: 1rem;"><strong>Big Ideas:</strong> ${escapeHtml(s.curriculum.bigIdeas.join("  •  "))}</p>
+        ${s.curriculum.content.map(std => {
+          const mastery = kid.mastery[std.id] || "not_yet";
+          return `
+            <div class="standard-row">
+              <div class="standard-text">
+                <strong>${std.id}</strong> · <span class="tag">${std.topic}</span><br>
+                ${escapeHtml(std.text)}
+              </div>
+              <button class="mastery-pill" data-state="${mastery}" data-standard="${std.id}">${labelForState(mastery)}</button>
+            </div>
+          `;
+        }).join("")}
+      </div>
+    `).join("")}
+  `;
+}
+
+function attachStandardsListeners(kid) {
+  document.querySelectorAll(".mastery-pill").forEach(el => {
+    el.addEventListener("click", () => cycleMastery(kid, el.dataset.standard));
+  });
+}
+
+function cycleMastery(kid, stdId) {
+  const order = ["not_yet", "emerging", "developing", "proficient", "extending"];
+  const current = kid.mastery[stdId] || "not_yet";
+  const next = order[(order.indexOf(current) + 1) % order.length];
+  kid.mastery[stdId] = next;
+  saveState();
+  renderContent();
+}
+
+function labelForState(s) {
+  return window.CURRICULUM.proficiencyScale.find(p => p.id === s)?.label || "Not yet";
+}
+
+/* ============================================================
+   DAILY PLAN TAB
+============================================================ */
+function renderDailyPlan(kid) {
+  return `
+    <div class="content-header">
+      <div>
+        <h2>Daily Plan — ${kid.name}</h2>
+        <div class="subtitle">${formatDate(Date.now())} • Auto-generated from current standings</div>
+      </div>
+      <button class="btn btn-primary" id="generatePlanBtn">✨ Generate today's plan</button>
+    </div>
+    <div id="planOutput">
+      <div class="empty">
+        <div class="empty-icon">📅</div>
+        Tap "Generate today's plan" and Claude will build a 30–60 min lesson plan based on where ${kid.name} is weakest.
+      </div>
+    </div>
+  `;
+}
+
+function attachPlanListeners(kid) {
+  document.getElementById("generatePlanBtn").addEventListener("click", () => generateDailyPlan(kid));
+}
+
+async function generateDailyPlan(kid) {
+  const btn = document.getElementById("generatePlanBtn");
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> Planning…';
+  try {
+    const weakStandards = findWeakStandards(kid);
+    const prompt = `Build a 30–60 minute homeschool lesson plan for ${kid.name}, age ${kid.age}, ${gradeLabel(kid)}.
+Focus on these BC standards where they're weakest:
+${weakStandards.map(s => "- " + s.id + ": " + s.text).join("\n")}
+
+Difficulty levels: Math ${kid.difficulty.math}, Reading ${kid.difficulty.reading}, Writing ${kid.difficulty.writing}.
+Interests: ${kid.interests || "general"}
+
+Return a friendly plain-text plan with:
+- A warm-up (5 min)
+- 2-3 short focused activities (10-15 min each)
+- A creative/play-based wrap-up
+Include specific materials needed (paper, pencil, blocks, etc).`;
+
+    let response;
+    if (state.settings.apiKey) {
+      response = await callClaudeAPI(prompt, { max_tokens: 1500 });
+    } else {
+      response = mockDailyPlan(kid, weakStandards);
+    }
+
+    document.getElementById("planOutput").innerHTML = `
+      <div class="card">
+        <pre style="white-space: pre-wrap; font-family: inherit; margin: 0;">${escapeHtml(response)}</pre>
+      </div>
+    `;
+  } catch (e) {
+    toast("Plan generation failed: " + e.message, "error");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = "✨ Generate today's plan";
+  }
+}
+
+function findWeakStandards(kid) {
+  const math = window.CURRICULUM.math[kid.gradeKey].content;
+  const ela = window.CURRICULUM.ela[kid.gradeKey].content;
+  const all = [...math, ...ela];
+  const weak = all.filter(s => {
+    const m = kid.mastery[s.id] || "not_yet";
+    return m === "not_yet" || m === "emerging" || m === "developing";
+  });
+  return weak.slice(0, 4); // top 4
+}
+
+function mockDailyPlan(kid, weak) {
+  return `Today's plan for ${kid.name} (mock — add a Claude API key for personalized plans)
+
+🌅 Warm-up (5 min)
+- A few quick mental math questions tailored to ${kid.name}'s level.
+
+📘 Focus block 1: Math (15 min)
+- Generate a worksheet from the Math tab targeting "${weak[0]?.text || "number sense"}".
+- Use blocks or coins to make it concrete.
+
+📖 Focus block 2: Reading (15 min)
+- Read aloud together for 10 min, then ask ${kid.name} to retell the story in their own words.
+- Talk about one new word from the book.
+
+✏️ Focus block 3: Writing (10 min)
+- A short writing task at ${kid.name}'s level — sentence-builders for younger kids, paragraph prompts for older.
+
+🎨 Wrap-up (10 min)
+- Free creative time: drawing, building, dramatic play, or outside.
+
+Materials: pencil, paper, picture book, optional: blocks or counters.`;
+}
+
+/* ============================================================
+   READING LOG TAB
+============================================================ */
+function renderReadingLog(kid) {
+  const log = state.readingLog[kid.id] || [];
+  return `
+    <div class="content-header">
+      <div>
+        <h2>Reading Log — ${kid.name}</h2>
+        <div class="subtitle">${log.length} books recorded</div>
+      </div>
+      <button class="btn btn-primary" id="addBookBtn">+ Add a book</button>
+    </div>
+
+    <div id="newBookForm" hidden class="card" style="margin-bottom: 1.5rem;">
+      <div class="card-title">New book entry</div>
+      <div class="grid grid-2">
+        <div class="form-group">
+          <label>Title</label>
+          <input type="text" id="bookTitle" placeholder="e.g. The Very Hungry Caterpillar" />
+        </div>
+        <div class="form-group">
+          <label>Author</label>
+          <input type="text" id="bookAuthor" placeholder="Author name" />
+        </div>
+      </div>
+      <div class="grid grid-2">
+        <div class="form-group">
+          <label>Date read</label>
+          <input type="text" id="bookDate" value="${new Date().toISOString().slice(0, 10)}" />
+        </div>
+        <div class="form-group">
+          <label>${kid.name}'s rating (1–5)</label>
+          <input type="number" id="bookRating" min="1" max="5" value="4" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Reflection / notes</label>
+        <textarea id="bookNotes" placeholder="What did ${kid.name} think? Any new words?"></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-secondary" id="cancelBookBtn">Cancel</button>
+        <button class="btn btn-primary" id="saveBookBtn">Save</button>
+      </div>
+    </div>
+
+    ${log.length === 0
+      ? `<div class="empty"><div class="empty-icon">📚</div>No books logged yet.</div>`
+      : `<div class="history-list">${log.sort((a, b) => (b.date || "").localeCompare(a.date || "")).map(b => `
+          <div class="history-item">
+            <div class="meta">
+              <div class="meta-title">${escapeHtml(b.title)} ${b.author ? `<span class="muted">— ${escapeHtml(b.author)}</span>` : ""}</div>
+              <div class="meta-sub">${b.date || ""} • ${"⭐".repeat(b.rating || 0)}${b.notes ? " • " + escapeHtml(b.notes).slice(0, 80) : ""}</div>
+            </div>
+            <button class="btn btn-ghost" data-action="del-book" data-book-id="${b.id}">✕</button>
+          </div>
+        `).join("")}</div>`}
+  `;
+}
+
+function attachReadingLogListeners(kid) {
+  document.getElementById("addBookBtn").addEventListener("click", () => {
+    document.getElementById("newBookForm").hidden = false;
+  });
+  const cancelBtn = document.getElementById("cancelBookBtn");
+  if (cancelBtn) cancelBtn.addEventListener("click", () => document.getElementById("newBookForm").hidden = true);
+  const saveBtn = document.getElementById("saveBookBtn");
+  if (saveBtn) saveBtn.addEventListener("click", () => {
+    const book = {
+      id: "bk_" + Date.now(),
+      title: document.getElementById("bookTitle").value.trim(),
+      author: document.getElementById("bookAuthor").value.trim(),
+      date: document.getElementById("bookDate").value.trim(),
+      rating: parseInt(document.getElementById("bookRating").value, 10) || 0,
+      notes: document.getElementById("bookNotes").value.trim()
+    };
+    if (!book.title) { toast("Title is required", "error"); return; }
+    state.readingLog[kid.id].push(book);
+    saveState();
+    renderContent();
+  });
+  document.querySelectorAll("[data-action='del-book']").forEach(el => {
+    el.addEventListener("click", () => {
+      state.readingLog[kid.id] = state.readingLog[kid.id].filter(b => b.id !== el.dataset.bookId);
+      saveState();
+      renderContent();
+    });
+  });
+}
+
+/* ============================================================
+   PORTFOLIO TAB
+============================================================ */
+function renderPortfolio(kid) {
+  const counts = countMastery(kid);
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  const totalStandards = (window.CURRICULUM.math[kid.gradeKey]?.content.length || 0) + (window.CURRICULUM.ela[kid.gradeKey]?.content.length || 0);
+  return `
+    <div class="content-header">
+      <div>
+        <h2>Portfolio — ${kid.name}</h2>
+        <div class="subtitle">Year-end snapshot for records or reporting</div>
+      </div>
+      <button class="btn btn-primary" id="exportPortfolioBtn">📥 Export PDF</button>
+    </div>
+
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="card-title">Standards coverage</div>
+        <p><strong>${total}</strong> / ${totalStandards} BC standards touched</p>
+        <ul class="stack" style="list-style:none; padding:0;">
+          ${window.CURRICULUM.proficiencyScale.map(p => `
+            <li class="row-between"><span>${p.label}</span><span class="tag">${counts[p.id] || 0}</span></li>
+          `).join("")}
+        </ul>
+      </div>
+      <div class="card">
+        <div class="card-title">Activity totals</div>
+        <p><strong>${state.worksheets[kid.id]?.length || 0}</strong> worksheets generated</p>
+        <p><strong>${state.gradings[kid.id]?.length || 0}</strong> worksheets marked</p>
+        <p><strong>${state.readingLog[kid.id]?.length || 0}</strong> books in reading log</p>
+        <p><strong>${computeAvgScore(state.gradings[kid.id] || []) ?? "—"}%</strong> average score</p>
+      </div>
+    </div>
+  `;
+}
+
+function attachPortfolioListeners(kid) {
+  document.getElementById("exportPortfolioBtn").addEventListener("click", () => exportPortfolioPDF(kid));
+}
+
+function exportPortfolioPDF(kid) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const margin = 50;
+  let y = margin;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.text(`${kid.name} — Year Portfolio`, margin, y); y += 24;
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "normal");
+  doc.text(`${gradeLabel(kid)} • Generated ${formatDate(Date.now())}`, margin, y); y += 24;
+
+  const counts = countMastery(kid);
+  doc.setFont("helvetica", "bold"); doc.text("BC Standards Mastery", margin, y); y += 18;
+  doc.setFont("helvetica", "normal");
+  window.CURRICULUM.proficiencyScale.forEach(p => {
+    doc.text(`${p.label}: ${counts[p.id] || 0}`, margin + 14, y); y += 16;
+  });
+  y += 16;
+
+  doc.setFont("helvetica", "bold"); doc.text("Activity Summary", margin, y); y += 18;
+  doc.setFont("helvetica", "normal");
+  doc.text(`Worksheets generated: ${state.worksheets[kid.id]?.length || 0}`, margin + 14, y); y += 16;
+  doc.text(`Worksheets marked:    ${state.gradings[kid.id]?.length || 0}`, margin + 14, y); y += 16;
+  doc.text(`Books in reading log: ${state.readingLog[kid.id]?.length || 0}`, margin + 14, y); y += 16;
+  doc.text(`Average score: ${computeAvgScore(state.gradings[kid.id] || []) ?? "—"}%`, margin + 14, y); y += 24;
+
+  // Standards detail by subject
+  ["math", "ela"].forEach(subject => {
+    const c = window.CURRICULUM[subject][kid.gradeKey];
+    if (!c) return;
+    doc.addPage(); y = margin;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(14);
+    doc.text(`${c.subject} — ${c.grade}`, margin, y); y += 22;
+    doc.setFontSize(11); doc.setFont("helvetica", "normal");
+    c.content.forEach(std => {
+      const mastery = kid.mastery[std.id] || "not_yet";
+      const label = labelForState(mastery);
+      const lines = doc.splitTextToSize(`${std.id} [${label}] · ${std.text}`, 500);
+      if (y + lines.length * 13 > doc.internal.pageSize.getHeight() - margin) {
+        doc.addPage(); y = margin;
+      }
+      doc.text(lines, margin, y); y += lines.length * 13 + 4;
+    });
+  });
+
+  doc.save(`portfolio_${kid.name.toLowerCase()}.pdf`);
+}
+
+/* ============================================================
+   SETTINGS MODAL
+============================================================ */
+function openSettings() {
+  document.getElementById("apiKeyInput").value = state.settings.apiKey;
+  document.getElementById("modelSelect").value = state.settings.model;
+  renderKidProfilesEdit();
+  document.getElementById("settingsModal").hidden = false;
+}
+
+function renderKidProfilesEdit() {
+  const wrap = document.getElementById("kidProfilesEdit");
+  wrap.innerHTML = Object.values(state.kids).map(kid => `
+    <div style="border: 1px solid var(--border); border-radius: 6px; padding: 0.8rem; margin-bottom: 0.8rem;">
+      <h4 style="margin-bottom: 0.5rem;">${kid.name}</h4>
+      <div class="grid grid-2">
+        <div class="form-group">
+          <label>Age</label>
+          <input type="number" data-kid-field="age" data-kid-id="${kid.id}" value="${kid.age}" />
+        </div>
+        <div class="form-group">
+          <label>Grade level (K, 1, 3)</label>
+          <select data-kid-field="gradeKey" data-kid-id="${kid.id}">
+            <option value="K" ${kid.gradeKey === "K" ? "selected" : ""}>BC Kindergarten</option>
+            <option value="1" ${kid.gradeKey === "1" ? "selected" : ""}>BC Grade 1</option>
+            <option value="3" ${kid.gradeKey === "3" ? "selected" : ""}>BC Grade 3</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Interests (used to personalize worksheets)</label>
+        <input type="text" data-kid-field="interests" data-kid-id="${kid.id}" value="${escapeAttr(kid.interests)}" placeholder="e.g. horses, dinosaurs, Lego" />
+      </div>
+      <div class="form-group">
+        <label>Notes</label>
+        <textarea data-kid-field="notes" data-kid-id="${kid.id}" placeholder="Any special learning needs, preferences, or context">${escapeHtml(kid.notes)}</textarea>
+      </div>
+    </div>
+  `).join("");
+}
+
+function saveSettings() {
+  state.settings.apiKey = document.getElementById("apiKeyInput").value.trim();
+  state.settings.model = document.getElementById("modelSelect").value;
+
+  // Save kid profiles
+  document.querySelectorAll("[data-kid-id]").forEach(el => {
+    const id = el.dataset.kidId;
+    const field = el.dataset.kidField;
+    let val = el.value;
+    if (field === "age") val = parseInt(val, 10) || state.kids[id].age;
+    state.kids[id][field] = val;
+  });
+
+  saveState();
+  renderHeader();
+  renderContent();
+  closeAllModals();
+  toast("Settings saved", "success");
+}
+
+function exportData() {
+  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "homeschool_data_" + new Date().toISOString().slice(0, 10) + ".json";
+  a.click();
+  URL.revokeObjectURL(url);
+  toast("Data exported", "success");
+}
+
+function importData(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const imported = JSON.parse(ev.target.result);
+      if (!imported.kids) throw new Error("Invalid file");
+      state = { ...structuredClone(DEFAULT_STATE), ...imported };
+      saveState();
+      renderHeader();
+      renderContent();
+      closeAllModals();
+      toast("Data imported", "success");
+    } catch (err) {
+      toast("Import failed: " + err.message, "error");
+    }
+  };
+  reader.readAsText(file);
+}
+
+/* ============================================================
+   UTILITIES
+============================================================ */
+function closeAllModals() {
+  document.querySelectorAll(".modal").forEach(m => m.hidden = true);
+}
+
+function toast(msg, type) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.className = "toast visible" + (type ? " toast-" + type : "");
+  t.hidden = false;
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => {
+    t.className = "toast";
+    t.hidden = true;
+  }, 3200);
+}
+
+function formatDate(ts) {
+  const d = new Date(ts);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function escapeHtml(s) {
+  if (s == null) return "";
+  return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function escapeAttr(s) { return escapeHtml(s).replace(/"/g, "&quot;"); }
+function capitalize(s) { return s ? s[0].toUpperCase() + s.slice(1) : ""; }
+function slugify(s) { return (s || "worksheet").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, ""); }
+
+function findWorksheet(id) {
+  for (const kidId of Object.keys(state.worksheets)) {
+    const w = state.worksheets[kidId].find(w => w.id === id);
+    if (w) return w;
+  }
+  return null;
+}
+function findGrading(worksheetId) {
+  for (const kidId of Object.keys(state.gradings)) {
+    const g = state.gradings[kidId].find(g => g.worksheetId === worksheetId);
+    if (g) return g;
+  }
+  return null;
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
