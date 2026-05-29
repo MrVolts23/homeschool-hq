@@ -1244,7 +1244,209 @@ function renderTemplatePreviewHTML(ws) {
   if (ws.templateId === "place_value_expanded") return previewPlaceValue(content, ws.modifiers);
   if (ws.templateId === "tracing_letters_numbers") return previewTracing(content, ws.modifiers, ws.kidId);
   if (ws.templateId === "tracing_shapes") return previewTracingShapes(content, ws.modifiers);
+  if (ws.templateId === "count_to_10") return previewCountTo10(content, ws.modifiers);
+  if (ws.templateId === "ways_to_make") return previewWaysToMake(content, ws.modifiers);
+  if (ws.templateId === "ab_patterns") return previewAbPatterns(content, ws.modifiers);
+  if (ws.templateId === "multiplication_facts") return previewMultiplicationFacts(content, ws.modifiers);
+  if (ws.templateId === "fractions_visual") return previewFractionsVisual(content, ws.modifiers);
+  if (ws.templateId === "time_telling") return previewTimeTelling(content, ws.modifiers);
+  if (ws.templateId === "sight_words_practice") return previewSightWords(content, ws.modifiers);
   return "<p class='muted'>Preview not available for this template — but the PDF will render correctly.</p>";
+}
+
+/* -------- Previews for new templates -------- */
+
+function previewCountTo10(content, m) {
+  const rows = [content.example, ...content.problems].filter(Boolean);
+  return rows.map((p, idx) => {
+    const dotsSVG = renderCountDotsSVG(p.n, m.arrangement);
+    return `<div style="display:flex; align-items:center; gap:14px; padding:10px 0; border-bottom: 1px dashed #eee;">
+      <div style="color:#888; font-size:12px; min-width:18px;">${idx === 0 && content.example ? "Ex" : idx + (content.example ? 0 : 1) + "."}</div>
+      <div style="flex:1;">${dotsSVG}</div>
+      <div style="border-bottom: 2px solid #222; width: 80px; height: 26px;"></div>
+    </div>`;
+  }).join("");
+}
+function renderCountDotsSVG(n, arrangement) {
+  const w = 280;
+  const h = 50;
+  let dots = "";
+  if (arrangement === "ten_frame") {
+    const cellW = 22;
+    const cellH = 22;
+    const startX = 8;
+    const startY = (h - cellH * 2) / 2;
+    for (let r = 0; r < 2; r++) {
+      for (let c = 0; c < 5; c++) {
+        dots += `<rect x="${startX + c * cellW}" y="${startY + r * cellH}" width="${cellW}" height="${cellH}" fill="none" stroke="#777" stroke-width="0.7"/>`;
+      }
+    }
+    let drawn = 0;
+    for (let r = 0; r < 2 && drawn < n; r++) {
+      for (let c = 0; c < 5 && drawn < n; c++) {
+        dots += `<circle cx="${startX + c * cellW + cellW/2}" cy="${startY + r * cellH + cellH/2}" r="6" fill="#222"/>`;
+        drawn++;
+      }
+    }
+  } else {
+    // row arrangement: just space them out
+    const gap = Math.min(24, (w - 20) / (n + 1));
+    for (let i = 0; i < n; i++) {
+      dots += `<circle cx="${10 + (i + 1) * gap}" cy="${h/2}" r="6" fill="#222"/>`;
+    }
+  }
+  return `<svg width="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMinYMid meet" style="max-height:50px;">${dots}</svg>`;
+}
+
+function previewWaysToMake(content, m) {
+  const target = parseInt(m.target, 10);
+  const renderItem = (p, isEx) => {
+    const left = p.blankPos === "right" ? p.knownAddend : "<span style='display:inline-block;min-width:28px;border:1.5px solid #222;padding:0 4px;'>&nbsp;</span>";
+    const right = p.blankPos === "left" ? p.knownAddend : "<span style='display:inline-block;min-width:28px;border:1.5px solid #222;padding:0 4px;'>&nbsp;</span>";
+    return `<div style="display:inline-block; margin: 6px 14px; font-size:18px;">
+      ${isEx ? '<span style="color:#888; font-size:12px; margin-right:6px;">Ex:</span>' : ''}${left} + ${right} = <strong>${target}</strong>
+    </div>`;
+  };
+  let html = '<div style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 4px;">';
+  if (content.example) html += renderItem(content.example, true);
+  content.problems.forEach(p => { html += renderItem(p, false); });
+  html += '</div>';
+  return html;
+}
+
+function previewAbPatterns(content, m) {
+  const borderStyle = (isBlank) => `border:${isBlank ? '2px dashed #b53c3c' : '1px solid #ccc'}`;
+  const renderShape = (token, isBlank) => {
+    if (isBlank) {
+      // Always render the blank box regardless of element type
+      return `<div style="display:inline-block; width:36px; height:36px; ${borderStyle(true)}; margin: 0 2px; vertical-align:middle;"></div>`;
+    }
+    if (content.elementType === "shapes") {
+      const shape = window.SHAPES[token];
+      if (!shape) return `<div style="display:inline-block; width:36px; height:36px; ${borderStyle(false)}; margin: 0 2px; vertical-align:middle;"></div>`;
+      const inner = shape.drawSVG({ cx: 18, cy: 18, size: 28, mode: "solid" });
+      return `<div style="display:inline-block; width:36px; height:36px; ${borderStyle(false)}; margin: 0 2px; vertical-align:middle;">
+        <svg width="36" height="36" viewBox="0 0 36 36">${inner}</svg>
+      </div>`;
+    }
+    return `<div style="display:inline-block; width:36px; height:36px; ${borderStyle(false)}; line-height: 36px; text-align:center; font-size:18px; font-weight:bold; margin:0 2px;">${escapeHtml(token)}</div>`;
+  };
+  return content.problems.map(p => {
+    const shown = p.shown.map(t => renderShape(t, false)).join("");
+    const blanks = p.expected.map(() => renderShape("", true)).join("");
+    return `<div style="padding: 6px 0; border-bottom: 1px solid #eee;">
+      ${shown} <span style="color:#aaa; margin: 0 4px;">→</span> ${blanks}
+    </div>`;
+  }).join("");
+}
+
+function previewMultiplicationFacts(content, m) {
+  const cols = parseInt(m.columns, 10);
+  const renderH = (p, i) => `<div style="padding: 6px 0; font-size:16px;">
+    <span style="color:#888; font-size:12px; margin-right:6px;">${i + 1}.</span>
+    ${p.a} ${p.op} ${p.b} = <span style="display:inline-block; min-width: 44px; height: 24px; border: 1.5px solid #222; vertical-align:middle; margin-left: 6px;"></span>
+  </div>`;
+  const renderV = (p, i) => `<div style="text-align:center; padding: 6px 0; font-family: 'Courier New', monospace; font-size: 15px;">
+    <div style="color:#888; font-size:11px; text-align:left; padding-left: 14px;">${i + 1}.</div>
+    <div style="display:inline-block; text-align:right;">
+      <div>${p.a}</div>
+      <div>${p.op} ${p.b}</div>
+      <div style="border-top: 1.5px solid #222; padding-top: 14px;"></div>
+    </div>
+  </div>`;
+  const fn = m.format === "vertical" ? renderV : renderH;
+  return `<div style="display:grid; grid-template-columns: repeat(${cols}, 1fr); gap: 4px 14px;">
+    ${content.problems.map((p, i) => fn(p, i)).join("")}
+  </div>`;
+}
+
+function previewFractionsVisual(content, m) {
+  const rows = [content.example, ...content.problems].filter(Boolean);
+  const renderItem = (p, i) => {
+    const w = 140, h = 60;
+    let pic = "";
+    if (p.shape === "bar") {
+      const barW = w - 16;
+      const partW = barW / p.denominator;
+      for (let j = 0; j < p.denominator; j++) {
+        const filled = (p.mode === "identify" || i === 0) && j < p.numerator;
+        pic += `<rect x="${8 + j * partW}" y="14" width="${partW}" height="30" fill="${filled ? '#5082b4' : 'none'}" stroke="#222" stroke-width="1"/>`;
+      }
+    } else {
+      const cx = w/2, cy = h/2, r = Math.min(w/2, h/2) - 6;
+      pic += `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#222" stroke-width="1"/>`;
+      for (let j = 0; j < p.denominator; j++) {
+        const a = (j / p.denominator) * Math.PI * 2 - Math.PI / 2;
+        const x2 = cx + r * Math.cos(a);
+        const y2 = cy + r * Math.sin(a);
+        pic += `<line x1="${cx}" y1="${cy}" x2="${x2}" y2="${y2}" stroke="#222" stroke-width="1"/>`;
+      }
+      if (p.mode === "identify" || i === 0) {
+        for (let j = 0; j < p.numerator; j++) {
+          const a1 = (j / p.denominator) * Math.PI * 2 - Math.PI / 2;
+          const a2 = ((j + 1) / p.denominator) * Math.PI * 2 - Math.PI / 2;
+          const large = (a2 - a1) > Math.PI ? 1 : 0;
+          const x1 = cx + r * Math.cos(a1), y1 = cy + r * Math.sin(a1);
+          const x2 = cx + r * Math.cos(a2), y2 = cy + r * Math.sin(a2);
+          pic += `<path d="M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z" fill="#5082b4" stroke="#222" stroke-width="1"/>`;
+        }
+      }
+    }
+    const ans = p.mode === "shade"
+      ? `<div style="font-size:18px; font-weight:bold;">Shade ${p.numerator}/${p.denominator}</div>`
+      : `<div style="font-size:18px;">= <span style="display:inline-block; width:30px; border: 1px solid #222; text-align:center; min-height:20px;">&nbsp;</span><br/><span style="display:inline-block; margin-left: 18px; width:30px; border: 1px solid #222; text-align:center; min-height:20px;">&nbsp;</span></div>`;
+    return `<div style="display:flex; align-items:center; gap:14px; padding: 10px 0; border-bottom: 1px solid #eee;">
+      <div style="color:#888; font-size:12px; min-width: 18px;">${i === 0 && content.example ? "Ex" : (i + (content.example ? 0 : 1)) + "."}</div>
+      <svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${pic}</svg>
+      ${ans}
+    </div>`;
+  };
+  return rows.map((p, i) => renderItem(p, i)).join("");
+}
+
+function previewTimeTelling(content, m) {
+  const renderClock = (p, i) => {
+    const size = 80, cx = size / 2, cy = size / 2, r = size / 2 - 4;
+    let inner = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="#fff" stroke="#222" stroke-width="1.5"/>`;
+    for (let hh = 1; hh <= 12; hh++) {
+      const a = (hh / 12) * Math.PI * 2 - Math.PI / 2;
+      const nx = cx + (r - 8) * Math.cos(a);
+      const ny = cy + (r - 8) * Math.sin(a);
+      inner += `<text x="${nx}" y="${ny + 3}" text-anchor="middle" font-size="8" font-weight="bold" fill="#222">${hh}</text>`;
+    }
+    const mAng = (p.minute / 60) * Math.PI * 2 - Math.PI / 2;
+    const hFrac = (p.hour % 12) + p.minute / 60;
+    const hAng = (hFrac / 12) * Math.PI * 2 - Math.PI / 2;
+    inner += `<line x1="${cx}" y1="${cy}" x2="${cx + r * 0.55 * Math.cos(hAng)}" y2="${cy + r * 0.55 * Math.sin(hAng)}" stroke="#222" stroke-width="2.2"/>`;
+    inner += `<line x1="${cx}" y1="${cy}" x2="${cx + r * 0.85 * Math.cos(mAng)}" y2="${cy + r * 0.85 * Math.sin(mAng)}" stroke="#222" stroke-width="1.4"/>`;
+    inner += `<circle cx="${cx}" cy="${cy}" r="2" fill="#222"/>`;
+    const ans = m.showDigital
+      ? `<span style="display:inline-block; width:28px; height:24px; border:1px solid #222;">&nbsp;</span> : <span style="display:inline-block; width:28px; height:24px; border:1px solid #222;">&nbsp;</span>`
+      : `<span style="display:inline-block; border-bottom: 2px solid #222; width: 90px; height: 22px;"></span>`;
+    return `<div style="display:flex; align-items:center; gap:14px; padding: 10px 0; border-bottom: 1px solid #eee;">
+      <div style="color:#888; font-size:12px; min-width: 18px;">${i + 1}.</div>
+      <svg width="${size}" height="${size}">${inner}</svg>
+      <div style="font-size:16px;">${ans}</div>
+    </div>`;
+  };
+  return `<div style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 0 22px;">
+    ${content.problems.map((p, i) => renderClock(p, i)).join("")}
+  </div>`;
+}
+
+function previewSightWords(content, m) {
+  const isReadOnly = m.format === "read_only";
+  return content.words.map(word => {
+    const safe = escapeHtml(word);
+    if (isReadOnly) {
+      return `<div style="padding: 12px 0; text-align:center; font-size: 32px; font-weight:bold; border-bottom: 1px solid #ddd;">${safe}</div>`;
+    }
+    return `<div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; padding: 14px 0; border-bottom: 1px solid #eee; align-items: end;">
+      <div style="font-size: 28px; font-weight: bold; padding-left: 8px; border-bottom: 1.5px solid #222;">${safe}</div>
+      <div style="font-size: 28px; color: #c0c0c0; padding-left: 8px; border-bottom: 1.5px solid #222; border-left: 1px dashed #bbb;">${safe}</div>
+      <div style="border-bottom: 1.5px solid #222; height: 38px; border-left: 1px dashed #bbb;"></div>
+    </div>`;
+  }).join("");
 }
 
 function previewTracingShapes(content, m) {

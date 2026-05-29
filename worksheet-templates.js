@@ -1480,6 +1480,1096 @@ function drawShapeRow(doc, shapeId, y, pageW, margin, copies, shapeSize, rowH, m
 }
 
 /* ============================================================
+   TEMPLATE — COUNT OBJECTS TO 10  (K math)
+   Maps to BC MK.1 — Number concepts to 10
+============================================================ */
+window.TEMPLATES.count_to_10 = {
+  id: "count_to_10",
+  label: "Count the objects (1–10)",
+  subject: "math",
+  grades: ["K"],
+  topicHint: "Number",
+
+  modifiers: [
+    { id: "maxCount", type: "select", label: "Highest count",
+      options: [
+        { value: "5", label: "Up to 5 (easier)" },
+        { value: "10", label: "Up to 10" }
+      ], default: "10" },
+    { id: "arrangement", type: "select", label: "How to arrange the dots",
+      options: [
+        { value: "row", label: "Row (line)" },
+        { value: "scatter", label: "Scattered (harder to count)" },
+        { value: "ten_frame", label: "Ten-frame (BC-style)" }
+      ], default: "row" },
+    { id: "count", type: "number", label: "# of rows", default: 8, min: 4, max: 16 },
+    { id: "workedExample", type: "boolean", label: "Show worked example", default: true }
+  ],
+
+  generate(m) {
+    const maxN = parseInt(m.maxCount, 10);
+    const count = parseInt(m.count, 10);
+    const problems = [];
+    for (let i = 0; i < count; i++) {
+      const n = randInt(1, maxN);
+      problems.push({ n });
+    }
+    const example = m.workedExample ? { n: Math.min(3, maxN) } : null;
+    return { problems, example, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "How many?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(doc, "Count the dots. Write the number on the line.", y, pageW, margin);
+
+    if (content.example) {
+      y = pdfDrawWorkedExampleBox(doc, (x, ey, w, h) => {
+        renderCountRow(doc, content.example, m.arrangement, x + 10, ey + 10, w - 20, h - 20, true);
+      }, y, pageW, margin, 60);
+    }
+
+    const rowH = 64;
+    const cols = 2;
+    const colW = (pageW - margin * 2) / cols;
+    let startY = y;
+    let pageOffset = 0;
+
+    content.problems.forEach((p, i) => {
+      const itemOnPage = i - pageOffset;
+      const col = itemOnPage % cols;
+      const row = Math.floor(itemOnPage / cols);
+      const py = startY + row * rowH;
+      if (py + rowH > pageH - margin - 30) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+        startY = y;
+        pageOffset = i;
+        renderCountRow(doc, p, m.arrangement, margin + 4, startY + 6, colW - 8, rowH - 12, opts.showAnswers);
+      } else {
+        const x = margin + col * colW + 4;
+        renderCountRow(doc, p, m.arrangement, x, py + 6, colW - 8, rowH - 12, opts.showAnswers);
+      }
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+function renderCountRow(doc, p, arrangement, x, y, w, h, showAnswer) {
+  // Left ~70%: dots ; Right ~30%: answer line
+  const dotsW = w * 0.7;
+  const answerW = w * 0.3;
+  const cyMid = y + h / 2;
+  const dotR = 5;
+
+  doc.setFillColor(40, 40, 40);
+  doc.setDrawColor(40, 40, 40);
+
+  if (arrangement === "ten_frame") {
+    // 2x5 grid
+    const cellW = 22;
+    const cellH = 22;
+    const frameX = x + 6;
+    const frameY = cyMid - cellH;
+    doc.setLineWidth(0.6);
+    for (let r = 0; r < 2; r++) {
+      for (let c = 0; c < 5; c++) {
+        doc.rect(frameX + c * cellW, frameY + r * cellH, cellW, cellH, "S");
+      }
+    }
+    let drawn = 0;
+    for (let r = 0; r < 2 && drawn < p.n; r++) {
+      for (let c = 0; c < 5 && drawn < p.n; c++) {
+        doc.circle(frameX + c * cellW + cellW / 2, frameY + r * cellH + cellH / 2, dotR + 1, "F");
+        drawn++;
+      }
+    }
+  } else if (arrangement === "scatter") {
+    // Reproducible scatter inside the left box (seeded by n)
+    const seedRand = mulberry32(p.n * 9973 + 42);
+    for (let i = 0; i < p.n; i++) {
+      const cx = x + 12 + seedRand() * (dotsW - 24);
+      const cy = y + 8 + seedRand() * (h - 16);
+      doc.circle(cx, cy, dotR, "F");
+    }
+  } else {
+    // Row arrangement
+    const usable = dotsW - 16;
+    const gap = Math.min(20, usable / Math.max(1, p.n + 1));
+    let cx = x + 12 + gap;
+    for (let i = 0; i < p.n; i++) {
+      doc.circle(cx, cyMid, dotR, "F");
+      cx += gap;
+    }
+  }
+
+  // Answer line
+  const lineX1 = x + dotsW + 8;
+  const lineX2 = x + w - 4;
+  doc.setDrawColor(20, 20, 20);
+  doc.setLineWidth(0.9);
+  doc.line(lineX1, cyMid + 8, lineX2, cyMid + 8);
+  if (showAnswer) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.setTextColor(20, 20, 20);
+    doc.text(String(p.n), (lineX1 + lineX2) / 2, cyMid + 4, { align: "center" });
+  }
+}
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = a;
+    t = Math.imul(t ^ t >>> 15, t | 1);
+    t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+/* ============================================================
+   TEMPLATE — WAYS TO MAKE 5 / 10  (K, Gr1 math)
+   Maps to BC MK.2 / M1.2
+============================================================ */
+window.TEMPLATES.ways_to_make = {
+  id: "ways_to_make",
+  label: "Ways to make 5 / 10",
+  subject: "math",
+  grades: ["K", "1"],
+  topicHint: "Number",
+
+  modifiers: [
+    { id: "target", type: "select", label: "Target number",
+      options: [
+        { value: "5", label: "Make 5 (easier)" },
+        { value: "10", label: "Make 10" }
+      ], default: "10" },
+    { id: "blankPosition", type: "select", label: "Which number is missing?",
+      options: [
+        { value: "right", label: "Second addend (e.g. 7 + ___ = 10)" },
+        { value: "left", label: "First addend (e.g. ___ + 3 = 10)" },
+        { value: "mixed", label: "Mixed" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of equations", default: 10, min: 4, max: 16 },
+    { id: "showDots", type: "boolean", label: "Show ten-frame dots above each equation", default: true },
+    { id: "workedExample", type: "boolean", label: "Show worked example", default: true }
+  ],
+
+  generate(m) {
+    const target = parseInt(m.target, 10);
+    const count = parseInt(m.count, 10);
+    const problems = [];
+    for (let i = 0; i < count; i++) {
+      const knownAddend = randInt(0, target);
+      const missing = target - knownAddend;
+      const blankPos = m.blankPosition === "mixed"
+        ? (Math.random() < 0.5 ? "left" : "right")
+        : m.blankPosition;
+      problems.push({ target, knownAddend, missing, blankPos });
+    }
+    const example = m.workedExample
+      ? { target, knownAddend: Math.max(1, target - 3), missing: 3, blankPos: "right" }
+      : null;
+    return { problems, example, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const target = parseInt(m.target, 10);
+    const title = `Ways to make ${target}`;
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(doc, `Fill in the missing number so the two sides add to ${target}.`, y, pageW, margin);
+
+    if (content.example) {
+      y = pdfDrawWorkedExampleBox(doc, (x, ey, w, h) => {
+        renderWaysToMakeEq(doc, content.example, x + 10, ey + 8, w - 20, h - 16, true, m.showDots, target);
+      }, y, pageW, margin, m.showDots ? 80 : 50);
+    }
+
+    const cols = 2;
+    const colW = (pageW - margin * 2) / cols;
+    const rowH = m.showDots ? 72 : 46;
+    let startY = y;
+    let pageOffset = 0;
+
+    content.problems.forEach((p, i) => {
+      const itemOnPage = i - pageOffset;
+      const col = itemOnPage % cols;
+      const row = Math.floor(itemOnPage / cols);
+      const py = startY + row * rowH;
+      if (py + rowH > pageH - margin - 30) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+        startY = y;
+        pageOffset = i;
+        renderWaysToMakeEq(doc, p, margin + 8, startY + 8, colW - 16, rowH - 16, opts.showAnswers, m.showDots, target);
+      } else {
+        const x = margin + col * colW + 8;
+        renderWaysToMakeEq(doc, p, x, py + 8, colW - 16, rowH - 16, opts.showAnswers, m.showDots, target);
+      }
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+function renderWaysToMakeEq(doc, p, x, y, w, h, showAnswer, showDots, target) {
+  // Optional ten-frame on top
+  let topY = y;
+  if (showDots) {
+    const cellW = 14;
+    const cellH = 14;
+    const cols = target <= 5 ? 5 : 5;
+    const rows = target <= 5 ? 1 : 2;
+    const frameW = cols * cellW;
+    const frameX = x + (w - frameW) / 2;
+    doc.setDrawColor(120);
+    doc.setLineWidth(0.4);
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        doc.rect(frameX + c * cellW, topY + r * cellH, cellW, cellH, "S");
+      }
+    }
+    // Fill known dots one color, missing another (light)
+    let drawn = 0;
+    for (let r = 0; r < rows && drawn < p.knownAddend; r++) {
+      for (let c = 0; c < cols && drawn < p.knownAddend; c++) {
+        doc.setFillColor(60, 60, 60);
+        doc.circle(frameX + c * cellW + cellW / 2, topY + r * cellH + cellH / 2, 3.5, "F");
+        drawn++;
+      }
+    }
+    if (showAnswer) {
+      let extra = 0;
+      const startIdx = p.knownAddend;
+      for (let i = startIdx; i < target && extra < p.missing; i++) {
+        const r = Math.floor(i / cols);
+        const c = i % cols;
+        doc.setFillColor(180, 60, 60);
+        doc.circle(frameX + c * cellW + cellW / 2, topY + r * cellH + cellH / 2, 3.5, "F");
+        extra++;
+      }
+    }
+    topY += rows * cellH + 8;
+  }
+
+  // Equation line
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(18);
+  doc.setTextColor(20, 20, 20);
+
+  // Layout: "A + B = target" with blank where indicated
+  const blankStr = "[   ]";
+  const a = p.blankPos === "left" ? blankStr : String(p.knownAddend);
+  const b = p.blankPos === "right" ? blankStr : String(p.missing);
+  // BUT: knownAddend lives on the SHOWN side. Re-arrange:
+  // If blankPos == "right", shown side is left = knownAddend, missing is right
+  // If blankPos == "left", shown side is right = knownAddend, missing is left
+  let leftStr, rightStr;
+  if (p.blankPos === "right") {
+    leftStr = String(p.knownAddend);
+    rightStr = blankStr;
+  } else {
+    leftStr = blankStr;
+    rightStr = String(p.knownAddend);
+  }
+  const eqStr = `${leftStr}  +  ${rightStr}  =  ${target}`;
+  const cyEq = topY + 14;
+  doc.text(eqStr, x + w / 2, cyEq, { align: "center" });
+
+  if (showAnswer) {
+    doc.setTextColor(180, 30, 30);
+    doc.setFont("helvetica", "bold");
+    const answeredStr = `${p.blankPos === "left" ? p.missing : p.knownAddend}  +  ${p.blankPos === "right" ? p.missing : p.knownAddend}  =  ${target}`;
+    doc.text(answeredStr, x + w / 2, cyEq + 18, { align: "center" });
+  }
+}
+
+/* ============================================================
+   TEMPLATE — REPEATING PATTERNS  (K, Gr1, Gr3 math)
+   Maps to BC MK.4 / M1.4 / M3.6
+============================================================ */
+window.TEMPLATES.ab_patterns = {
+  id: "ab_patterns",
+  label: "Repeating patterns (AB, ABB, ABC…)",
+  subject: "math",
+  grades: ["K", "1", "3"],
+  topicHint: "Patterns",
+
+  modifiers: [
+    { id: "patternType", type: "select", label: "Pattern type",
+      options: [
+        { value: "AB",  label: "AB AB AB (easiest)" },
+        { value: "ABB", label: "ABB ABB" },
+        { value: "AAB", label: "AAB AAB" },
+        { value: "ABC", label: "ABC ABC" },
+        { value: "mixed", label: "Mixed" }
+      ], default: "AB" },
+    { id: "elements", type: "select", label: "What goes in the pattern",
+      options: [
+        { value: "shapes",  label: "Shapes (circle, square, triangle)" },
+        { value: "letters", label: "Letters (A, B, C…)" },
+        { value: "numbers", label: "Numbers (1, 2, 3…)" }
+      ], default: "shapes" },
+    { id: "count", type: "number", label: "# of rows", default: 6, min: 3, max: 12 },
+    { id: "trailingBlanks", type: "select", label: "How many blanks at the end",
+      options: [
+        { value: "1", label: "1 (just the next)" },
+        { value: "2", label: "2 (next two)" },
+        { value: "3", label: "3 (next three)" }
+      ], default: "2" }
+  ],
+
+  generate(m) {
+    const types = m.patternType === "mixed" ? ["AB", "ABB", "AAB", "ABC"] : [m.patternType];
+    const count = parseInt(m.count, 10);
+    const blanks = parseInt(m.trailingBlanks, 10);
+    const problems = [];
+
+    for (let i = 0; i < count; i++) {
+      const type = types[Math.floor(Math.random() * types.length)];
+      const unitLen = type.length;
+      const distinctNeeded = new Set(type.split("")).size;
+      const tokens = pickTokens(m.elements, distinctNeeded);
+      // Build the pattern: 3 full units shown, then `blanks` more positions
+      const fullUnits = 3;
+      const totalLen = fullUnits * unitLen + blanks;
+      const sequence = [];
+      for (let j = 0; j < totalLen; j++) {
+        const letter = type[j % unitLen]; // A/B/C
+        const tokenIdx = letter.charCodeAt(0) - "A".charCodeAt(0);
+        sequence.push(tokens[tokenIdx]);
+      }
+      const shown = sequence.slice(0, fullUnits * unitLen);
+      const expected = sequence.slice(fullUnits * unitLen);
+      problems.push({ type, shown, expected, blanks });
+    }
+    return { problems, modifiers: m, elementType: m.elements };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Finish the Pattern";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(doc, "Look at the pattern. Draw or write what comes next.", y, pageW, margin);
+
+    const rowH = 56;
+    content.problems.forEach((p) => {
+      if (pdfNeedNewPage(doc, y, rowH, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      renderPatternRow(doc, p, content.elementType, margin, y, pageW - margin * 2, rowH, opts.showAnswers);
+      y += rowH;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+function pickTokens(elementType, needed) {
+  if (elementType === "letters") {
+    return ["A", "B", "C", "D", "E"].slice(0, needed);
+  }
+  if (elementType === "numbers") {
+    return ["1", "2", "3", "4", "5"].slice(0, needed);
+  }
+  // shapes: circle / square / triangle / diamond
+  return ["circle", "square", "triangle", "diamond"].slice(0, needed);
+}
+
+function renderPatternRow(doc, p, elementType, x, y, w, h, showAnswers) {
+  const totalCells = p.shown.length + p.expected.length;
+  const cellW = Math.min(40, (w - 20) / totalCells);
+  const cellH = 34;
+  const cyMid = y + h / 2;
+  let cx = x + 10;
+
+  // Shown cells
+  p.shown.forEach((token) => {
+    drawPatternCell(doc, token, elementType, cx, cyMid, cellW, cellH, false, false);
+    cx += cellW + 4;
+  });
+
+  // Blank cells (the answer slots)
+  p.expected.forEach((token) => {
+    drawPatternCell(doc, token, elementType, cx, cyMid, cellW, cellH, true, showAnswers);
+    cx += cellW + 4;
+  });
+}
+
+function drawPatternCell(doc, token, elementType, cx, cy, w, h, isBlank, showAnswer) {
+  const boxX = cx;
+  const boxY = cy - h / 2;
+  if (isBlank) {
+    doc.setDrawColor(120);
+    doc.setLineWidth(0.6);
+    doc.setLineDashPattern([2, 2], 0);
+    doc.rect(boxX, boxY, w, h, "S");
+    doc.setLineDashPattern([], 0);
+    if (!showAnswer) return;
+  }
+  if (elementType === "letters" || elementType === "numbers") {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.setTextColor(isBlank ? 180 : 20, isBlank ? 30 : 20, isBlank ? 30 : 20);
+    doc.text(token, boxX + w / 2, boxY + h / 2 + 6, { align: "center" });
+  } else {
+    // Shape
+    const shape = window.SHAPES[token];
+    if (shape) {
+      const renderColor = isBlank ? [180, 30, 30] : [30, 30, 30];
+      const prevDraw = doc.getDrawColor && doc.getDrawColor();
+      doc.setDrawColor(...renderColor);
+      doc.setLineWidth(1.6);
+      shape.drawPDF(doc, { cx: boxX + w / 2, cy: boxY + h / 2, size: Math.min(w, h) * 0.7, mode: "solid" });
+      doc.setDrawColor(30, 30, 30);
+    }
+  }
+  doc.setTextColor(0, 0, 0);
+}
+
+/* ============================================================
+   TEMPLATE — MULTIPLICATION / DIVISION FACTS  (Gr3 math)
+   Maps to BC M3.5
+============================================================ */
+window.TEMPLATES.multiplication_facts = {
+  id: "multiplication_facts",
+  label: "Multiplication & division facts",
+  subject: "math",
+  grades: ["3"],
+  topicHint: "Operations",
+
+  modifiers: [
+    { id: "operation", type: "select", label: "Operation",
+      options: [
+        { value: "multiplication", label: "× only" },
+        { value: "division",       label: "÷ only" },
+        { value: "mixed",          label: "Mixed × and ÷" }
+      ], default: "multiplication" },
+    { id: "maxFactor", type: "select", label: "Largest factor",
+      options: [
+        { value: "5",  label: "Up to 5 (easier)" },
+        { value: "10", label: "Up to 10" },
+        { value: "12", label: "Up to 12 (harder)" }
+      ], default: "10" },
+    { id: "format", type: "select", label: "Layout",
+      options: [
+        { value: "horizontal", label: "Horizontal (a × b = ___)" },
+        { value: "vertical",   label: "Vertical (stacked)" }
+      ], default: "horizontal" },
+    { id: "count", type: "number", label: "# of problems", default: 20, min: 6, max: 40 },
+    { id: "columns", type: "select", label: "Columns",
+      options: [
+        { value: "2", label: "2" },
+        { value: "3", label: "3" },
+        { value: "4", label: "4" }
+      ], default: "4" }
+  ],
+
+  generate(m) {
+    const max = parseInt(m.maxFactor, 10);
+    const count = parseInt(m.count, 10);
+    const problems = [];
+    while (problems.length < count) {
+      const a = randInt(1, max);
+      const b = randInt(1, max);
+      const useDiv = m.operation === "division" ||
+                     (m.operation === "mixed" && Math.random() < 0.5);
+      if (useDiv) {
+        // Build a clean division: product / a = b
+        const product = a * b;
+        problems.push({ a: product, b: a, op: "÷", answer: b });
+      } else {
+        problems.push({ a, b, op: "×", answer: a * b });
+      }
+    }
+    return { problems, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const opLabel = m.operation === "multiplication" ? "Multiplication"
+                  : m.operation === "division" ? "Division"
+                  : "Multiplication & Division";
+    const title = opLabel + " Facts";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+
+    const cols = parseInt(m.columns, 10);
+    const colW = (pageW - margin * 2) / cols;
+    const rowH = m.format === "vertical" ? 100 : 48;
+    let startY = y + 6;
+    let pageOffset = 0;
+
+    content.problems.forEach((p, i) => {
+      const itemOnPage = i - pageOffset;
+      const col = itemOnPage % cols;
+      const row = Math.floor(itemOnPage / cols);
+      const py = startY + row * rowH;
+      if (py + rowH > pageH - margin - 30) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+        startY = y + 6;
+        pageOffset = i;
+        renderFactProblem(doc, p, margin + 8, startY + 16, colW - 16, rowH - 8, m.format, opts.showAnswers, i + 1);
+      } else {
+        const x = margin + col * colW + 8;
+        renderFactProblem(doc, p, x, py + 16, colW - 16, rowH - 8, m.format, opts.showAnswers, i + 1);
+      }
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+function renderFactProblem(doc, p, x, y, w, h, format, showAnswer, number) {
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.setTextColor(140);
+  doc.text(`${number}.`, x, y - 6);
+
+  if (format === "vertical") {
+    doc.setFont("courier", "normal");
+    doc.setFontSize(16);
+    doc.setTextColor(20, 20, 20);
+    const aStr = String(p.a);
+    const bStr = String(p.b);
+    const maxLen = Math.max(aStr.length, bStr.length + 2);
+    const centerX = x + w / 2;
+    const charW = 11;
+    const rightX = centerX + maxLen * charW / 2;
+    doc.text(aStr.padStart(maxLen, " "), rightX, y + 10, { align: "right" });
+    doc.text(`${p.op} ${bStr.padStart(maxLen - 2, " ")}`, rightX, y + 30, { align: "right" });
+    doc.setLineWidth(0.8);
+    doc.line(rightX - maxLen * charW - 4, y + 36, rightX + 2, y + 36);
+    if (showAnswer) {
+      doc.text(String(p.answer).padStart(maxLen, " "), rightX, y + 54, { align: "right" });
+    }
+  } else {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(16);
+    doc.setTextColor(20, 20, 20);
+    const eqStr = `${p.a}  ${p.op}  ${p.b}  =`;
+    doc.text(eqStr, x, y + 14);
+    const eqW = doc.getTextWidth(eqStr);
+    doc.setDrawColor(20);
+    doc.setLineWidth(0.7);
+    doc.rect(x + eqW + 8, y, 50, 22, "S");
+    if (showAnswer) {
+      doc.text(String(p.answer), x + eqW + 8 + 25, y + 15, { align: "center" });
+    }
+  }
+}
+
+/* ============================================================
+   TEMPLATE — FRACTIONS (visual identify)  (Gr3 math)
+   Maps to BC M3.2
+============================================================ */
+window.TEMPLATES.fractions_visual = {
+  id: "fractions_visual",
+  label: "Fractions — visual",
+  subject: "math",
+  grades: ["3"],
+  topicHint: "Number",
+
+  modifiers: [
+    { id: "shape", type: "select", label: "Shape",
+      options: [
+        { value: "bar",   label: "Bars (rectangles)" },
+        { value: "pie",   label: "Pies (circles)" },
+        { value: "mixed", label: "Mixed" }
+      ], default: "bar" },
+    { id: "maxDenominator", type: "select", label: "Largest denominator",
+      options: [
+        { value: "4",  label: "Halves & quarters (up to 4)" },
+        { value: "6",  label: "Up to 6" },
+        { value: "8",  label: "Up to 8" },
+        { value: "12", label: "Up to 12" }
+      ], default: "6" },
+    { id: "mode", type: "select", label: "What does the kid do?",
+      options: [
+        { value: "identify", label: "Write the fraction shown" },
+        { value: "shade",    label: "Shade the fraction given" },
+        { value: "mixed",    label: "Mixed" }
+      ], default: "identify" },
+    { id: "count", type: "number", label: "# of problems", default: 8, min: 4, max: 12 },
+    { id: "workedExample", type: "boolean", label: "Show worked example", default: true }
+  ],
+
+  generate(m) {
+    const maxDen = parseInt(m.maxDenominator, 10);
+    const count = parseInt(m.count, 10);
+    const problems = [];
+    for (let i = 0; i < count; i++) {
+      const denominator = randInt(2, maxDen);
+      const numerator = randInt(1, denominator - 1);
+      const shape = m.shape === "mixed"
+        ? (Math.random() < 0.5 ? "bar" : "pie")
+        : m.shape;
+      const mode = m.mode === "mixed"
+        ? (Math.random() < 0.5 ? "identify" : "shade")
+        : m.mode;
+      problems.push({ numerator, denominator, shape, mode });
+    }
+    const example = m.workedExample
+      ? { numerator: 3, denominator: 4, shape: m.shape === "mixed" ? "bar" : m.shape, mode: m.mode === "mixed" ? "identify" : m.mode }
+      : null;
+    return { problems, example, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Fractions";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(doc, "For each picture, write the fraction that is shaded, OR shade the fraction shown.", y, pageW, margin);
+
+    if (content.example) {
+      y = pdfDrawWorkedExampleBox(doc, (x, ey, w, h) => {
+        renderFractionProblem(doc, content.example, x + 6, ey + 6, w - 12, h - 12, true);
+      }, y, pageW, margin, 90);
+    }
+
+    const cols = 2;
+    const colW = (pageW - margin * 2) / cols;
+    const rowH = 90;
+    let startY = y;
+    let pageOffset = 0;
+
+    content.problems.forEach((p, i) => {
+      const itemOnPage = i - pageOffset;
+      const col = itemOnPage % cols;
+      const row = Math.floor(itemOnPage / cols);
+      const py = startY + row * rowH;
+      if (py + rowH > pageH - margin - 30) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+        startY = y;
+        pageOffset = i;
+        renderFractionProblem(doc, p, margin + 8, startY + 8, colW - 16, rowH - 16, opts.showAnswers);
+      } else {
+        const x = margin + col * colW + 8;
+        renderFractionProblem(doc, p, x, py + 8, colW - 16, rowH - 16, opts.showAnswers);
+      }
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+function renderFractionProblem(doc, p, x, y, w, h, showAnswers) {
+  // Left ~55% picture, right ~45% answer
+  const picW = w * 0.55;
+  const ansW = w * 0.45;
+  const cyMid = y + h / 2;
+
+  // Draw shape — shade portion if mode == "identify" (we want kid to read shading)
+  // For "shade" mode: show blank shape divided into N parts, show fraction on right
+  const shouldShade = p.mode === "identify" || showAnswers;
+
+  if (p.shape === "bar") {
+    const barW = picW - 20;
+    const barH = 30;
+    const barX = x + 10;
+    const barY = cyMid - barH / 2;
+    const partW = barW / p.denominator;
+    doc.setDrawColor(20);
+    doc.setLineWidth(0.8);
+    for (let i = 0; i < p.denominator; i++) {
+      if (shouldShade && i < p.numerator) {
+        doc.setFillColor(80, 130, 180);
+        doc.rect(barX + i * partW, barY, partW, barH, "FD");
+      } else {
+        doc.rect(barX + i * partW, barY, partW, barH, "S");
+      }
+    }
+  } else {
+    // pie
+    const cx = x + picW / 2;
+    const cy = cyMid;
+    const r = Math.min(picW / 2 - 8, h / 2 - 8);
+    doc.setDrawColor(20);
+    doc.setLineWidth(0.8);
+    // Outer circle
+    doc.circle(cx, cy, r, "S");
+    // Sector lines
+    for (let i = 0; i < p.denominator; i++) {
+      const angle = (i / p.denominator) * Math.PI * 2 - Math.PI / 2;
+      doc.line(cx, cy, cx + r * Math.cos(angle), cy + r * Math.sin(angle));
+    }
+    // Shade slices using triangular approximation
+    if (shouldShade) {
+      doc.setFillColor(80, 130, 180);
+      for (let i = 0; i < p.numerator; i++) {
+        const a1 = (i / p.denominator) * Math.PI * 2 - Math.PI / 2;
+        const a2 = ((i + 1) / p.denominator) * Math.PI * 2 - Math.PI / 2;
+        // Approximate sector with a triangle fan (a few steps)
+        const steps = 6;
+        for (let s = 0; s < steps; s++) {
+          const sa1 = a1 + (a2 - a1) * (s / steps);
+          const sa2 = a1 + (a2 - a1) * ((s + 1) / steps);
+          doc.triangle(
+            cx, cy,
+            cx + r * Math.cos(sa1), cy + r * Math.sin(sa1),
+            cx + r * Math.cos(sa2), cy + r * Math.sin(sa2),
+            "F"
+          );
+        }
+      }
+      // Re-stroke sector lines and outer circle on top
+      doc.setDrawColor(20);
+      doc.circle(cx, cy, r, "S");
+      for (let i = 0; i < p.denominator; i++) {
+        const angle = (i / p.denominator) * Math.PI * 2 - Math.PI / 2;
+        doc.line(cx, cy, cx + r * Math.cos(angle), cy + r * Math.sin(angle));
+      }
+    }
+  }
+
+  // Right: fraction answer area
+  const ansX = x + picW + 8;
+  if (p.mode === "identify") {
+    // "= ___ / ___"
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(16);
+    doc.setTextColor(20);
+    doc.text("=", ansX, cyMid + 4);
+    // Two stacked blank boxes
+    const boxW = 36;
+    const boxH = 22;
+    const fxX = ansX + 18;
+    doc.setDrawColor(20);
+    doc.setLineWidth(0.7);
+    doc.rect(fxX, cyMid - boxH - 2, boxW, boxH, "S");
+    doc.setLineWidth(1.0);
+    doc.line(fxX, cyMid + 4, fxX + boxW, cyMid + 4);
+    doc.setLineWidth(0.7);
+    doc.rect(fxX, cyMid + 6, boxW, boxH, "S");
+    if (showAnswers) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.setTextColor(20);
+      doc.text(String(p.numerator), fxX + boxW / 2, cyMid - 6, { align: "center" });
+      doc.text(String(p.denominator), fxX + boxW / 2, cyMid + 22, { align: "center" });
+    }
+  } else {
+    // shade mode: show the fraction as text, kid shades the picture
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.setTextColor(20);
+    const fracStr = `Shade ${p.numerator}/${p.denominator}`;
+    doc.text(fracStr, ansX, cyMid + 5);
+  }
+}
+
+/* ============================================================
+   TEMPLATE — TELLING TIME (analog clocks)  (Gr3 math)
+   Maps to BC M3.10
+============================================================ */
+window.TEMPLATES.time_telling = {
+  id: "time_telling",
+  label: "Telling time (analog clocks)",
+  subject: "math",
+  grades: ["3"],
+  topicHint: "Measurement",
+
+  modifiers: [
+    { id: "precision", type: "select", label: "Smallest interval",
+      options: [
+        { value: "hour",    label: "Whole hours (easier)" },
+        { value: "half",    label: "Hours and half hours" },
+        { value: "quarter", label: "Quarter hours" },
+        { value: "five",    label: "Five minutes (harder)" }
+      ], default: "half" },
+    { id: "count", type: "number", label: "# of clocks", default: 8, min: 4, max: 12 },
+    { id: "showDigital", type: "boolean", label: "Include digital answer line (HH:MM)", default: true }
+  ],
+
+  generate(m) {
+    const count = parseInt(m.count, 10);
+    const problems = [];
+    for (let i = 0; i < count; i++) {
+      const hour = randInt(1, 12);
+      let minute;
+      switch (m.precision) {
+        case "hour": minute = 0; break;
+        case "half": minute = Math.random() < 0.5 ? 0 : 30; break;
+        case "quarter": minute = [0, 15, 30, 45][randInt(0, 3)]; break;
+        case "five": minute = randInt(0, 11) * 5; break;
+        default: minute = 0;
+      }
+      problems.push({ hour, minute });
+    }
+    return { problems, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "What time is it?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(doc, "Look at each clock. Write the time on the line.", y, pageW, margin);
+
+    const cols = 2;
+    const colW = (pageW - margin * 2) / cols;
+    const rowH = 120;
+    let startY = y;
+    let pageOffset = 0;
+
+    content.problems.forEach((p, i) => {
+      const itemOnPage = i - pageOffset;
+      const col = itemOnPage % cols;
+      const row = Math.floor(itemOnPage / cols);
+      const py = startY + row * rowH;
+      if (py + rowH > pageH - margin - 30) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+        startY = y;
+        pageOffset = i;
+        renderClockProblem(doc, p, margin + 8, startY + 8, colW - 16, rowH - 16, m.showDigital, opts.showAnswers);
+      } else {
+        const x = margin + col * colW + 8;
+        renderClockProblem(doc, p, x, py + 8, colW - 16, rowH - 16, m.showDigital, opts.showAnswers);
+      }
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+function renderClockProblem(doc, p, x, y, w, h, showDigital, showAnswer) {
+  // Left ~50% clock, right ~50% answer line
+  const clockBoxW = w * 0.5;
+  const cx = x + clockBoxW / 2;
+  const cy = y + h / 2;
+  const r = Math.min(clockBoxW / 2 - 8, h / 2 - 4);
+
+  // Clock face
+  doc.setDrawColor(20);
+  doc.setLineWidth(1.4);
+  doc.circle(cx, cy, r, "S");
+
+  // Hour tick marks + numbers
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.setTextColor(20);
+  for (let hh = 1; hh <= 12; hh++) {
+    const angle = (hh / 12) * Math.PI * 2 - Math.PI / 2;
+    const tx1 = cx + (r - 4) * Math.cos(angle);
+    const ty1 = cy + (r - 4) * Math.sin(angle);
+    const tx2 = cx + r * Math.cos(angle);
+    const ty2 = cy + r * Math.sin(angle);
+    doc.setLineWidth(0.8);
+    doc.line(tx1, ty1, tx2, ty2);
+    const nx = cx + (r - 12) * Math.cos(angle);
+    const ny = cy + (r - 12) * Math.sin(angle);
+    doc.text(String(hh), nx, ny + 3, { align: "center" });
+  }
+
+  // Hands
+  const minuteAngle = (p.minute / 60) * Math.PI * 2 - Math.PI / 2;
+  const hourFraction = (p.hour % 12) + p.minute / 60;
+  const hourAngle = (hourFraction / 12) * Math.PI * 2 - Math.PI / 2;
+  // Hour hand: shorter, thicker
+  doc.setLineWidth(2);
+  doc.line(cx, cy, cx + r * 0.55 * Math.cos(hourAngle), cy + r * 0.55 * Math.sin(hourAngle));
+  // Minute hand: longer, thinner
+  doc.setLineWidth(1.2);
+  doc.line(cx, cy, cx + r * 0.85 * Math.cos(minuteAngle), cy + r * 0.85 * Math.sin(minuteAngle));
+  // Center
+  doc.setFillColor(20);
+  doc.circle(cx, cy, 1.6, "F");
+
+  // Right side: answer line
+  const ansX = x + clockBoxW + 8;
+  const ansY = cy;
+  if (showDigital) {
+    // Two boxes like a digital clock: __:__
+    const boxW = 30;
+    const boxH = 26;
+    doc.setDrawColor(20);
+    doc.setLineWidth(0.7);
+    doc.rect(ansX, ansY - boxH / 2, boxW, boxH, "S");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.text(":", ansX + boxW + 6, ansY + 6);
+    doc.rect(ansX + boxW + 16, ansY - boxH / 2, boxW, boxH, "S");
+    if (showAnswer) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text(String(p.hour), ansX + boxW / 2, ansY + 5, { align: "center" });
+      doc.text(String(p.minute).padStart(2, "0"), ansX + boxW + 16 + boxW / 2, ansY + 5, { align: "center" });
+    }
+  } else {
+    doc.setDrawColor(20);
+    doc.setLineWidth(0.9);
+    doc.line(ansX, ansY + 12, x + w - 4, ansY + 12);
+    if (showAnswer) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      const tstr = `${p.hour}:${String(p.minute).padStart(2, "0")}`;
+      doc.text(tstr, (ansX + x + w) / 2, ansY + 8, { align: "center" });
+    }
+  }
+}
+
+/* ============================================================
+   TEMPLATE — SIGHT WORDS PRACTICE  (K, Gr1 reading)
+   Maps to BC EK.7 / E1.4
+   Word lists adapted from Dolch + BC common sight words
+============================================================ */
+window.SIGHT_WORDS = {
+  K: ["the","of","and","a","to","in","is","you","that","it","he","was","for","on","are","as","with","his","they","I","at","be","this","have","from","or","one","had","by","but","not","what","all","were","we"],
+  "1": ["when","your","can","said","there","use","an","each","which","she","do","how","their","if","will","up","other","about","out","many","then","them","these","so","some","her","would","make","like","into","time","has","look","two"],
+  mixed: null // computed below
+};
+window.SIGHT_WORDS.mixed = [...window.SIGHT_WORDS.K, ...window.SIGHT_WORDS["1"]];
+
+window.TEMPLATES.sight_words_practice = {
+  id: "sight_words_practice",
+  label: "Sight words — read & write",
+  subject: "reading",
+  grades: ["K", "1"],
+  topicHint: "Reading",
+
+  modifiers: [
+    { id: "wordSet", type: "select", label: "Word list",
+      options: [
+        { value: "K",     label: "Kindergarten basics" },
+        { value: "1",     label: "Grade 1" },
+        { value: "mixed", label: "Mixed K + Grade 1" }
+      ], default: "K" },
+    { id: "count", type: "number", label: "# of words", default: 8, min: 4, max: 16 },
+    { id: "format", type: "select", label: "Format",
+      options: [
+        { value: "read_trace_write", label: "Read → Trace → Write (full practice)" },
+        { value: "read_only",        label: "Read aloud only (big print)" }
+      ], default: "read_trace_write" }
+  ],
+
+  generate(m) {
+    const list = window.SIGHT_WORDS[m.wordSet] || window.SIGHT_WORDS.K;
+    const pool = [...list];
+    const count = Math.min(parseInt(m.count, 10), pool.length);
+    const picked = [];
+    while (picked.length < count && pool.length) {
+      const idx = randInt(0, pool.length - 1);
+      picked.push(pool.splice(idx, 1)[0]);
+    }
+    return { words: picked, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Sight Words — Read, Trace, Write";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(doc, "Read each word out loud. Trace the gray copy. Then write it yourself on the line.", y, pageW, margin);
+
+    const isReadOnly = m.format === "read_only";
+    const rowH = isReadOnly ? 56 : 76;
+
+    content.words.forEach((word) => {
+      if (pdfNeedNewPage(doc, y, rowH, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      renderSightWordRow(doc, word, margin, y, pageW - margin * 2, rowH, isReadOnly, opts.showAnswers);
+      y += rowH;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+function renderSightWordRow(doc, word, x, y, w, h, isReadOnly, showAnswers) {
+  // Layout: bold word on left, then trace area, then blank lines (or just big word if read_only)
+  if (isReadOnly) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(36);
+    doc.setTextColor(20, 20, 20);
+    doc.text(word, x + w / 2, y + h / 2 + 12, { align: "center" });
+    // Underline
+    doc.setDrawColor(180);
+    doc.setLineWidth(0.5);
+    doc.line(x + 10, y + h - 6, x + w - 10, y + h - 6);
+    return;
+  }
+
+  // Three sections: bold word | traced (light) | blank line
+  const sectionW = w / 3;
+  const baseline = y + h * 0.7;
+  const topLine = y + h * 0.15;
+  const midLine = y + h * 0.45;
+
+  // Guide lines across the row
+  doc.setDrawColor(170);
+  doc.setLineWidth(0.4);
+  doc.line(x, topLine, x + w, topLine);
+  doc.setLineDashPattern([2.5, 3], 0);
+  doc.line(x, midLine, x + w, midLine);
+  doc.setLineDashPattern([], 0);
+  doc.line(x, baseline, x + w, baseline);
+
+  // Section 1: bold word
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(28);
+  doc.setTextColor(20, 20, 20);
+  doc.text(word, x + 10, baseline);
+
+  // Section 2: light ghost word (to trace)
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(28);
+  doc.setTextColor(190, 190, 190);
+  doc.text(word, x + sectionW + 10, baseline);
+
+  // Section 3: blank space for kid to write
+  if (showAnswers) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(28);
+    doc.setTextColor(180, 30, 30);
+    doc.text(word, x + sectionW * 2 + 10, baseline);
+  }
+
+  // Divider lines between sections
+  doc.setDrawColor(140);
+  doc.setLineDashPattern([1.5, 2], 0);
+  doc.setLineWidth(0.4);
+  doc.line(x + sectionW, topLine - 4, x + sectionW, baseline + 4);
+  doc.line(x + sectionW * 2, topLine - 4, x + sectionW * 2, baseline + 4);
+  doc.setLineDashPattern([], 0);
+
+  doc.setTextColor(0, 0, 0);
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
