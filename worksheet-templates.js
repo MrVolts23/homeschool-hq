@@ -2570,6 +2570,246 @@ function renderSightWordRow(doc, word, x, y, w, h, isReadOnly, showAnswers) {
 }
 
 /* ============================================================
+   AI TEMPLATE — READING COMPREHENSION PASSAGE (Gr3)
+   Maps to BC E3.1 / E3.5 / E3.3 / E3.10
+   Uses Claude API to generate a fresh passage themed around the
+   kid's interests, then comprehension questions to print alongside.
+============================================================ */
+window.TEMPLATES.reading_passage_gr3 = {
+  id: "reading_passage_gr3",
+  label: "Reading passage + comprehension Qs",
+  subject: "reading",
+  grades: ["3"],
+  topicHint: "Reading",
+  usesAI: true,
+  acceptsReferences: false,
+  maxTokens: 3000,
+
+  modifiers: [
+    { id: "genre", type: "select", label: "Genre",
+      options: [
+        { value: "fiction",     label: "Fiction (short story)" },
+        { value: "nonfiction",  label: "Nonfiction (informational)" },
+        { value: "fable",       label: "Fable / folktale" },
+        { value: "biography",   label: "Mini biography" },
+        { value: "mixed",       label: "Claude picks" }
+      ], default: "fiction" },
+    { id: "length", type: "select", label: "Passage length",
+      options: [
+        { value: "short",  label: "Short (~80–120 words)" },
+        { value: "medium", label: "Medium (~150–220 words)" },
+        { value: "long",   label: "Long (~250–320 words)" }
+      ], default: "medium" },
+    { id: "topicHint", type: "text", label: "Topic hint (optional — leave blank to use kid's interests)", default: "" },
+    { id: "questionCount", type: "number", label: "# of questions", default: 5, min: 3, max: 8 },
+    { id: "includeVocab", type: "boolean", label: "Include 1 vocabulary question", default: true },
+    { id: "includeInference", type: "boolean", label: "Include 1 inference question (\"why do you think…\")", default: true }
+  ],
+
+  buildPrompt(mods, kid) {
+    const wordRange = {
+      short:  "between 80 and 120 words",
+      medium: "between 150 and 220 words",
+      long:   "between 250 and 320 words"
+    }[mods.length] || "around 200 words";
+
+    const genreText = {
+      fiction:    "an original short fictional story",
+      nonfiction: "a short nonfiction informational passage",
+      fable:      "a short fable or folktale with a gentle moral",
+      biography:  "a short factual mini-biography of a real, age-appropriate person",
+      mixed:      "an age-appropriate passage — you choose fiction or nonfiction"
+    }[mods.genre] || "an original short passage";
+
+    const topic = mods.topicHint && mods.topicHint.trim()
+      ? `The topic must be: ${mods.topicHint.trim()}.`
+      : (kid.interests
+          ? `Theme it around the child's interests when possible: ${kid.interests}.`
+          : "Pick a topic a Grade 3 reader would find engaging — nature, animals, history, sports, science, or everyday life.");
+
+    const extras = [];
+    if (mods.includeVocab) extras.push("Include exactly one vocabulary question that asks the meaning of a specific word from the passage (give the word in quotes).");
+    if (mods.includeInference) extras.push("Include exactly one inference question that asks \"Why do you think…\" or \"What does this tell us about…\"");
+
+    return `You are a BC-curriculum-aligned worksheet generator for a homeschooled Grade 3 student.
+
+CHILD: ${kid.name}, age ${kid.age}, BC Grade 3 reading level.
+INTERESTS: ${kid.interests || "(none specified)"}
+PARENT NOTES: ${kid.notes || "(none)"}
+
+TASK: Write ${genreText}, ${wordRange} long, and ${mods.questionCount} comprehension questions about it.
+
+${topic}
+
+WRITING REQUIREMENTS:
+- Reading level: BC Grade 3 (vocabulary mostly 1–2 syllables, some 3-syllable words OK).
+- Sentence variety: short and medium sentences mixed; at least 2 compound sentences.
+- Voice: warm, clear, age-appropriate. No violence, no scary content.
+- Give the passage a short engaging title.
+- Break the passage into 2–4 short paragraphs separated by blank lines.
+
+QUESTION REQUIREMENTS:
+- Mix of: 1 main-idea question, 1–2 detail questions, ${extras.length} other type${extras.length === 1 ? "" : "s"}.
+${extras.map(e => "- " + e).join("\n")}
+- Each question gets a model "answer" used for the answer key. Answers should be short (1–2 sentences).
+- All questions must be answerable from the passage alone.
+
+RETURN VALID JSON ONLY (no markdown fences, no commentary):
+{
+  "title": "Reading: <short label>",
+  "passageTitle": "<short title for the passage itself>",
+  "passage": "<full passage text, paragraphs separated by \\n\\n>",
+  "questions": [
+    { "q": "<question>", "answer": "<model answer>", "type": "short_response" }
+  ],
+  "standards": ["E3.1", "E3.5"]
+}`;
+  },
+
+  parseResponse(text) {
+    // Strip markdown fences if Claude wrapped it
+    const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    let obj;
+    try {
+      obj = JSON.parse(cleaned);
+    } catch (e) {
+      // Fallback: try to find the first { ... } block
+      const m = cleaned.match(/\{[\s\S]*\}/);
+      if (!m) throw new Error("Claude response wasn't valid JSON.");
+      obj = JSON.parse(m[0]);
+    }
+    return {
+      title: obj.title || "Reading Comprehension",
+      passageTitle: obj.passageTitle || "",
+      passage: obj.passage || "",
+      questions: (obj.questions || []).map(q => ({
+        q: q.q || q.question || "",
+        answer: q.answer || "",
+        type: q.type || "short_response"
+      })),
+      standards: obj.standards || ["E3.1", "E3.5"]
+    };
+  },
+
+  // No-API-key fallback so the template is testable without burning tokens.
+  mockResponse(mods, kid) {
+    const passage = `On the West Coast of British Columbia, salmon do something amazing every fall. After years of living in the ocean, they swim all the way back to the small streams where they were born.\n\nThe trip is long and hard. Salmon must jump up waterfalls. They must dodge bears and eagles. Some salmon swim for weeks without eating.\n\nWhen they finally reach the right stream, the females dig small nests in the gravel and lay their eggs. Then the salmon's life cycle starts all over again. Bears, eagles, and even old fallen trees in the forest all rely on the salmon's return.`;
+    const questions = [
+      { q: "Where do salmon go when fall comes?", answer: "They swim back to the small streams where they were born.", type: "short_response" },
+      { q: "Name two things salmon must do on their journey.", answer: "Any two of: jump up waterfalls, dodge bears, dodge eagles, swim without eating.", type: "short_response" },
+      { q: "What does the female salmon do when she reaches the right stream?", answer: "She digs a small nest in the gravel and lays her eggs.", type: "short_response" },
+      { q: "What does the word 'dodge' mean in this passage?", answer: "To avoid or get out of the way of something.", type: "short_response" },
+      { q: "Why do you think the writer says bears, eagles, and old trees rely on the salmon's return?", answer: "Because salmon are food for bears and eagles, and when salmon die in the streams their bodies feed the forest soil.", type: "short_response" }
+    ].slice(0, parseInt(mods.questionCount, 10) || 5);
+    return JSON.stringify({
+      title: "Reading: The Long Journey Home",
+      passageTitle: "The Long Journey Home",
+      passage,
+      questions,
+      standards: ["E3.1", "E3.5"]
+    });
+  },
+
+  titleFrom(content, mods, kid) {
+    return content.title || `Reading: ${content.passageTitle || "Comprehension"}`;
+  },
+
+  renderPDF(doc, content, mods, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = content.title || "Reading Comprehension";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+
+    // Passage title (smaller, centered, italic)
+    if (content.passageTitle) {
+      doc.setFont("times", "bolditalic");
+      doc.setFontSize(14);
+      doc.setTextColor(30, 30, 30);
+      doc.text(content.passageTitle, pageW / 2, y + 4, { align: "center" });
+      y += 22;
+    }
+
+    // Passage — wrap paragraphs, paginate as needed
+    const passageMaxW = pageW - margin * 2;
+    const paragraphs = (content.passage || "").split(/\n+/).map(p => p.trim()).filter(Boolean);
+    doc.setFont("times", "normal");
+    doc.setFontSize(12);
+    doc.setTextColor(20, 20, 20);
+    const lineH = 16;
+    paragraphs.forEach(para => {
+      const lines = doc.splitTextToSize(para, passageMaxW);
+      lines.forEach(line => {
+        if (pdfNeedNewPage(doc, y, lineH, margin)) {
+          y = pdfAddPageWithHeader(doc, title, pageW, margin);
+        }
+        doc.text(line, margin, y);
+        y += lineH;
+      });
+      y += 6; // paragraph gap
+    });
+
+    // Separator
+    y += 6;
+    if (pdfNeedNewPage(doc, y, 26, margin)) {
+      y = pdfAddPageWithHeader(doc, title, pageW, margin);
+    }
+    doc.setDrawColor(40);
+    doc.setLineWidth(1);
+    doc.line(margin, y, pageW - margin, y);
+    y += 14;
+
+    // Questions header
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(12);
+    doc.setTextColor(20);
+    doc.text("Comprehension Questions", margin, y);
+    y += 14;
+
+    // Questions
+    const questions = content.questions || [];
+    questions.forEach((q, i) => {
+      const qLines = doc.splitTextToSize(`${i + 1}. ${q.q}`, passageMaxW);
+      const blockH = qLines.length * lineH + 36; // text + 2 answer lines + padding
+      if (pdfNeedNewPage(doc, y, blockH, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      doc.setTextColor(20);
+      qLines.forEach(line => {
+        doc.text(line, margin, y);
+        y += lineH;
+      });
+      // Two answer lines
+      doc.setDrawColor(80);
+      doc.setLineWidth(0.5);
+      const ansLineY1 = y + 6;
+      const ansLineY2 = y + 22;
+      doc.line(margin + 18, ansLineY1, pageW - margin, ansLineY1);
+      doc.line(margin + 18, ansLineY2, pageW - margin, ansLineY2);
+
+      if (opts.showAnswers && q.answer) {
+        doc.setFont("times", "italic");
+        doc.setFontSize(10);
+        doc.setTextColor(140, 30, 30);
+        const ansLines = doc.splitTextToSize(q.answer, passageMaxW - 22);
+        ansLines.slice(0, 2).forEach((line, j) => {
+          doc.text(line, margin + 22, y + 4 + j * 16);
+        });
+        doc.setTextColor(20);
+      }
+      y = ansLineY2 + 14;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);

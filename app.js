@@ -432,7 +432,9 @@ function renderSubject(kid, subject) {
     uiTemplate[subject] = templates[0].id;
   }
   const selectedTemplate = templates.find(t => t.id === uiTemplate[subject]);
-  const isAiMode = uiTemplate[subject] === "__ai__" || !selectedTemplate;
+  const isGenericAiMode = uiTemplate[subject] === "__ai__" || !selectedTemplate;
+  const isAiTemplate = selectedTemplate && selectedTemplate.usesAI;
+  const usesClaude = isGenericAiMode || isAiTemplate;
 
   return `
     <div class="content-header">
@@ -449,18 +451,19 @@ function renderSubject(kid, subject) {
         <div class="form-group">
           <label>Worksheet style</label>
           <select id="templatePicker">
-            ${templates.map(t => `<option value="${t.id}" ${t.id === uiTemplate[subject] ? "selected" : ""}>${escapeHtml(t.label)}</option>`).join("")}
-            <option value="__ai__" ${isAiMode ? "selected" : ""}>✨ AI custom (open-ended Claude prompt)</option>
+            ${templates.map(t => `<option value="${t.id}" ${t.id === uiTemplate[subject] ? "selected" : ""}>${escapeHtml(t.label)}${t.usesAI ? " ✨" : ""}</option>`).join("")}
+            <option value="__ai__" ${isGenericAiMode ? "selected" : ""}>✨ AI custom (open-ended Claude prompt)</option>
           </select>
         </div>
 
         <div id="modifierArea">
-          ${isAiMode ? renderAiModeControls(kid, subject, topics) : renderTemplateModifiers(selectedTemplate)}
+          ${isGenericAiMode ? renderAiModeControls(kid, subject, topics) : renderTemplateModifiers(selectedTemplate)}
         </div>
 
-        <button class="btn btn-primary btn-block" id="generateBtn" style="margin-top: 0.6rem;">${isAiMode ? "✨ Generate with AI" : "📄 Generate worksheet"}</button>
-        ${isAiMode && !state.settings.apiKey ? `<p class="muted" style="margin-top:0.6rem;">⚠️ AI mode needs a Claude API key — using mock generator. Add a key in Settings.</p>` : ""}
-        ${!isAiMode ? `<p class="muted" style="margin-top:0.6rem;">📐 Template mode — generates locally, no API needed. Same Scholastic-style layout every time.</p>` : ""}
+        <button class="btn btn-primary btn-block" id="generateBtn" style="margin-top: 0.6rem;">${usesClaude ? "✨ Generate with AI" : "📄 Generate worksheet"}</button>
+        ${usesClaude && !state.settings.apiKey ? `<p class="muted" style="margin-top:0.6rem;">⚠️ ${isAiTemplate ? "This worksheet uses AI" : "AI mode"} — needs a Claude API key. ${isAiTemplate ? "Add one in Settings, or use a local template instead." : "Using mock generator until you add one."}</p>` : ""}
+        ${isAiTemplate && state.settings.apiKey ? `<p class="muted" style="margin-top:0.6rem;">✨ AI template — generates a fresh ${subjectLabel(subject).toLowerCase()} worksheet via Claude (~2–4¢ per call).</p>` : ""}
+        ${!usesClaude ? `<p class="muted" style="margin-top:0.6rem;">📐 Template mode — generates locally, no API needed. Same Scholastic-style layout every time.</p>` : ""}
       </div>
 
       <div class="card">
@@ -831,20 +834,26 @@ function getTopicsForSubject(curriculum, subject) {
 ============================================================ */
 async function generateWorksheet(kid, subject) {
   const generateBtn = document.getElementById("generateBtn");
+  const wasLabel = generateBtn.innerHTML;
   generateBtn.disabled = true;
   generateBtn.innerHTML = '<span class="spinner"></span> Generating…';
 
   try {
     const templateId = uiTemplate[subject];
-    const isAiMode = templateId === "__ai__" || !window.TEMPLATES[templateId];
+    const template = window.TEMPLATES[templateId];
+    const isGenericAiMode = templateId === "__ai__" || !template;
 
     let worksheet;
-    if (isAiMode) {
+    if (isGenericAiMode) {
+      // Original open-ended AI flow — Mike types a prompt
       const topicId = document.getElementById("genTopic").value;
       const count = parseInt(document.getElementById("genCount").value, 10) || 10;
       const difficulty = parseInt(document.getElementById("genDifficulty").value, 10) || kid.difficulty[subject];
       const notes = document.getElementById("genNotes").value.trim();
       worksheet = await callClaudeForWorksheet({ kid, subject, topicId, count, difficulty, notes });
+    } else if (template.usesAI) {
+      // Structured AI template — modifiers feed buildPrompt, response feeds renderPDF
+      worksheet = await generateFromAITemplate(kid, subject, template);
     } else {
       worksheet = generateFromTemplate(kid, subject, templateId);
     }
@@ -858,13 +867,13 @@ async function generateWorksheet(kid, subject) {
     toast("Worksheet generation failed: " + e.message, "error");
   } finally {
     generateBtn.disabled = false;
-    generateBtn.innerHTML = "📄 Generate worksheet";
+    generateBtn.innerHTML = wasLabel || "📄 Generate worksheet";
   }
 }
 
-function generateFromTemplate(kid, subject, templateId) {
-  const template = window.TEMPLATES[templateId];
-  // Read modifier values from the form
+// Read modifier values from the rendered form. Shared between template
+// and AI-template flows so both pick up text/select/boolean/pickers the same way.
+function readModifiersFromForm(template) {
   const mods = {};
   template.modifiers.forEach(m => {
     if (m.type === "letter_picker" || m.type === "shape_picker") {
@@ -884,7 +893,12 @@ function generateFromTemplate(kid, subject, templateId) {
     if (m.type === "boolean") mods[m.id] = el.checked;
     else mods[m.id] = el.value;
   });
+  return mods;
+}
 
+function generateFromTemplate(kid, subject, templateId) {
+  const template = window.TEMPLATES[templateId];
+  const mods = readModifiersFromForm(template);
   const content = template.generate(mods);
   return {
     id: "ws_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
@@ -899,6 +913,59 @@ function generateFromTemplate(kid, subject, templateId) {
     answerKey: contentToAnswers(content, template),
     difficulty: kid.difficulty[subject],
     notes: "",
+    generatedAt: Date.now()
+  };
+}
+
+/* ============================================================
+   AI-TEMPLATE FLOW
+   Structured template that routes through Claude. Same UI as
+   regular templates, just with a buildPrompt + parseResponse.
+============================================================ */
+async function generateFromAITemplate(kid, subject, template) {
+  const mods = readModifiersFromForm(template);
+  const prompt = template.buildPrompt(mods, kid);
+
+  // Optional reference photos attached as vision input (same as the open-ended AI mode)
+  const refs = (kid.references && kid.references[subject]) || [];
+  let responseText;
+  if (state.settings.apiKey) {
+    if (refs.length > 0 && template.acceptsReferences !== false) {
+      const content = [];
+      content.push({ type: "text", text: `Below are ${refs.length} reference worksheet${refs.length > 1 ? "s" : ""} that show the style I want you to match:` });
+      refs.slice(0, 5).forEach(r => {
+        const match = r.dataUrl.match(/^data:(image\/[^;]+);base64,(.+)$/);
+        if (match) {
+          content.push({ type: "image", source: { type: "base64", media_type: match[1], data: match[2] } });
+        }
+      });
+      content.push({ type: "text", text: prompt });
+      responseText = await callClaudeAPI(null, { content, max_tokens: template.maxTokens || 4096 });
+    } else {
+      responseText = await callClaudeAPI(prompt, { max_tokens: template.maxTokens || 4096 });
+    }
+  } else if (typeof template.mockResponse === "function") {
+    responseText = template.mockResponse(mods, kid);
+  } else {
+    throw new Error("This template needs a Claude API key. Add one in Settings, then try again.");
+  }
+
+  const content = template.parseResponse(responseText);
+  const title = (template.titleFrom && template.titleFrom(content, mods, kid)) || content.title || template.label;
+  return {
+    id: "ws_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    kidId: kid.id,
+    subject,
+    templateId: template.id,
+    modifiers: mods,
+    content,
+    title,
+    standards: content.standards || [],
+    questions: content.questions || [],
+    answerKey: (content.questions || []).map(q => q.answer || ""),
+    difficulty: kid.difficulty[subject],
+    notes: "",
+    referencesUsed: refs.length,
     generatedAt: Date.now()
   };
 }
@@ -1251,7 +1318,29 @@ function renderTemplatePreviewHTML(ws) {
   if (ws.templateId === "fractions_visual") return previewFractionsVisual(content, ws.modifiers);
   if (ws.templateId === "time_telling") return previewTimeTelling(content, ws.modifiers);
   if (ws.templateId === "sight_words_practice") return previewSightWords(content, ws.modifiers);
+  if (ws.templateId === "reading_passage_gr3") return previewReadingPassage(content, ws.modifiers);
   return "<p class='muted'>Preview not available for this template — but the PDF will render correctly.</p>";
+}
+
+function previewReadingPassage(content, m) {
+  const passage = (content.passage || "").split(/\n+/).map(p => `<p style="margin: 0 0 10px; line-height: 1.5;">${escapeHtml(p)}</p>`).join("");
+  const passageTitle = content.passageTitle ? `<h3 style="margin: 0 0 8px; font-family: Georgia, serif;">${escapeHtml(content.passageTitle)}</h3>` : "";
+  const qs = (content.questions || []).map((q, i) => `
+    <div style="padding: 10px 0; border-bottom: 1px dashed #ddd;">
+      <div style="font-size: 14px; margin-bottom: 6px;"><strong>${i + 1}.</strong> ${escapeHtml(q.q)}</div>
+      <div style="border-bottom: 1.5px solid #222; height: 22px; margin-bottom: 4px;"></div>
+      <div style="border-bottom: 1.5px solid #222; height: 22px;"></div>
+    </div>
+  `).join("");
+  return `
+    <div style="font-family: Georgia, 'Times New Roman', serif; padding: 8px 4px;">
+      ${passageTitle}
+      ${passage}
+    </div>
+    <hr style="border: none; border-top: 2px solid #222; margin: 14px 0;"/>
+    <h4 style="margin: 0 0 8px;">Comprehension Questions</h4>
+    ${qs}
+  `;
 }
 
 /* -------- Previews for new templates -------- */
