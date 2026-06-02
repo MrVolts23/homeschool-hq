@@ -16,11 +16,13 @@ Migrated from a Claude Cowork session on 2026-05-28. Previously lived at `~/Desk
 
 ## How to run it
 
-```bash
-open /Users/mikevolts/Projects/homeschool/index.html
-```
+**Recommended (and required for AI features):** double-click **`Start Homeschool HQ.command`** (on the Desktop, or in this folder). It starts a small local server on port 8765 and opens the app at `http://localhost:8765/index.html`.
 
-That's it. All state lives in browser `localStorage` under the key `homeschoolHQ_v1`.
+Why a server and not just opening the file: the AI worksheet templates call the Anthropic API directly from the browser. That CORS request needs a real http origin — it fails from a `file://` page (origin "null"). Local-only templates (tracing, math, the Scholastic writing pages) work fine either way, but **AI templates only work over the local server.**
+
+Storage is per-origin. The user's API key and all data live under `http://localhost:8765` when launched this way (and persist across server restarts, since localStorage is keyed by origin, not process). If the app is ever opened via `file://` instead, that's a *separate* empty storage bucket — the key would need re-entering and AI calls would likely fail.
+
+All state lives in browser `localStorage` under the key `homeschoolHQ_v1`.
 
 ## Architecture quick reference
 
