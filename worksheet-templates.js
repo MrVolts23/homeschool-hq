@@ -3870,6 +3870,537 @@ function buildWordSearch(words, opts) {
 }
 
 /* ============================================================
+   SHARED AI-TEMPLATE HELPERS
+============================================================ */
+// Robust JSON extraction shared by AI templates.
+function parseAIJSON(text) {
+  const cleaned = text.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  try { return JSON.parse(cleaned); } catch (e) {}
+  const m = cleaned.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error("Claude's response wasn't valid JSON.");
+  return JSON.parse(m[0]);
+}
+
+function gradeWord(kid) {
+  return kid.gradeKey === "K" ? "Kindergarten" : "Grade " + kid.gradeKey;
+}
+
+/* ============================================================
+   AI TEMPLATE — MATH WORD PROBLEMS  (K, Gr1, Gr3)
+   Maps to BC MK.5 / M1.3 / M3.3 / M3.5
+============================================================ */
+window.TEMPLATES.math_word_problems = {
+  id: "math_word_problems",
+  label: "Math word problems (story problems)",
+  subject: "math",
+  grades: ["K", "1", "3"],
+  topicHint: "Operations",
+  usesAI: true,
+  acceptsReferences: false,
+  maxTokens: 2500,
+
+  modifiers: [
+    { id: "operation", type: "select", label: "Math focus",
+      options: [
+        { value: "auto",        label: "Match the grade (Claude picks)" },
+        { value: "addition",    label: "Addition" },
+        { value: "subtraction", label: "Subtraction" },
+        { value: "add_sub",     label: "Addition & subtraction" },
+        { value: "mult_div",    label: "Multiplication & division (Gr 3)" }
+      ], default: "auto" },
+    { id: "count", type: "number", label: "# of problems", default: 6, min: 3, max: 12 },
+    { id: "topicHint", type: "text", label: "Story theme (optional — blank = kid's interests)", default: "" },
+    { id: "showWorkSpace", type: "boolean", label: "Include a work-space box for each problem", default: true }
+  ],
+
+  buildPrompt(mods, kid) {
+    const gradeBand = {
+      "K": "Numbers and totals must stay within 10. One-step only. Very concrete (counting toys, snacks, animals).",
+      "1": "Numbers within 20. One-step addition or subtraction. Concrete, everyday situations.",
+      "3": "Numbers within 1000 for + and −. Multiplication/division facts within 12×12. One or two steps allowed."
+    }[kid.gradeKey] || "Grade-appropriate numbers, one step.";
+
+    const opText = {
+      auto: "Choose operations appropriate to the grade.",
+      addition: "All problems should use addition.",
+      subtraction: "All problems should use subtraction.",
+      add_sub: "Mix addition and subtraction.",
+      mult_div: "Use multiplication and division (Grade 3 level, facts within 12×12)."
+    }[mods.operation] || "Choose operations appropriate to the grade.";
+
+    const theme = mods.topicHint && mods.topicHint.trim()
+      ? `Every problem should involve: ${mods.topicHint.trim()}.`
+      : (kid.interests ? `Theme the problems around the child's interests when natural: ${kid.interests}.`
+                       : "Use everyday, relatable situations (toys, snacks, pets, sports, family).");
+
+    return `You are a BC-curriculum math worksheet generator for a homeschooled child.
+
+CHILD: ${kid.name}, age ${kid.age}, ${gradeWord(kid)} level.
+INTERESTS: ${kid.interests || "(none specified)"}
+
+TASK: Write ${mods.count} math STORY problems (word problems).
+
+GRADE CALIBRATION: ${gradeBand}
+OPERATIONS: ${opText}
+${theme}
+
+REQUIREMENTS:
+- Each problem is 1–2 short sentences, ending in a clear question.
+- Use ${kid.name}'s name in some problems to make it personal.
+- Keep numbers clean (no remainders for division, no negatives for subtraction).
+- Give the exact numeric answer for each (the "answer" field), plus a one-line "work" showing the number sentence (e.g. "7 + 5 = 12").
+
+RETURN VALID JSON ONLY (no markdown fences):
+{
+  "title": "Math Word Problems: <short label>",
+  "instructions": "<one short instruction line for the child>",
+  "problems": [
+    { "problem": "<the word problem>", "work": "<number sentence>", "answer": "<final answer>" }
+  ],
+  "standards": ["<BC standard id, e.g. M3.3>"]
+}`;
+  },
+
+  parseResponse(text) {
+    const obj = parseAIJSON(text);
+    const problems = (obj.problems || []).map(p => ({
+      problem: p.problem || p.q || "",
+      work: p.work || "",
+      answer: String(p.answer != null ? p.answer : "")
+    }));
+    return {
+      title: obj.title || "Math Word Problems",
+      instructions: obj.instructions || "Read each problem. Show your work and write your answer.",
+      problems,
+      standards: obj.standards || [],
+      // expose a generic questions[] for grading compatibility
+      questions: problems.map(p => ({ q: p.problem, answer: p.answer, type: "short_response" }))
+    };
+  },
+
+  mockResponse(mods, kid) {
+    const name = kid.name || "Sam";
+    const problems = [
+      { problem: `${name} had 8 toy cars. ${name} got 5 more for a birthday. How many toy cars now?`, work: "8 + 5 = 13", answer: "13 cars" },
+      { problem: `There were 12 cookies on a plate. ${name} ate 4 of them. How many cookies are left?`, work: "12 − 4 = 8", answer: "8 cookies" },
+      { problem: `${name} reads 3 books each week. How many books in 4 weeks?`, work: "3 × 4 = 12", answer: "12 books" },
+      { problem: `A bag holds 6 apples. ${name} fills 3 bags. How many apples in all?`, work: "6 × 3 = 18", answer: "18 apples" },
+      { problem: `${name} has 20 stickers and shares them equally with 4 friends. How many does each friend get?`, work: "20 ÷ 4 = 5", answer: "5 stickers each" },
+      { problem: `There are 15 birds in a tree. 7 fly away. How many birds stay?`, work: "15 − 7 = 8", answer: "8 birds" }
+    ].slice(0, parseInt(mods.count, 10) || 6);
+    return JSON.stringify({
+      title: "Math Word Problems: Everyday Math",
+      instructions: "Read each problem. Show your work in the box, then write your answer.",
+      problems,
+      standards: ["M3.3"]
+    });
+  },
+
+  renderPDF(doc, content, mods, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = content.title || "Math Word Problems";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    if (content.instructions) y = pdfDrawInstruction(doc, content.instructions, y, pageW, margin);
+
+    const showWork = mods.showWorkSpace !== false;
+    (content.problems || []).forEach((p, i) => {
+      const qLines = doc.splitTextToSize(`${i + 1}. ${p.problem}`, pageW - margin * 2 - 20);
+      const workH = showWork ? 56 : 28;
+      const blockH = qLines.length * 15 + workH + 12;
+      if (pdfNeedNewPage(doc, y, blockH, margin)) y = pdfAddPageWithHeader(doc, title, pageW, margin);
+
+      pdfDrawNumberedDot(doc, String(i + 1), margin + 10, y + 6, 9);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.setTextColor(20);
+      qLines.forEach((line, j) => {
+        // strip the leading "N." we already drew as a dot
+        const txt = j === 0 ? line.replace(/^\d+\.\s*/, "") : line;
+        doc.text(txt, margin + 26, y + 10 + j * 15);
+      });
+      y += qLines.length * 15 + 6;
+
+      if (showWork) {
+        doc.setDrawColor(180);
+        doc.setLineWidth(0.6);
+        doc.rect(margin + 26, y, pageW - margin - (margin + 26), 40, "S");
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(8);
+        doc.setTextColor(150);
+        doc.text("work space", margin + 30, y + 11);
+        if (opts.showAnswers && p.work) {
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(12);
+          doc.setTextColor(140, 30, 30);
+          doc.text(p.work, margin + 34, y + 26);
+        }
+        y += 48;
+      }
+
+      // Answer line
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(11);
+      doc.setTextColor(20);
+      doc.text("Answer:", margin + 26, y + 4);
+      doc.setDrawColor(20);
+      doc.setLineWidth(0.8);
+      doc.line(margin + 80, y + 6, pageW - margin, y + 6);
+      if (opts.showAnswers) {
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(180, 30, 30);
+        doc.text(String(p.answer), margin + 86, y + 2);
+        doc.setTextColor(20);
+      }
+      y += 22;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ============================================================
+   AI TEMPLATE — SPELLING LIST + SENTENCES  (Gr1, Gr3)
+   Maps to BC E1.11 / E3.10 / E3.11
+============================================================ */
+window.TEMPLATES.spelling_with_sentences = {
+  id: "spelling_with_sentences",
+  label: "Spelling list + write a sentence",
+  subject: "writing",
+  grades: ["1", "3"],
+  topicHint: "Vocabulary",
+  usesAI: true,
+  acceptsReferences: false,
+  maxTokens: 2000,
+
+  modifiers: [
+    { id: "focus", type: "select", label: "Word focus",
+      options: [
+        { value: "mixed",       label: "Mixed (grade-appropriate)" },
+        { value: "word_family", label: "Word families / rhyming patterns" },
+        { value: "blends",      label: "Blends & digraphs (sh, ch, str…)" },
+        { value: "long_vowels", label: "Long vowel patterns" },
+        { value: "sight_words", label: "Common sight words" },
+        { value: "theme",       label: "Themed (use kid's interests)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of words", default: 10, min: 5, max: 16 },
+    { id: "writeWordTimes", type: "select", label: "Write-the-word practice",
+      options: [
+        { value: "0", label: "No tracing — just a sentence line" },
+        { value: "2", label: "Write each word 2×, then a sentence" },
+        { value: "3", label: "Write each word 3×, then a sentence" }
+      ], default: "2" }
+  ],
+
+  buildPrompt(mods, kid) {
+    const level = kid.gradeKey === "1"
+      ? "Grade 1 spelling: mostly 3–4 letter CVC words, simple blends, common sight words."
+      : "Grade 3 spelling: 1–2 syllable words, blends, digraphs, long-vowel patterns, common irregular words.";
+
+    const focusText = {
+      mixed: "A balanced mix appropriate to the grade.",
+      word_family: "Group the words into 2–3 word families that share a spelling pattern (e.g. -ight, -ack).",
+      blends: "Focus on consonant blends and digraphs (sh, ch, th, str, bl, etc.).",
+      long_vowels: "Focus on long-vowel spelling patterns (a_e, ai, ay, ee, ea, igh, oa, etc.).",
+      sight_words: "Use common high-frequency sight words for the grade.",
+      theme: `Pick real words connected to the child's interests: ${kid.interests || "general topics"}.`
+    }[mods.focus] || "A balanced mix appropriate to the grade.";
+
+    return `You are a BC-curriculum spelling worksheet generator.
+
+CHILD: ${kid.name}, age ${kid.age}, ${gradeWord(kid)} level.
+
+TASK: Choose ${mods.count} spelling words and write one simple example sentence for each.
+
+LEVEL: ${level}
+FOCUS: ${focusText}
+
+REQUIREMENTS:
+- Words must be real and spelled in Canadian/standard English.
+- Each example sentence uses the word correctly and is short (Grade-appropriate).
+- In the sentence, the spelling word should appear (you may surround it with **double asterisks** so we can find it).
+
+RETURN VALID JSON ONLY (no markdown fences):
+{
+  "title": "Spelling: <short label>",
+  "instructions": "<one short instruction line>",
+  "words": [
+    { "word": "<word>", "sentence": "<example sentence using the word>" }
+  ],
+  "standards": ["E3.10"]
+}`;
+  },
+
+  parseResponse(text) {
+    const obj = parseAIJSON(text);
+    const words = (obj.words || []).map(w => ({
+      word: (w.word || "").replace(/\*\*/g, "").trim(),
+      sentence: (w.sentence || "").trim()
+    })).filter(w => w.word);
+    return {
+      title: obj.title || "Spelling Practice",
+      instructions: obj.instructions || "Read each word. Write it neatly, then use it in a sentence.",
+      words,
+      standards: obj.standards || ["E3.10"],
+      questions: words.map(w => ({ q: `Spell and use: ${w.word}`, answer: w.word, type: "short_response" }))
+    };
+  },
+
+  mockResponse(mods, kid) {
+    const base = kid.gradeKey === "1"
+      ? [["ship","The big ship sailed away."],["chop","Dad will chop the wood."],["rain","We play in the rain."],["bike","I ride my bike fast."],["tree","A bird sits in the tree."],["jump","The frogs jump high."],["nest","The eggs are in the nest."],["star","One star is very bright."],["frog","The frog is green."],["play","Let's play outside."]]
+      : [["bright","The sun is very bright today."],["thunder","We heard thunder in the storm."],["picture","She drew a picture of her dog."],["between","Sit between your two friends."],["o'clock","School starts at nine o'clock."],["country","Canada is a big country."],["enough","Do we have enough snacks?"],["o'clock","It is three o'clock now."],["measure","Let's measure the table."],["finally","We finally reached the top."]];
+    const words = base.slice(0, parseInt(mods.count, 10) || 10).map(([word, sentence]) => ({ word, sentence }));
+    return JSON.stringify({
+      title: "Spelling: This Week's Words",
+      instructions: "Read each word. Write it neatly, then use it in a sentence.",
+      words,
+      standards: ["E3.10"]
+    });
+  },
+
+  renderPDF(doc, content, mods, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = content.title || "Spelling Practice";
+    const writeTimes = parseInt(mods.writeWordTimes, 10) || 0;
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    if (content.instructions) y = pdfDrawInstruction(doc, content.instructions, y, pageW, margin);
+
+    // Word list box at top
+    const words = content.words || [];
+    const colCount = 2;
+    const perCol = Math.ceil(words.length / colCount);
+    const boxH = perCol * 16 + 26;
+    doc.setFillColor(232, 240, 244);
+    doc.roundedRect(margin, y, pageW - margin * 2, boxH, 5, 5, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(40);
+    doc.text("This week's words", margin + 12, y + 16);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    words.forEach((w, i) => {
+      const col = Math.floor(i / perCol);
+      const row = i % perCol;
+      const wx = margin + 16 + col * ((pageW - margin * 2) / colCount);
+      doc.text(`${i + 1}. ${w.word}`, wx, y + 32 + row * 16);
+    });
+    y += boxH + 16;
+
+    // Per-word practice
+    words.forEach((w, i) => {
+      const lineCount = writeTimes > 0 ? 1 : 0;
+      const blockH = 20 + (writeTimes > 0 ? 24 : 0) + 26;
+      if (pdfNeedNewPage(doc, y, blockH, margin)) y = pdfAddPageWithHeader(doc, title, pageW, margin);
+
+      pdfDrawNumberedDot(doc, String(i + 1), margin + 10, y + 6, 9);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(20);
+      doc.text(w.word, margin + 26, y + 10);
+
+      // Write-the-word boxes
+      if (writeTimes > 0) {
+        y += 18;
+        const slotW = (pageW - margin - (margin + 26)) / writeTimes;
+        for (let k = 0; k < writeTimes; k++) {
+          const sx = margin + 26 + k * slotW;
+          doc.setDrawColor(170);
+          doc.setLineWidth(0.5);
+          doc.line(sx, y + 12, sx + slotW - 10, y + 12);
+        }
+        y += 20;
+      } else {
+        y += 14;
+      }
+
+      // Sentence line
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(90);
+      doc.text("Use it in a sentence:", margin + 26, y + 4);
+      doc.setDrawColor(20);
+      doc.setLineWidth(0.7);
+      doc.line(margin + 26, y + 18, pageW - margin, y + 18);
+      if (opts.showAnswers && w.sentence) {
+        doc.setFont("times", "italic");
+        doc.setFontSize(10);
+        doc.setTextColor(140, 30, 30);
+        doc.text(w.sentence.replace(/\*\*/g, ""), margin + 30, y + 14);
+        doc.setTextColor(20);
+      }
+      y += 28;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ============================================================
+   AI TEMPLATE — STORY STARTERS (creative writing prompts) (Gr1, Gr3)
+   Maps to BC E1.7 / E3.8
+============================================================ */
+window.TEMPLATES.story_starters = {
+  id: "story_starters",
+  label: "Story starters (creative writing)",
+  subject: "writing",
+  grades: ["1", "3"],
+  topicHint: "Writing",
+  usesAI: true,
+  acceptsReferences: false,
+  maxTokens: 1800,
+
+  modifiers: [
+    { id: "vibe", type: "select", label: "Story flavor",
+      options: [
+        { value: "any",       label: "Claude picks a fun mix" },
+        { value: "adventure", label: "Adventure" },
+        { value: "funny",     label: "Funny / silly" },
+        { value: "mystery",   label: "Mystery" },
+        { value: "animal",    label: "Animal stories" },
+        { value: "fantasy",   label: "Fantasy / magic" },
+        { value: "everyday",  label: "Everyday life" }
+      ], default: "any" },
+    { id: "count", type: "number", label: "# of prompts", default: 3, min: 1, max: 5 },
+    { id: "linesPerPrompt", type: "select", label: "Writing lines per prompt",
+      options: [
+        { value: "6",  label: "6 lines" },
+        { value: "9",  label: "9 lines" },
+        { value: "12", label: "12 lines (full page each)" }
+      ], default: "9" }
+  ],
+
+  buildPrompt(mods, kid) {
+    const vibeText = {
+      any: "a fun mix of flavors",
+      adventure: "exciting adventures",
+      funny: "silly, funny situations",
+      mystery: "gentle, age-appropriate mysteries to solve",
+      animal: "stories featuring animals",
+      fantasy: "magic and fantasy",
+      everyday: "relatable everyday-life moments"
+    }[mods.vibe] || "a fun mix";
+
+    const interestLine = kid.interests
+      ? `Weave in the child's interests where natural: ${kid.interests}.`
+      : "Use universally appealing kid topics.";
+
+    return `You are a creative-writing prompt generator for a homeschooled ${gradeWord(kid)} child named ${kid.name} (age ${kid.age}).
+
+TASK: Write ${mods.count} story-starter prompts featuring ${vibeText}.
+
+${interestLine}
+
+REQUIREMENTS:
+- Each prompt is 1–3 sentences that set up a scene and stop right before the action, inviting the child to continue the story.
+- Open-ended and imaginative; never a yes/no question.
+- Grade-appropriate vocabulary and ideas. Nothing scary or violent.
+- Optionally include one tiny "Try to use these words:" trio of fun vocabulary words per prompt.
+
+RETURN VALID JSON ONLY (no markdown fences):
+{
+  "title": "Story Starters: <short label>",
+  "instructions": "<one short instruction line>",
+  "prompts": [
+    { "prompt": "<the story starter>", "tryWords": ["word1","word2","word3"] }
+  ],
+  "standards": ["E3.8"]
+}`;
+  },
+
+  parseResponse(text) {
+    const obj = parseAIJSON(text);
+    const prompts = (obj.prompts || []).map(p => ({
+      prompt: typeof p === "string" ? p : (p.prompt || ""),
+      tryWords: (p && p.tryWords) || []
+    })).filter(p => p.prompt);
+    return {
+      title: obj.title || "Story Starters",
+      instructions: obj.instructions || "Pick a story starter and keep the story going. Write neatly!",
+      prompts,
+      standards: obj.standards || ["E3.8"],
+      questions: prompts.map(p => ({ q: p.prompt, answer: "", type: "short_response" }))
+    };
+  },
+
+  mockResponse(mods, kid) {
+    const prompts = [
+      { prompt: "You wake up one morning and your pet can suddenly talk. The very first thing it says is…", tryWords: ["whispered", "surprised", "secret"] },
+      { prompt: "A glowing door appears in the middle of your classroom. When you open it, you see…", tryWords: ["glowing", "tiptoed", "discover"] },
+      { prompt: "You find a treasure map tucked inside an old library book. It leads to…", tryWords: ["ancient", "clue", "journey"] },
+      { prompt: "The school bus takes a wrong turn and drives straight into…", tryWords: ["suddenly", "wobbled", "amazing"] },
+      { prompt: "You build the world's greatest fort. Then something knocks on the door…", tryWords: ["enormous", "brave", "knock"] }
+    ].slice(0, parseInt(mods.count, 10) || 3);
+    return JSON.stringify({
+      title: "Story Starters: Imagine That!",
+      instructions: "Pick a story starter and keep the story going. Write neatly!",
+      prompts,
+      standards: ["E3.8"]
+    });
+  },
+
+  renderPDF(doc, content, mods, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = content.title || "Story Starters";
+    const lines = parseInt(mods.linesPerPrompt, 10) || 9;
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    if (content.instructions) y = pdfDrawInstruction(doc, content.instructions, y, pageW, margin);
+
+    (content.prompts || []).forEach((p, i) => {
+      const promptLines = doc.splitTextToSize(p.prompt, pageW - margin * 2 - 20);
+      const wordsH = (p.tryWords && p.tryWords.length) ? 16 : 0;
+      const blockH = promptLines.length * 15 + wordsH + lines * 20 + 24;
+      if (pdfNeedNewPage(doc, y, Math.min(blockH, pageH - margin * 2), margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+
+      // Prompt in a tinted box
+      const boxH = promptLines.length * 15 + wordsH + 16;
+      doc.setFillColor(255, 248, 235);
+      doc.roundedRect(margin, y, pageW - margin * 2, boxH, 5, 5, "F");
+      pdfDrawNumberedDot(doc, String(i + 1), margin + 14, y + 16, 9);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(30);
+      promptLines.forEach((line, j) => doc.text(line, margin + 30, y + 16 + j * 15));
+      if (p.tryWords && p.tryWords.length) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(10);
+        doc.setTextColor(150, 90, 30);
+        doc.text("Try to use: " + p.tryWords.join(", "), margin + 30, y + 16 + promptLines.length * 15 + 4);
+      }
+      y += boxH + 10;
+
+      // Writing lines
+      doc.setDrawColor(150);
+      doc.setLineWidth(0.5);
+      for (let k = 0; k < lines; k++) {
+        if (pdfNeedNewPage(doc, y, 20, margin)) y = pdfAddPageWithHeader(doc, title, pageW, margin);
+        doc.line(margin, y + 14, pageW - margin, y + 14);
+        y += 20;
+      }
+      y += 10;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);

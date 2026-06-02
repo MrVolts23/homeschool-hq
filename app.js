@@ -1057,6 +1057,115 @@ function contentToAnswers(content, template) {
 }
 
 /* ============================================================
+   RE-TEACH FROM GRADING
+   Takes a graded worksheet + its grading result and generates a
+   fresh, targeted practice worksheet focused on what the kid missed.
+   Produces a generic AI-worksheet object (no templateId) so it
+   renders through the existing question-list preview + PDF path.
+============================================================ */
+async function generateReteachWorksheet(kid, sourceWorksheet, grading) {
+  const prompt = buildReteachPrompt(kid, sourceWorksheet, grading);
+
+  let responseText;
+  if (state.settings.apiKey) {
+    responseText = await callClaudeAPI(prompt, { max_tokens: 2500 });
+  } else {
+    responseText = mockReteachResponse(kid, sourceWorksheet, grading);
+  }
+
+  const parsed = parseWorksheetJSON(responseText);
+  const questions = (parsed.questions || []).map(q => ({
+    q: q.q || q.question || "",
+    answer: q.answer != null ? String(q.answer) : "",
+    type: q.type || "short_response"
+  }));
+
+  return {
+    id: "ws_" + Date.now() + "_" + Math.random().toString(36).slice(2, 7),
+    kidId: kid.id,
+    subject: sourceWorksheet ? sourceWorksheet.subject : state.currentTab,
+    // No templateId → renders via the generic question-list path
+    title: parsed.title || "Practice: Try Again",
+    instructions: parsed.instructions || "Let's practice the tricky ones again. Take your time!",
+    questions,
+    answerKey: questions.map(q => q.answer),
+    standards: parsed.standards || (sourceWorksheet ? sourceWorksheet.standards : []) || [],
+    difficulty: kid.difficulty[sourceWorksheet ? sourceWorksheet.subject : "math"],
+    reteachOf: sourceWorksheet ? sourceWorksheet.id : null,
+    notes: "Re-teach worksheet generated from a graded result.",
+    generatedAt: Date.now()
+  };
+}
+
+function buildReteachPrompt(kid, sourceWorksheet, grading) {
+  const subject = sourceWorksheet ? sourceWorksheet.subject : "this subject";
+
+  // Identify the specific questions the child missed.
+  let missed = [];
+  if (sourceWorksheet && Array.isArray(grading.perQuestion)) {
+    grading.perQuestion.forEach((pq, i) => {
+      const q = sourceWorksheet.questions && sourceWorksheet.questions[i];
+      if (q && pq && pq.correct === false) {
+        missed.push(`"${q.q}" (correct answer: ${q.answer}${pq.kidAnswer ? `; child wrote: ${pq.kidAnswer}` : ""})`);
+      }
+    });
+  }
+  const missedBlock = missed.length
+    ? `The child specifically got these wrong:\n- ${missed.join("\n- ")}\n`
+    : "The child scored below mastery on this worksheet; rebuild practice on the same skills.\n";
+
+  const weakStd = (grading.weakStandards && grading.weakStandards.length)
+    ? `Weak BC standards flagged: ${grading.weakStandards.join(", ")}.`
+    : "";
+
+  const ease = grading.recommendation === "easier"
+    ? "Make this set NOTICEABLY EASIER — smaller numbers / simpler wording / more scaffolding."
+    : "Keep it at the SAME level but approach the skill from a fresh angle (new examples, slightly different phrasing).";
+
+  return `You are a BC-curriculum tutor creating a targeted re-teach worksheet for a homeschooled child who just struggled with some problems.
+
+CHILD: ${kid.name}, age ${kid.age}, ${gradeWord(kid)} level.
+SUBJECT: ${subject}
+ORIGINAL WORKSHEET: ${sourceWorksheet ? sourceWorksheet.title : "(unknown)"}
+SCORE: ${grading.score}%  •  RECOMMENDATION: ${grading.recommendation}
+${weakStd}
+
+${missedBlock}
+GOAL: Generate 6–8 fresh practice questions that rebuild confidence on exactly these skills.
+${ease}
+- Start with the 2 easiest to build a quick win, then increase gently.
+- Use ${kid.name}'s name and interests (${kid.interests || "everyday topics"}) to keep it engaging.
+- Each question must be answerable on paper.
+
+RETURN VALID JSON ONLY (no markdown fences):
+{
+  "title": "Practice Again: <short skill label>",
+  "instructions": "<one warm, short instruction line>",
+  "questions": [
+    { "q": "<question>", "answer": "<correct answer>", "type": "<fill_in|short_response>" }
+  ],
+  "standards": ["<BC standard id>"]
+}`;
+}
+
+function mockReteachResponse(kid, sourceWorksheet, grading) {
+  const name = kid.name || "friend";
+  return JSON.stringify({
+    title: "Practice Again: Tricky Ones",
+    instructions: `Nice try, ${name}! Let's practice these a little more. Take your time.`,
+    questions: [
+      { q: "Warm-up: 6 + 3 = ___", answer: "9", type: "fill_in" },
+      { q: "Warm-up: 10 − 4 = ___", answer: "6", type: "fill_in" },
+      { q: `${name} has 7 marbles and finds 6 more. How many now?`, answer: "13", type: "short_response" },
+      { q: "There are 15 apples. 8 are eaten. How many are left?", answer: "7", type: "short_response" },
+      { q: "Fill in: 9 + ___ = 16", answer: "7", type: "fill_in" },
+      { q: "A box holds 4 crayons. How many crayons in 3 boxes?", answer: "12", type: "short_response" }
+    ],
+    standards: (sourceWorksheet && sourceWorksheet.standards) || ["M3.3"]
+  });
+}
+
+/* ============================================================
    CLAUDE API WRAPPER
    - Real API call if apiKey is set
    - Otherwise returns mock data so the app is fully testable
@@ -1324,7 +1433,69 @@ function renderTemplatePreviewHTML(ws) {
   if (ws.templateId === "combine_sentences") return previewCombineSentences(content, ws.modifiers);
   if (ws.templateId === "describing_words_fill") return previewDescribingFill(content, ws.modifiers);
   if (ws.templateId === "describing_words_choose") return previewDescribingChoose(content, ws.modifiers);
+  if (ws.templateId === "math_word_problems") return previewMathWordProblems(content, ws.modifiers);
+  if (ws.templateId === "spelling_with_sentences") return previewSpelling(content, ws.modifiers);
+  if (ws.templateId === "story_starters") return previewStoryStarters(content, ws.modifiers);
   return "<p class='muted'>Preview not available for this template — but the PDF will render correctly.</p>";
+}
+
+function previewMathWordProblems(content, m) {
+  const showWork = m.showWorkSpace !== false;
+  const items = (content.problems || []).map((p, i) => `
+    <div style="padding: 12px 0; border-bottom: 1px dashed #ddd;">
+      <div style="display:flex; align-items:flex-start; gap:8px;">
+        ${scholasticDotHTML(String(i + 1))}
+        <span style="font-size: 14px;">${escapeHtml(p.problem)}</span>
+      </div>
+      ${showWork ? `<div style="margin: 8px 0 8px 30px; border: 1px solid #bbb; border-radius: 3px; height: 40px; color:#bbb; font-size: 10px; padding: 3px 6px;">work space</div>` : ""}
+      <div style="margin-left: 30px; font-size: 13px;"><strong>Answer:</strong> <span style="display:inline-block; border-bottom: 1.5px solid #222; width: 200px; height: 18px;"></span></div>
+    </div>
+  `).join("");
+  return `
+    ${content.instructions ? `<p style="margin: 0 0 10px;"><em>${escapeHtml(content.instructions)}</em></p>` : ""}
+    ${items}
+  `;
+}
+
+function previewSpelling(content, m) {
+  const words = content.words || [];
+  const writeTimes = parseInt(m.writeWordTimes, 10) || 0;
+  const listHTML = `
+    <div style="background:#e8f0f4; border-radius:6px; padding: 10px 14px; margin-bottom: 14px;">
+      <div style="font-weight:bold; margin-bottom:6px;">This week's words</div>
+      <div style="columns: 2; font-size: 14px;">
+        ${words.map((w, i) => `<div>${i + 1}. ${escapeHtml(w.word)}</div>`).join("")}
+      </div>
+    </div>`;
+  const items = words.map((w, i) => `
+    <div style="padding: 10px 0; border-bottom: 1px dashed #eee;">
+      <div style="display:flex; align-items:center; gap:8px;">${scholasticDotHTML(String(i + 1))}<strong style="font-size:15px;">${escapeHtml(w.word)}</strong></div>
+      ${writeTimes > 0 ? `<div style="display:flex; gap: 12px; margin: 8px 0 8px 30px;">${Array.from({length: writeTimes}).map(() => `<span style="flex:1; border-bottom: 1px solid #aaa; height: 18px;"></span>`).join("")}</div>` : ""}
+      <div style="margin-left: 30px; font-size: 12px; color:#666;">Use it in a sentence:</div>
+      <div style="margin-left: 30px; border-bottom: 1.5px solid #222; height: 20px;"></div>
+    </div>
+  `).join("");
+  return listHTML + items;
+}
+
+function previewStoryStarters(content, m) {
+  const lines = parseInt(m.linesPerPrompt, 10) || 9;
+  const previewLines = Math.min(lines, 5); // keep the on-screen preview compact
+  return (content.prompts || []).map((p, i) => `
+    <div style="margin-bottom: 18px;">
+      <div style="background:#fff8eb; border-radius:6px; padding: 12px 14px; display:flex; gap:10px; align-items:flex-start;">
+        ${scholasticDotHTML(String(i + 1))}
+        <div>
+          <div style="font-size: 14px; font-weight: 600;">${escapeHtml(p.prompt)}</div>
+          ${(p.tryWords && p.tryWords.length) ? `<div style="font-size: 12px; color:#9a5a1e; font-style:italic; margin-top:4px;">Try to use: ${p.tryWords.map(escapeHtml).join(", ")}</div>` : ""}
+        </div>
+      </div>
+      <div style="margin-top: 8px;">
+        ${Array.from({length: previewLines}).map(() => `<div style="border-bottom: 1px solid #bbb; height: 20px;"></div>`).join("")}
+        ${lines > previewLines ? `<div style="font-size: 11px; color:#aaa; text-align:center; margin-top:4px;">…${lines} lines total on the printed page</div>` : ""}
+      </div>
+    </div>
+  `).join("");
 }
 
 /* -------- Scholastic-style previews -------- */
@@ -2126,7 +2297,35 @@ async function runGrading() {
         </div>
       </div>
       <p><strong>Claude's notes:</strong> ${escapeHtml(grading.notes || "—")}</p>
+      ${(worksheet && grading.score < 90) ? `
+        <div style="margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid #eee;">
+          <button class="btn btn-primary" id="reteachBtn">✨ Generate a re-teach worksheet</button>
+          <p class="muted" style="margin-top: 0.4rem;">Builds a fresh practice page targeting exactly what ${state.kids[kidId].name} missed.</p>
+        </div>` : ""}
     `;
+
+    // Wire the re-teach button (only present when a worksheet is linked and score < 90)
+    const reteachBtn = document.getElementById("reteachBtn");
+    if (reteachBtn) {
+      reteachBtn.addEventListener("click", async () => {
+        reteachBtn.disabled = true;
+        reteachBtn.innerHTML = '<span class="spinner"></span> Generating…';
+        try {
+          const kid = state.kids[kidId];
+          const reteach = await generateReteachWorksheet(kid, worksheet, grading);
+          reteach._unsaved = true;
+          closeAllModals();
+          openWorksheetModal(reteach);
+          toast("Re-teach worksheet ready — preview below.", "success");
+        } catch (err) {
+          console.error(err);
+          toast("Re-teach generation failed: " + err.message, "error");
+          reteachBtn.disabled = false;
+          reteachBtn.innerHTML = "✨ Generate a re-teach worksheet";
+        }
+      });
+    }
+
     toast("Marked! Difficulty adjusted.", "success");
     renderContent(); // refresh dashboards/subject pages
   } catch (e) {
