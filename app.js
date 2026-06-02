@@ -2513,19 +2513,166 @@ function labelForState(s) {
 /* ============================================================
    DAILY PLAN TAB
 ============================================================ */
+/* ============================================================
+   PROGRESS SNAPSHOT — single source of truth that the Daily Plan
+   (and anything else) reads to reflect the AI's latest marking.
+============================================================ */
+const SUBJECT_TOPICS = {
+  reading: ["Story", "Reading", "Vocabulary", "Phonics", "Print"],
+  writing: ["Writing", "Handwriting", "Grammar", "Conventions", "Letters"]
+};
+
+function getSubjectStandards(kid, subject) {
+  const curriculum = getCurriculumForKid(kid, subject);
+  if (!curriculum) return [];
+  const items = curriculum.content || [];
+  if (subject === "math") return items;
+  const topics = SUBJECT_TOPICS[subject];
+  return topics ? items.filter(i => topics.includes(i.topic)) : items;
+}
+
+// Gradings carry no subject of their own — resolve it via the worksheet.
+function gradingsForSubject(kid, subject) {
+  return (state.gradings[kid.id] || [])
+    .map(g => {
+      const ws = g.worksheetId ? findWorksheet(g.worksheetId) : null;
+      return Object.assign({}, g, {
+        _subject: ws ? ws.subject : null,
+        _wsTitle: ws ? ws.title : null,
+        _wsStandards: ws ? (ws.standards || []) : []
+      });
+    })
+    .filter(g => g._subject === subject)
+    .sort((a, b) => b.gradedAt - a.gradedAt);
+}
+
+function buildProgressSnapshot(kid) {
+  const subjects = {};
+  ["math", "reading", "writing"].forEach(subject => {
+    const standards = getSubjectStandards(kid, subject);
+    const mastery = { not_yet: 0, emerging: 0, developing: 0, proficient: 0, extending: 0, total: standards.length };
+    standards.forEach(s => {
+      const lvl = kid.mastery[s.id] || "not_yet";
+      if (mastery[lvl] != null) mastery[lvl]++;
+    });
+
+    const gradings = gradingsForSubject(kid, subject);
+    const lastGrading = gradings[0] || null;
+
+    const wsList = (state.worksheets[kid.id] || []).filter(w => w.subject === subject);
+    const lastActivity = wsList.length
+      ? Math.max.apply(null, wsList.map(w => w.generatedAt))
+      : (lastGrading ? lastGrading.gradedAt : null);
+
+    // Prioritise weak standards: recently-flagged first, then in-progress, then untouched.
+    const weakIds = new Set();
+    gradings.slice(0, 3).forEach(g => (g.weakStandards || []).forEach(id => weakIds.add(id)));
+    const order = [];
+    standards.forEach(s => { if (weakIds.has(s.id)) order.push(s); });
+    standards.forEach(s => {
+      const m = kid.mastery[s.id] || "not_yet";
+      if (!order.includes(s) && (m === "emerging" || m === "developing")) order.push(s);
+    });
+    standards.forEach(s => {
+      const m = kid.mastery[s.id] || "not_yet";
+      if (!order.includes(s) && m === "not_yet") order.push(s);
+    });
+    const weakStandards = order.slice(0, 4);
+
+    // Derive a focus from the most recent AI mark.
+    let focus, focusKind;
+    if (lastGrading && (lastGrading.recommendation === "reteach" || lastGrading.recommendation === "easier")) {
+      focusKind = lastGrading.recommendation;
+      const what = lastGrading._wsTitle || (weakStandards[0] && weakStandards[0].text) || "the last topic";
+      focus = `Re-teach "${what}" — last scored ${lastGrading.score}%.`;
+    } else if (lastGrading && lastGrading.recommendation === "harder") {
+      focusKind = "harder";
+      focus = `Ready to advance — aced the last one (${lastGrading.score}%). Push difficulty up.`;
+    } else if (weakStandards.length) {
+      focusKind = "practice";
+      focus = `Work on: ${weakStandards[0].text}.`;
+    } else {
+      focusKind = "maintain";
+      focus = `Strong across the board — keep practicing and extend.`;
+    }
+
+    subjects[subject] = {
+      difficulty: kid.difficulty[subject],
+      mastery,
+      lastGrading,
+      lastActivity,
+      weakStandards,
+      recentWorksheetCount: wsList.length,
+      focus,
+      focusKind
+    };
+  });
+  return subjects;
+}
+
+function masteryBarHTML(mastery) {
+  const segs = [
+    { key: "extending",  color: "#3a8f3a" },
+    { key: "proficient", color: "#6bbf6b" },
+    { key: "developing", color: "#7fb3e0" },
+    { key: "emerging",   color: "#f4c44d" },
+    { key: "not_yet",    color: "#e2e2e2" }
+  ];
+  const total = mastery.total || 1;
+  const bars = segs.map(s => {
+    const pct = (mastery[s.key] / total) * 100;
+    return pct > 0 ? `<div style="width:${pct}%; background:${s.color};" title="${s.key}: ${mastery[s.key]}"></div>` : "";
+  }).join("");
+  const mastered = mastery.proficient + mastery.extending;
+  return `
+    <div style="display:flex; height:10px; border-radius:5px; overflow:hidden; background:#eee; margin:6px 0;">${bars}</div>
+    <div class="muted" style="font-size:0.75rem;">${mastered} of ${mastery.total} standards proficient+</div>
+  `;
+}
+
 function renderDailyPlan(kid) {
+  const snap = buildProgressSnapshot(kid);
+  const subjMeta = { math: "🔢 Math", reading: "📖 Reading", writing: "✏️ Writing" };
+
+  const cards = ["math", "reading", "writing"].map(subject => {
+    const s = snap[subject];
+    const lg = s.lastGrading;
+    const lastLine = lg
+      ? `<span class="score-badge ${lg.score >= 85 ? "score-high" : lg.score >= 65 ? "score-mid" : "score-low"}">${lg.score}%</span> ${difficultyArrow(lg.recommendation)} <span class="muted" style="font-size:0.75rem;">${formatDate(lg.gradedAt)}</span>`
+      : `<span class="muted" style="font-size:0.8rem;">No marked work yet</span>`;
+    return `
+      <div class="card" style="display:flex; flex-direction:column; gap:0.4rem;">
+        <div class="row-between">
+          <strong>${subjMeta[subject]}</strong>
+          <span class="tag tag-accent">Level ${s.difficulty}/10</span>
+        </div>
+        ${masteryBarHTML(s.mastery)}
+        <div class="row-between" style="align-items:center;">${lastLine}</div>
+        <div style="background:#f6f6f4; border-radius:6px; padding:0.5rem 0.7rem; font-size:0.85rem;">
+          <strong>Today's focus:</strong> ${escapeHtml(s.focus)}
+        </div>
+        <button class="btn btn-ghost" data-goto-subject="${subject}" style="align-self:flex-start; font-size:0.8rem; padding:0.3rem 0.6rem;">Make a ${subject} worksheet →</button>
+      </div>
+    `;
+  }).join("");
+
   return `
     <div class="content-header">
       <div>
         <h2>Daily Plan — ${kid.name}</h2>
-        <div class="subtitle">${formatDate(Date.now())} • Auto-generated from current standings</div>
+        <div class="subtitle">${formatDate(Date.now())} • Built from ${kid.name}'s latest marked progress</div>
       </div>
       <button class="btn btn-primary" id="generatePlanBtn">✨ Generate today's plan</button>
     </div>
+
+    <div class="card-title" style="margin-bottom:0.6rem;">📊 Current standing</div>
+    <div class="grid grid-3" style="margin-bottom:1.4rem;">${cards}</div>
+
     <div id="planOutput">
       <div class="empty">
         <div class="empty-icon">📅</div>
-        Tap "Generate today's plan" and Claude will build a 30–60 min lesson plan based on where ${kid.name} is weakest.
+        The cards above update automatically as you mark ${kid.name}'s work.
+        Tap "Generate today's plan" to turn this into a 30–60 min lesson plan.
       </div>
     </div>
   `;
@@ -2533,6 +2680,9 @@ function renderDailyPlan(kid) {
 
 function attachPlanListeners(kid) {
   document.getElementById("generatePlanBtn").addEventListener("click", () => generateDailyPlan(kid));
+  document.querySelectorAll("[data-goto-subject]").forEach(btn => {
+    btn.addEventListener("click", () => setCurrentTab(btn.dataset.gotoSubject));
+  });
 }
 
 async function generateDailyPlan(kid) {
@@ -2540,29 +2690,19 @@ async function generateDailyPlan(kid) {
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner"></span> Planning…';
   try {
-    const weakStandards = findWeakStandards(kid);
-    const prompt = `Build a 30–60 minute homeschool lesson plan for ${kid.name}, age ${kid.age}, ${gradeLabel(kid)}.
-Focus on these BC standards where they're weakest:
-${weakStandards.map(s => "- " + s.id + ": " + s.text).join("\n")}
-
-Difficulty levels: Math ${kid.difficulty.math}, Reading ${kid.difficulty.reading}, Writing ${kid.difficulty.writing}.
-Interests: ${kid.interests || "general"}
-
-Return a friendly plain-text plan with:
-- A warm-up (5 min)
-- 2-3 short focused activities (10-15 min each)
-- A creative/play-based wrap-up
-Include specific materials needed (paper, pencil, blocks, etc).`;
+    const snap = buildProgressSnapshot(kid);
+    const prompt = buildDailyPlanPrompt(kid, snap);
 
     let response;
     if (state.settings.apiKey) {
-      response = await callClaudeAPI(prompt, { max_tokens: 1500 });
+      response = await callClaudeAPI(prompt, { max_tokens: 1600 });
     } else {
-      response = mockDailyPlan(kid, weakStandards);
+      response = mockDailyPlan(kid, snap);
     }
 
     document.getElementById("planOutput").innerHTML = `
       <div class="card">
+        <div class="card-title">📅 Today's plan</div>
         <pre style="white-space: pre-wrap; font-family: inherit; margin: 0;">${escapeHtml(response)}</pre>
       </div>
     `;
@@ -2574,38 +2714,61 @@ Include specific materials needed (paper, pencil, blocks, etc).`;
   }
 }
 
-function findWeakStandards(kid) {
-  const math = window.CURRICULUM.math[kid.gradeKey].content;
-  const ela = window.CURRICULUM.ela[kid.gradeKey].content;
-  const all = [...math, ...ela];
-  const weak = all.filter(s => {
-    const m = kid.mastery[s.id] || "not_yet";
-    return m === "not_yet" || m === "emerging" || m === "developing";
-  });
-  return weak.slice(0, 4); // top 4
+function buildDailyPlanPrompt(kid, snap) {
+  const subjLabel = { math: "Math", reading: "Reading", writing: "Writing" };
+  const lines = ["math", "reading", "writing"].map(subject => {
+    const s = snap[subject];
+    const lg = s.lastGrading;
+    const lastMark = lg
+      ? `last marked ${formatDate(lg.gradedAt)} — scored ${lg.score}%, AI said "${lg.recommendation}"${lg.notes ? ` (${lg.notes})` : ""}`
+      : "no graded work yet";
+    const weak = s.weakStandards.length ? s.weakStandards.map(w => w.text).join("; ") : "none flagged";
+    const mastered = s.mastery.proficient + s.mastery.extending;
+    return `${subjLabel[subject]}: difficulty ${s.difficulty}/10; ${mastered}/${s.mastery.total} standards proficient+; ${lastMark}; weak spots: ${weak}; suggested focus: ${s.focus}`;
+  }).join("\n");
+
+  return `Build a 30–60 minute homeschool lesson plan for ${kid.name}, age ${kid.age}, ${gradeLabel(kid)}.
+Interests: ${kid.interests || "general"}
+
+CURRENT PROGRESS (from the most recent AI marking — let this drive the plan):
+${lines}
+
+PLANNING RULES:
+- Where the AI recommended "reteach" or "easier", spend the main block re-teaching that exact skill at or below the current difficulty, from a fresh angle.
+- Where the AI recommended "harder", advance that subject and stretch them.
+- Otherwise, target the listed weak spots at the current difficulty.
+- Match each activity to ${kid.name}'s difficulty level for that subject.
+
+Return a friendly plain-text plan with:
+- A warm-up (5 min)
+- 2–3 short focused activities (10–15 min each), each naming the subject + the specific skill and difficulty
+- A creative/play-based wrap-up
+- A short "Materials" line (paper, pencil, blocks, coins, etc.)
+Where a worksheet would help, say which app tab/template to use (e.g. "Math → Multiplication facts" or "Reading → Reading passage").`;
 }
 
-function mockDailyPlan(kid, weak) {
-  return `Today's plan for ${kid.name} (mock — add a Claude API key for personalized plans)
+function mockDailyPlan(kid, snap) {
+  const m = snap.math, r = snap.reading, w = snap.writing;
+  return `Today's plan for ${kid.name} (mock — add a Claude API key for fully personalized plans)
 
 🌅 Warm-up (5 min)
-- A few quick mental math questions tailored to ${kid.name}'s level.
+- Quick mental math at Level ${m.difficulty}/10.
 
-📘 Focus block 1: Math (15 min)
-- Generate a worksheet from the Math tab targeting "${weak[0]?.text || "number sense"}".
-- Use blocks or coins to make it concrete.
+📘 Math (15 min) — ${m.focus}
+- ${m.lastGrading && (m.lastGrading.recommendation === "reteach" || m.lastGrading.recommendation === "easier")
+      ? "Use the re-teach flow or generate a fresh worksheet on that skill."
+      : "Generate a worksheet from the Math tab targeting the focus above."}
 
-📖 Focus block 2: Reading (15 min)
-- Read aloud together for 10 min, then ask ${kid.name} to retell the story in their own words.
-- Talk about one new word from the book.
+📖 Reading (15 min) — ${r.focus}
+- Read aloud 10 min, then ${kid.name} retells it. Try Reading → Reading passage for comprehension Qs.
 
-✏️ Focus block 3: Writing (10 min)
-- A short writing task at ${kid.name}'s level — sentence-builders for younger kids, paragraph prompts for older.
+✏️ Writing (10 min) — ${w.focus}
+- A short writing task at Level ${w.difficulty}/10.
 
 🎨 Wrap-up (10 min)
-- Free creative time: drawing, building, dramatic play, or outside.
+- Free creative time: drawing, building, or outside.
 
-Materials: pencil, paper, picture book, optional: blocks or counters.`;
+Materials: pencil, paper, picture book, optional blocks or counters.`;
 }
 
 /* ============================================================
