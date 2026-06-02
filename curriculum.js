@@ -259,6 +259,83 @@ window.CURRICULUM = {
   },
 
   // ============================================================
+  // GEOGRAPHY (added subject — maps, places, Canada & the world)
+  // Not a standalone BC K-3 subject (it lives under Social Studies),
+  // but broken out here so it can be tracked like the others.
+  // ============================================================
+  geography: {
+    K: {
+      grade: "Kindergarten",
+      subject: "Geography",
+      bigIdeas: [
+        "A map is a picture of a place seen from above.",
+        "We can describe where things are using position words.",
+        "The Earth has land and water, and weather changes with the seasons."
+      ],
+      content: [
+        { id: "GK.1", topic: "Community",  text: "My home, family, and the people in my community" },
+        { id: "GK.2", topic: "Maps",       text: "A map shows a place from above (intro to maps)" },
+        { id: "GK.3", topic: "Directions", text: "Position words — up/down, near/far, left/right, beside" },
+        { id: "GK.4", topic: "Earth",      text: "Land and water look different on Earth" },
+        { id: "GK.5", topic: "Nature",     text: "Weather and seasons where I live" }
+      ],
+      competencies: [
+        "Describe where people, places, and things are using everyday words.",
+        "Recognize that a map represents a real place.",
+        "Observe and describe weather and the natural world."
+      ]
+    },
+    "1": {
+      grade: "Grade 1",
+      subject: "Geography",
+      bigIdeas: [
+        "Maps use symbols and a key to show real places.",
+        "The four cardinal directions help us describe where things are.",
+        "We live in a community, in a province, in a country, on a continent."
+      ],
+      content: [
+        { id: "G1.1", topic: "Maps",       text: "Reading simple maps and using a map key/symbols" },
+        { id: "G1.2", topic: "Directions", text: "The four cardinal directions (North, South, East, West)" },
+        { id: "G1.3", topic: "Community",  text: "Places in my community (school, store, park, library)" },
+        { id: "G1.4", topic: "Continents", text: "Earth has continents and oceans (introduction)" },
+        { id: "G1.5", topic: "Canada",     text: "I live in Canada; my province is British Columbia" },
+        { id: "G1.6", topic: "Landforms",  text: "Landforms — mountains, rivers, lakes, forests, beaches" }
+      ],
+      competencies: [
+        "Use a simple map and its key to find places.",
+        "Use cardinal directions to describe location and movement.",
+        "Identify Canada, British Columbia, and the local community on a map."
+      ]
+    },
+    "3": {
+      grade: "Grade 3",
+      subject: "Geography",
+      bigIdeas: [
+        "Maps and globes use keys, compass roses, and grids to locate places.",
+        "Earth's land is organized into continents and its water into oceans.",
+        "Canada is made of provinces and territories, each with a capital.",
+        "Geography — landforms and climate — shapes how and where people live."
+      ],
+      content: [
+        { id: "G3.1", topic: "Maps",        text: "Using a map key, compass rose, and grid to locate places" },
+        { id: "G3.2", topic: "Continents",  text: "The seven continents and where they are" },
+        { id: "G3.3", topic: "Oceans",      text: "The five oceans and where they are" },
+        { id: "G3.4", topic: "Canada",      text: "Provinces and territories of Canada and their capitals" },
+        { id: "G3.5", topic: "BC",          text: "Major regions, cities, and features of British Columbia" },
+        { id: "G3.6", topic: "Landforms",   text: "Landforms — mountains, rivers, plains, coasts, islands" },
+        { id: "G3.7", topic: "Climate",     text: "How climate and landscape differ across regions" },
+        { id: "G3.8", topic: "People",      text: "How geography shapes how and where people live" }
+      ],
+      competencies: [
+        "Locate places using map tools (key, compass rose, grid).",
+        "Name and locate the continents and oceans.",
+        "Identify Canada's provinces/territories and major BC features.",
+        "Explain how landforms and climate affect daily life."
+      ]
+    }
+  },
+
+  // ============================================================
   // BC PROFICIENCY SCALE (used across all subjects for tracking)
   // ============================================================
   proficiencyScale: [

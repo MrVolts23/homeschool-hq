@@ -4549,6 +4549,186 @@ RETURN VALID JSON ONLY (no markdown fences):
 };
 
 /* ============================================================
+   AI TEMPLATE — GEOGRAPHY WORKSHEET (K, Gr1, Gr3)
+   Flexible Q&A geography sheet. Topic-selectable (or custom, so the
+   parent can steer it), grade-calibrated, rendered as a numbered
+   question list (short answer or multiple choice).
+============================================================ */
+window.TEMPLATES.geography_worksheet = {
+  id: "geography_worksheet",
+  label: "Geography worksheet (quiz)",
+  subject: "geography",
+  grades: ["K", "1", "3"],
+  topicHint: "Geography",
+  usesAI: true,
+  acceptsReferences: false,
+  maxTokens: 2500,
+
+  modifiers: [
+    { id: "topic", type: "select", label: "Topic",
+      options: [
+        { value: "auto",        label: "Match the grade (Claude picks)" },
+        { value: "maps",        label: "Maps & directions (compass, keys)" },
+        { value: "continents",  label: "Continents & oceans" },
+        { value: "canada",      label: "Canada — provinces & capitals" },
+        { value: "bc",          label: "British Columbia" },
+        { value: "landforms",   label: "Landforms (mountains, rivers…)" },
+        { value: "community",   label: "My community & the world" },
+        { value: "custom",      label: "Custom topic (type below)" }
+      ], default: "auto" },
+    { id: "customTopic", type: "text", label: "Custom topic (used when 'Custom' is selected)", default: "" },
+    { id: "style", type: "select", label: "Question style",
+      options: [
+        { value: "short", label: "Short answer" },
+        { value: "mc",    label: "Multiple choice" },
+        { value: "mixed", label: "Mixed" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of questions", default: 8, min: 4, max: 14 }
+  ],
+
+  buildPrompt(mods, kid) {
+    const band = {
+      "K": "Kindergarten: very concrete — home, family, community, land vs water, weather/seasons, simple position words. Picture-friendly, 1-step recall.",
+      "1": "Grade 1: simple maps & keys, the 4 cardinal directions, the community, intro to continents/oceans, Canada & BC, basic landforms.",
+      "3": "Grade 3: map tools (key, compass rose, grid), the 7 continents and 5 oceans, Canada's provinces/territories & capitals, BC features, landforms, climate, how geography affects people."
+    }[kid.gradeKey] || "Grade-appropriate geography.";
+
+    const topicText = {
+      auto: "Choose a geography topic appropriate to the grade.",
+      maps: "Focus on maps, map keys/symbols, the compass rose, and directions.",
+      continents: "Focus on the continents and oceans.",
+      canada: "Focus on Canada — its provinces, territories, and capital cities.",
+      bc: "Focus on British Columbia — regions, major cities, and physical features.",
+      landforms: "Focus on landforms — mountains, rivers, lakes, plains, coasts, islands.",
+      community: "Focus on the local community and how it connects to the wider world.",
+      custom: `Focus specifically on: ${(mods.customTopic || "").trim() || "a geography topic suitable for the grade"}.`
+    }[mods.topic] || "Choose a geography topic appropriate to the grade.";
+
+    const styleText = {
+      short: "All questions are short-answer (one word or one sentence).",
+      mc: "All questions are multiple choice with exactly 4 options (a, b, c, d).",
+      mixed: "Mix short-answer and multiple-choice (with 4 options) questions."
+    }[mods.style] || "Mix short-answer and multiple-choice questions.";
+
+    return `You are a geography worksheet generator for a homeschooled child.
+
+CHILD: ${kid.name}, age ${kid.age}, ${gradeWord(kid)} level.
+INTERESTS: ${kid.interests || "(none specified)"}
+
+GRADE CALIBRATION: ${band}
+TOPIC: ${topicText}
+STYLE: ${styleText}
+
+TASK: Write ${mods.count} geography questions with answers.
+
+REQUIREMENTS:
+- Factually correct and age-appropriate.
+- For multiple-choice, provide an "options" array of 4 strings and put the correct one in "answer".
+- For short-answer, leave "options" empty and give the correct "answer".
+- Keep wording simple for the grade.
+
+RETURN VALID JSON ONLY (no markdown fences):
+{
+  "title": "Geography: <short label>",
+  "instructions": "<one short instruction line>",
+  "questions": [
+    { "q": "<question>", "options": ["a","b","c","d"], "answer": "<correct answer>", "type": "multiple_choice" },
+    { "q": "<question>", "options": [], "answer": "<correct answer>", "type": "short_answer" }
+  ],
+  "standards": ["<geography standard id, e.g. G3.2>"]
+}`;
+  },
+
+  parseResponse(text) {
+    const obj = parseAIJSON(text);
+    const questions = (obj.questions || []).map(q => ({
+      q: q.q || q.question || "",
+      options: Array.isArray(q.options) ? q.options : [],
+      answer: q.answer != null ? String(q.answer) : "",
+      type: q.type || (Array.isArray(q.options) && q.options.length ? "multiple_choice" : "short_answer")
+    }));
+    return {
+      title: obj.title || "Geography Worksheet",
+      instructions: obj.instructions || "Answer each question. Circle or write your answer.",
+      questions,
+      standards: obj.standards || []
+    };
+  },
+
+  mockResponse(mods, kid) {
+    return JSON.stringify({
+      title: "Geography: Continents & Oceans",
+      instructions: "Answer each question. Circle the best choice or write your answer on the line.",
+      questions: [
+        { q: "How many continents are there on Earth?", options: ["5", "6", "7", "8"], answer: "7", type: "multiple_choice" },
+        { q: "Which is the largest ocean?", options: ["Atlantic", "Pacific", "Indian", "Arctic"], answer: "Pacific", type: "multiple_choice" },
+        { q: "What continent do we live on?", options: [], answer: "North America", type: "short_answer" },
+        { q: "Which country do you live in?", options: [], answer: "Canada", type: "short_answer" },
+        { q: "Name one ocean that touches Canada.", options: [], answer: "Pacific, Atlantic, or Arctic", type: "short_answer" },
+        { q: "Which direction does a compass needle usually point?", options: ["North", "South", "East", "West"], answer: "North", type: "multiple_choice" },
+        { q: "Antarctica is known for being very…", options: ["hot", "cold", "sandy", "crowded"], answer: "cold", type: "multiple_choice" },
+        { q: "What do we call a drawing of a place from above?", options: [], answer: "A map", type: "short_answer" }
+      ].slice(0, parseInt(mods.count, 10) || 8),
+      standards: ["G3.2", "G3.3"]
+    });
+  },
+
+  renderPDF(doc, content, mods, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = content.title || "Geography Worksheet";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    if (content.instructions) y = pdfDrawInstruction(doc, content.instructions, y, pageW, margin);
+
+    (content.questions || []).forEach((q, i) => {
+      const qLines = doc.splitTextToSize(`${i + 1}. ${q.q}`, pageW - margin * 2 - 16);
+      const hasOpts = q.options && q.options.length;
+      const blockH = qLines.length * 15 + (hasOpts ? q.options.length * 15 + 6 : 26);
+      if (pdfNeedNewPage(doc, y, blockH, margin)) y = pdfAddPageWithHeader(doc, title, pageW, margin);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.setTextColor(20);
+      qLines.forEach((line, j) => doc.text(line, margin, y + 10 + j * 15));
+      y += qLines.length * 15 + 4;
+
+      if (hasOpts) {
+        const letters = ["a", "b", "c", "d", "e", "f"];
+        q.options.forEach((opt, k) => {
+          const isAns = opts.showAnswers && String(opt).trim().toLowerCase() === String(q.answer).trim().toLowerCase();
+          doc.setFont("helvetica", isAns ? "bold" : "normal");
+          doc.setTextColor(isAns ? 180 : 40, isAns ? 30 : 40, isAns ? 30 : 40);
+          doc.setFontSize(11);
+          doc.text(`${isAns ? "● " : "○ "}${letters[k]}) ${opt}`, margin + 18, y + 10);
+          y += 15;
+        });
+        doc.setTextColor(20);
+        y += 8;
+      } else {
+        // short-answer line
+        doc.setDrawColor(20);
+        doc.setLineWidth(0.7);
+        doc.line(margin + 18, y + 14, pageW - margin, y + 14);
+        if (opts.showAnswers && q.answer) {
+          doc.setFont("times", "italic");
+          doc.setFontSize(10);
+          doc.setTextColor(140, 30, 30);
+          doc.text(q.answer, margin + 22, y + 10);
+          doc.setTextColor(20);
+        }
+        y += 24;
+      }
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);

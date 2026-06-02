@@ -17,9 +17,9 @@ const DEFAULT_KIDS = {
     gradeKey: "3",        // BC Grade 3 curriculum
     interests: "",
     notes: "",
-    difficulty: { math: 5, reading: 5, writing: 5 }, // 1–10 per subject
+    difficulty: { math: 5, reading: 5, writing: 5, geography: 5 }, // 1–10 per subject
     mastery: {}, // { standardId: "not_yet" | "emerging" | "developing" | "proficient" | "extending" }
-    references: { math: [], reading: [], writing: [] } // per-subject reference photos
+    references: { math: [], reading: [], writing: [], geography: [] } // per-subject reference photos
   },
   makena: {
     id: "makena",
@@ -28,9 +28,9 @@ const DEFAULT_KIDS = {
     gradeKey: "1",        // BC Grade 1 curriculum
     interests: "",
     notes: "",
-    difficulty: { math: 5, reading: 5, writing: 5 },
+    difficulty: { math: 5, reading: 5, writing: 5, geography: 5 },
     mastery: {},
-    references: { math: [], reading: [], writing: [] }
+    references: { math: [], reading: [], writing: [], geography: [] }
   },
   oakley: {
     id: "oakley",
@@ -39,9 +39,9 @@ const DEFAULT_KIDS = {
     gradeKey: "K",        // BC K + Pre-K bridge
     interests: "",
     notes: "",
-    difficulty: { math: 3, reading: 3, writing: 3 }, // start gentler for the 4yo
+    difficulty: { math: 3, reading: 3, writing: 3, geography: 3 }, // start gentler for the 4yo
     mastery: {},
-    references: { math: [], reading: [], writing: [] }
+    references: { math: [], reading: [], writing: [], geography: [] }
   }
 };
 
@@ -61,7 +61,7 @@ const DEFAULT_STATE = {
 let state = loadState();
 
 // Non-persistent UI state: which template is selected in each subject tab
-const uiTemplate = { math: null, reading: null, writing: null };
+const uiTemplate = { math: null, reading: null, writing: null, geography: null };
 
 /* ------------------------------------------------------------
    STORAGE
@@ -76,9 +76,11 @@ function loadState() {
     // Migrate kids to add new fields (references, etc.)
     Object.keys(merged.kids || {}).forEach(kidId => {
       const kid = merged.kids[kidId];
-      if (!kid.references) kid.references = { math: [], reading: [], writing: [] };
-      ["math", "reading", "writing"].forEach(s => {
+      if (!kid.references) kid.references = {};
+      if (!kid.difficulty) kid.difficulty = {};
+      ["math", "reading", "writing", "geography"].forEach(s => {
         if (!kid.references[s]) kid.references[s] = [];
+        if (kid.difficulty[s] == null) kid.difficulty[s] = kid.gradeKey === "K" && kid.age < 5 ? 3 : 5;
       });
     });
     return merged;
@@ -105,6 +107,7 @@ const TABS = [
   { id: "math",        label: "Math",        icon: "🔢", section: "Subjects" },
   { id: "reading",     label: "Reading",     icon: "📖", section: "" },
   { id: "writing",     label: "Writing",     icon: "✏️", section: "" },
+  { id: "geography",   label: "Geography",   icon: "🌍", section: "" },
   { id: "standards",   label: "Standards",   icon: "📚", section: "Track" },
   { id: "plan",        label: "Daily Plan",  icon: "📅", section: "" },
   { id: "reading-log", label: "Reading Log", icon: "📕", section: "" },
@@ -227,6 +230,7 @@ function renderContent() {
     case "math":        c.innerHTML = renderSubject(kid, "math"); attachSubjectListeners(kid, "math"); break;
     case "reading":     c.innerHTML = renderSubject(kid, "reading"); attachSubjectListeners(kid, "reading"); break;
     case "writing":     c.innerHTML = renderSubject(kid, "writing"); attachSubjectListeners(kid, "writing"); break;
+    case "geography":   c.innerHTML = renderSubject(kid, "geography"); attachSubjectListeners(kid, "geography"); break;
     case "standards":   c.innerHTML = renderStandards(kid); attachStandardsListeners(kid); break;
     case "plan":        c.innerHTML = renderDailyPlan(kid); attachPlanListeners(kid); break;
     case "reading-log": c.innerHTML = renderReadingLog(kid); attachReadingLogListeners(kid); break;
@@ -302,7 +306,7 @@ function achievementsHTML(kid) {
 }
 
 function subjectFeedbackHTML(kid, subject, snap) {
-  const meta = { math: "🔢 Math", reading: "📖 Reading", writing: "✏️ Writing" };
+  const meta = SUBJECT_META;
   const s = snap[subject];
   const grs = gradingsForSubject(kid, subject);
   const last = grs[0], prev = grs[1];
@@ -375,8 +379,8 @@ function renderDashboard(kid) {
     <div style="margin-bottom:1.2rem;">${achievementsHTML(kid)}</div>
 
     <div class="card-title" style="margin-bottom:0.6rem;">📊 How each subject is going</div>
-    <div class="grid grid-3" style="margin-bottom:1.4rem;">
-      ${["math", "reading", "writing"].map(subj => subjectFeedbackHTML(kid, subj, snap)).join("")}
+    <div class="grid grid-2" style="margin-bottom:1.4rem;">
+      ${SUBJECTS.map(subj => subjectFeedbackHTML(kid, subj, snap)).join("")}
     </div>
 
     <div class="grid grid-2">
@@ -896,16 +900,17 @@ function resizeImageToDataUrl(file, maxDim, quality) {
 }
 
 function subjectLabel(s) {
-  return s === "math" ? "Math" : s === "reading" ? "Reading" : "Writing";
+  return s === "math" ? "Math" : s === "reading" ? "Reading" : s === "geography" ? "Geography" : "Writing";
 }
 
 function getCurriculumForKid(kid, subject) {
   if (subject === "math") return window.CURRICULUM.math[kid.gradeKey];
+  if (subject === "geography") return window.CURRICULUM.geography[kid.gradeKey];
   return window.CURRICULUM.ela[kid.gradeKey]; // reading + writing share ELA
 }
 
 function getTopicsForSubject(curriculum, subject) {
-  // Filter ELA content into reading vs writing buckets
+  // Filter ELA content into reading vs writing buckets; math/geography use all.
   const items = curriculum.content;
   let filtered;
   if (subject === "reading") {
@@ -1526,7 +1531,27 @@ function renderTemplatePreviewHTML(ws) {
   if (ws.templateId === "math_word_problems") return previewMathWordProblems(content, ws.modifiers);
   if (ws.templateId === "spelling_with_sentences") return previewSpelling(content, ws.modifiers);
   if (ws.templateId === "story_starters") return previewStoryStarters(content, ws.modifiers);
+  if (ws.templateId === "geography_worksheet") return previewGeography(content, ws.modifiers);
   return "<p class='muted'>Preview not available for this template — but the PDF will render correctly.</p>";
+}
+
+function previewGeography(content, m) {
+  const letters = ["a", "b", "c", "d", "e", "f"];
+  const items = (content.questions || []).map((q, i) => {
+    const hasOpts = q.options && q.options.length;
+    const body = hasOpts
+      ? `<div style="margin: 6px 0 0 26px;">${q.options.map((o, k) => `<div style="font-size:13px; padding:2px 0;">○ ${letters[k]}) ${escapeHtml(o)}</div>`).join("")}</div>`
+      : `<div style="margin: 6px 0 0 26px; border-bottom: 1.5px solid #222; height: 20px; width: 70%;"></div>`;
+    return `
+      <div style="padding: 10px 0; border-bottom: 1px dashed #ddd;">
+        <div style="font-size: 14px;"><strong>${i + 1}.</strong> ${escapeHtml(q.q)}</div>
+        ${body}
+      </div>`;
+  }).join("");
+  return `
+    ${content.instructions ? `<p style="margin: 0 0 10px;"><em>${escapeHtml(content.instructions)}</em></p>` : ""}
+    ${items}
+  `;
 }
 
 function previewMathWordProblems(content, m) {
@@ -2650,6 +2675,8 @@ function labelForState(s) {
    PROGRESS SNAPSHOT — single source of truth that the Daily Plan
    (and anything else) reads to reflect the AI's latest marking.
 ============================================================ */
+const SUBJECTS = ["math", "reading", "writing", "geography"];
+const SUBJECT_META = { math: "🔢 Math", reading: "📖 Reading", writing: "✏️ Writing", geography: "🌍 Geography" };
 const SUBJECT_TOPICS = {
   reading: ["Story", "Reading", "Vocabulary", "Phonics", "Print"],
   writing: ["Writing", "Handwriting", "Grammar", "Conventions", "Letters"]
@@ -2681,7 +2708,7 @@ function gradingsForSubject(kid, subject) {
 
 function buildProgressSnapshot(kid) {
   const subjects = {};
-  ["math", "reading", "writing"].forEach(subject => {
+  SUBJECTS.forEach(subject => {
     const standards = getSubjectStandards(kid, subject);
     const mastery = { not_yet: 0, emerging: 0, developing: 0, proficient: 0, extending: 0, total: standards.length };
     standards.forEach(s => {
@@ -2763,28 +2790,85 @@ function masteryBarHTML(mastery) {
   `;
 }
 
+// Pick the single best-fit template for a subject given the kid's grade + current focus.
+function recommendTemplateForSubject(kid, subject, s) {
+  const avail = window.getTemplatesForSubjectGrade(subject, kid.gradeKey);
+  if (!avail.length) return null;
+  const availIds = new Set(avail.map(t => t.id));
+  const weakText = ((s.weakStandards[0] && s.weakStandards[0].text) || "").toLowerCase();
+
+  const rules = [
+    [/multipl|divis|times|equal groups/, "multiplication_facts"],
+    [/fraction/, "fractions_visual"],
+    [/time|clock|hour/, "time_telling"],
+    [/place value|expanded|hundreds|tens and ones/, "place_value_expanded"],
+    [/order|least to greatest|compare/, "number_order"],
+    [/pattern/, "ab_patterns"],
+    [/equalit|equation|balance/, "balance_equations"],
+    [/ways to make|make 5|make 10/, "ways_to_make"],
+    [/count|number concepts to 10/, "count_to_10"],
+    [/spell|word famil|vocabulary/, "spelling_with_sentences"],
+    [/handwrit|printing|letter formation|legible/, "tracing_words"],
+    [/story|sentence|writing process|paragraph/, "story_starters"],
+    [/passage|comprehension|elements of story|main idea/, "reading_passage_gr3"],
+    [/sight word|phonics|decod|rhym/, "sight_words_practice"],
+    [/add|subtract/, subject === "math" ? "vertical_arithmetic" : null]
+  ];
+  for (const [re, id] of rules) {
+    if (id && re.test(weakText) && availIds.has(id)) return window.TEMPLATES[id];
+  }
+
+  const pref = {
+    math: ["multiplication_facts", "vertical_arithmetic", "place_value_expanded", "number_order", "balance_equations", "add_subtract_10", "ways_to_make", "ab_patterns", "count_to_10", "fractions_visual", "time_telling", "math_word_problems"],
+    reading: ["reading_passage_gr3", "sight_words_practice"],
+    writing: ["spelling_with_sentences", "story_starters", "tracing_words", "tracing_letters_numbers", "capitalize_questions", "combine_sentences", "story_middle_end", "describing_words_fill", "describing_words_choose"],
+    geography: ["geography_worksheet"]
+  }[subject] || [];
+  const byPref = pref.find(id => availIds.has(id));
+  return window.TEMPLATES[byPref] || avail[0];
+}
+
 function renderDailyPlan(kid) {
   const snap = buildProgressSnapshot(kid);
-  const subjMeta = { math: "🔢 Math", reading: "📖 Reading", writing: "✏️ Writing" };
 
-  const cards = ["math", "reading", "writing"].map(subject => {
+  const recs = SUBJECTS.map(subject => {
+    const s = snap[subject];
+    const tmpl = recommendTemplateForSubject(kid, subject, s);
+    if (!tmpl) return "";
+    const lg = s.lastGrading;
+    let reason;
+    if (s.focusKind === "reteach" || s.focusKind === "easier") {
+      reason = `Re-teach — last scored ${lg.score}%. ${tmpl.usesAI ? "A fresh, slightly easier set." : "A fresh set on this skill."}`;
+    } else if (s.focusKind === "harder") {
+      reason = `Aced it (${lg.score}%) — level up with a tougher set.`;
+    } else if (s.weakStandards[0]) {
+      reason = `Practice: ${s.weakStandards[0].text}.`;
+    } else {
+      reason = "Quick review to stay sharp.";
+    }
+    return `
+      <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:0.8rem;">
+        <div style="min-width:0;">
+          <div><strong>${SUBJECT_META[subject]}</strong> <span class="tag tag-accent" style="margin-left:6px;">Lvl ${s.difficulty}</span></div>
+          <div style="margin-top:5px;">📄 <strong>${escapeHtml(tmpl.label)}</strong>${tmpl.usesAI ? " ✨" : ""}</div>
+          <div class="muted" style="font-size:0.8rem; margin-top:3px;">${escapeHtml(reason)}</div>
+        </div>
+        <button class="btn btn-primary" data-plan-generate data-subject="${subject}" data-template="${tmpl.id}" style="white-space:nowrap;">Generate this →</button>
+      </div>
+    `;
+  }).join("");
+
+  const standing = SUBJECTS.map(subject => {
     const s = snap[subject];
     const lg = s.lastGrading;
     const lastLine = lg
-      ? `<span class="score-badge ${lg.score >= 85 ? "score-high" : lg.score >= 65 ? "score-mid" : "score-low"}">${lg.score}%</span> ${difficultyArrow(lg.recommendation)} <span class="muted" style="font-size:0.75rem;">${formatDate(lg.gradedAt)}</span>`
-      : `<span class="muted" style="font-size:0.8rem;">No marked work yet</span>`;
+      ? `<span class="score-badge ${lg.score >= 85 ? "score-high" : lg.score >= 65 ? "score-mid" : "score-low"}">${lg.score}%</span> ${difficultyArrow(lg.recommendation)}`
+      : `<span class="muted" style="font-size:0.78rem;">no marks yet</span>`;
     return `
-      <div class="card" style="display:flex; flex-direction:column; gap:0.4rem;">
-        <div class="row-between">
-          <strong>${subjMeta[subject]}</strong>
-          <span class="tag tag-accent">Level ${s.difficulty}/10</span>
-        </div>
+      <div class="card" style="display:flex; flex-direction:column; gap:0.35rem;">
+        <div class="row-between"><strong>${SUBJECT_META[subject]}</strong><span class="tag tag-accent">Lvl ${s.difficulty}/10</span></div>
         ${masteryBarHTML(s.mastery)}
         <div class="row-between" style="align-items:center;">${lastLine}</div>
-        <div style="background:#f6f6f4; border-radius:6px; padding:0.5rem 0.7rem; font-size:0.85rem;">
-          <strong>Today's focus:</strong> ${escapeHtml(s.focus)}
-        </div>
-        <button class="btn btn-ghost" data-goto-subject="${subject}" style="align-self:flex-start; font-size:0.8rem; padding:0.3rem 0.6rem;">Make a ${subject} worksheet →</button>
       </div>
     `;
   }).join("");
@@ -2793,115 +2877,33 @@ function renderDailyPlan(kid) {
     <div class="content-header">
       <div>
         <h2>Daily Plan — ${kid.name}</h2>
-        <div class="subtitle">${formatDate(Date.now())} • Built from ${kid.name}'s latest marked progress</div>
+        <div class="subtitle">${formatDate(Date.now())} • Suggested from ${kid.name}'s latest progress</div>
       </div>
-      <button class="btn btn-primary" id="generatePlanBtn">✨ Generate today's plan</button>
     </div>
+
+    <div class="card-title" style="margin-bottom:0.6rem;">🎯 Today's worksheets — tap to generate</div>
+    <div class="grid grid-2" style="margin-bottom:1.4rem;">${recs}</div>
 
     <div class="card-title" style="margin-bottom:0.6rem;">📊 Current standing</div>
-    <div class="grid grid-3" style="margin-bottom:1.4rem;">${cards}</div>
-
-    <div id="planOutput">
-      <div class="empty">
-        <div class="empty-icon">📅</div>
-        The cards above update automatically as you mark ${kid.name}'s work.
-        Tap "Generate today's plan" to turn this into a 30–60 min lesson plan.
-      </div>
-    </div>
+    <div class="grid grid-2">${standing}</div>
   `;
 }
 
 function attachPlanListeners(kid) {
-  document.getElementById("generatePlanBtn").addEventListener("click", () => generateDailyPlan(kid));
+  document.querySelectorAll("[data-plan-generate]").forEach(btn => {
+    btn.addEventListener("click", () => goGenerateFromPlan(btn.dataset.subject, btn.dataset.template));
+  });
   document.querySelectorAll("[data-goto-subject]").forEach(btn => {
     btn.addEventListener("click", () => setCurrentTab(btn.dataset.gotoSubject));
   });
 }
 
-async function generateDailyPlan(kid) {
-  const btn = document.getElementById("generatePlanBtn");
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner"></span> Planning…';
-  try {
-    const snap = buildProgressSnapshot(kid);
-    const prompt = buildDailyPlanPrompt(kid, snap);
-
-    let response;
-    if (state.settings.apiKey) {
-      response = await callClaudeAPI(prompt, { max_tokens: 1600 });
-    } else {
-      response = mockDailyPlan(kid, snap);
-    }
-
-    document.getElementById("planOutput").innerHTML = `
-      <div class="card">
-        <div class="card-title">📅 Today's plan</div>
-        <pre style="white-space: pre-wrap; font-family: inherit; margin: 0;">${escapeHtml(response)}</pre>
-      </div>
-    `;
-  } catch (e) {
-    toast("Plan generation failed: " + e.message, "error");
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = "✨ Generate today's plan";
-  }
-}
-
-function buildDailyPlanPrompt(kid, snap) {
-  const subjLabel = { math: "Math", reading: "Reading", writing: "Writing" };
-  const lines = ["math", "reading", "writing"].map(subject => {
-    const s = snap[subject];
-    const lg = s.lastGrading;
-    const lastMark = lg
-      ? `last marked ${formatDate(lg.gradedAt)} — scored ${lg.score}%, AI said "${lg.recommendation}"${lg.notes ? ` (${lg.notes})` : ""}`
-      : "no graded work yet";
-    const weak = s.weakStandards.length ? s.weakStandards.map(w => w.text).join("; ") : "none flagged";
-    const mastered = s.mastery.proficient + s.mastery.extending;
-    return `${subjLabel[subject]}: difficulty ${s.difficulty}/10; ${mastered}/${s.mastery.total} standards proficient+; ${lastMark}; weak spots: ${weak}; suggested focus: ${s.focus}`;
-  }).join("\n");
-
-  return `Build a 30–60 minute homeschool lesson plan for ${kid.name}, age ${kid.age}, ${gradeLabel(kid)}.
-Interests: ${kid.interests || "general"}
-
-CURRENT PROGRESS (from the most recent AI marking — let this drive the plan):
-${lines}
-
-PLANNING RULES:
-- Where the AI recommended "reteach" or "easier", spend the main block re-teaching that exact skill at or below the current difficulty, from a fresh angle.
-- Where the AI recommended "harder", advance that subject and stretch them.
-- Otherwise, target the listed weak spots at the current difficulty.
-- Match each activity to ${kid.name}'s difficulty level for that subject.
-
-Return a friendly plain-text plan with:
-- A warm-up (5 min)
-- 2–3 short focused activities (10–15 min each), each naming the subject + the specific skill and difficulty
-- A creative/play-based wrap-up
-- A short "Materials" line (paper, pencil, blocks, coins, etc.)
-Where a worksheet would help, say which app tab/template to use (e.g. "Math → Multiplication facts" or "Reading → Reading passage").`;
-}
-
-function mockDailyPlan(kid, snap) {
-  const m = snap.math, r = snap.reading, w = snap.writing;
-  return `Today's plan for ${kid.name} (mock — add a Claude API key for fully personalized plans)
-
-🌅 Warm-up (5 min)
-- Quick mental math at Level ${m.difficulty}/10.
-
-📘 Math (15 min) — ${m.focus}
-- ${m.lastGrading && (m.lastGrading.recommendation === "reteach" || m.lastGrading.recommendation === "easier")
-      ? "Use the re-teach flow or generate a fresh worksheet on that skill."
-      : "Generate a worksheet from the Math tab targeting the focus above."}
-
-📖 Reading (15 min) — ${r.focus}
-- Read aloud 10 min, then ${kid.name} retells it. Try Reading → Reading passage for comprehension Qs.
-
-✏️ Writing (10 min) — ${w.focus}
-- A short writing task at Level ${w.difficulty}/10.
-
-🎨 Wrap-up (10 min)
-- Free creative time: drawing, building, or outside.
-
-Materials: pencil, paper, picture book, optional blocks or counters.`;
+// Jump to the subject tab with the recommended template preselected, then generate it.
+function goGenerateFromPlan(subject, templateId) {
+  uiTemplate[subject] = templateId;
+  setCurrentTab(subject); // re-renders the subject tab with the template chosen
+  const kid = state.kids[state.currentKidId];
+  generateWorksheet(kid, subject);
 }
 
 /* ============================================================
