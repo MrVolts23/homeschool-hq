@@ -95,6 +95,97 @@ function pdfStampFooters(doc, kid, pageW, pageH, margin) {
 }
 
 /* ============================================================
+   SCHOLASTIC-STYLE HELPERS
+   Replicates the visual language of Scholastic Success workbooks:
+   - Purple banner across top with category label in white
+   - Large teal title
+   - Tinted lavender hint box on the right
+   - Orange/coral numbered dot circles next to each item
+============================================================ */
+const SCHOLASTIC_PURPLE = [76, 47, 110];
+const SCHOLASTIC_TEAL = [33, 130, 130];
+const SCHOLASTIC_HINT_BG = [232, 226, 240];
+const SCHOLASTIC_ORANGE = [231, 105, 56];
+
+function pdfDrawScholasticHeader(doc, categoryLabel, title, pageW, margin) {
+  // Purple banner across full width
+  const bannerH = 36;
+  doc.setFillColor(...SCHOLASTIC_PURPLE);
+  doc.rect(0, 0, pageW, bannerH, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  doc.text(categoryLabel, margin, 22);
+
+  // Big teal title
+  let y = bannerH + 30;
+  doc.setTextColor(...SCHOLASTIC_TEAL);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(24);
+  doc.text(title, margin, y);
+  doc.setTextColor(20, 20, 20);
+  return y + 14;
+}
+
+// Side hint box positioned to the right of the title area.
+// Returns the y at the bottom of the hint box so caller can align.
+function pdfDrawSideHintBox(doc, lines, x, y, w, lineH) {
+  lineH = lineH || 13;
+  const h = lines.length * lineH + 16;
+  doc.setFillColor(...SCHOLASTIC_HINT_BG);
+  doc.roundedRect(x, y, w, h, 6, 6, "F");
+  doc.setTextColor(40, 40, 40);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10);
+  lines.forEach((line, i) => {
+    if (line && line.bold) {
+      doc.setFont("helvetica", "bold");
+      doc.text(line.text, x + 10, y + 14 + i * lineH);
+      doc.setFont("helvetica", "normal");
+    } else {
+      doc.text(typeof line === "string" ? line : line.text, x + 10, y + 14 + i * lineH);
+    }
+  });
+  return y + h;
+}
+
+function pdfDrawNumberedDot(doc, label, cx, cy, r, color) {
+  r = r || 9;
+  doc.setFillColor(...(color || SCHOLASTIC_ORANGE));
+  doc.circle(cx, cy, r, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(label.length > 1 ? 9 : 11);
+  doc.text(label, cx, cy + 4, { align: "center" });
+  doc.setTextColor(20, 20, 20);
+}
+
+// Pick N items from an array using a Fisher-Yates style approach.
+// Returns up to N items, even if the source is shorter (no padding).
+function pickItems(source, n) {
+  const arr = [...source];
+  const out = [];
+  while (out.length < n && arr.length > 0) {
+    const idx = Math.floor(Math.random() * arr.length);
+    out.push(arr.splice(idx, 1)[0]);
+  }
+  return out;
+}
+
+function pickThemeKey(themes, requestedTheme) {
+  if (requestedTheme && requestedTheme !== "random" && themes[requestedTheme]) return requestedTheme;
+  const keys = Object.keys(themes);
+  return keys[Math.floor(Math.random() * keys.length)];
+}
+
+// Apply capital first letter + question mark to a lowercase question.
+function fixQuestionCase(q) {
+  const trimmed = q.replace(/[?.\s]+$/, "");
+  const fixed = trimmed.charAt(0).toUpperCase() + trimmed.slice(1) + "?";
+  return fixed;
+}
+
+/* ============================================================
    TEMPLATE 1 — VERTICAL ARITHMETIC (stacked +/-, regrouping)
    Covers:
      - Image 1: Subtracting Three-Digit Numbers (Borrowing)
@@ -2808,6 +2899,975 @@ RETURN VALID JSON ONLY (no markdown fences, no commentary):
     pdfStampFooters(doc, kid, pageW, pageH, margin);
   }
 };
+
+/* ============================================================
+   WRITING CONTENT BANKS
+   Themed item sets used by the Scholastic-style writing templates.
+   Each template picks one theme per generation so the worksheet
+   isn't identical every time.
+============================================================ */
+window.WRITING_BANKS = {
+  // Theme banks for capitalize_questions
+  question_themes: {
+    mother_goose: {
+      label: "Ask Mother Goose",
+      items: [
+        "where is the king's castle",
+        "who helped Humpty Dumpty",
+        "why did the cow jump over the moon",
+        "will the frog become a prince",
+        "could the three mice see",
+        "what did the giant find at the top of the beanstalk",
+        "who blew down the pig's house",
+        "how did Cinderella lose her shoe",
+        "when will the sleeping princess wake up",
+        "why is Goldilocks afraid of bears"
+      ]
+    },
+    animals: {
+      label: "All About Animals",
+      items: [
+        "where do polar bears live",
+        "what do pandas eat for breakfast",
+        "how do bats find their way in the dark",
+        "why do owls hunt at night",
+        "when do salmon swim upstream",
+        "could a turtle outrun a hare",
+        "will the kitten learn to climb",
+        "who taught the bear cubs to fish",
+        "how many spots does a leopard have"
+      ]
+    },
+    space: {
+      label: "Out of This World",
+      items: [
+        "how many moons does Jupiter have",
+        "where does the sun go at night",
+        "why are stars so far away",
+        "could humans live on Mars",
+        "will we ever visit Pluto",
+        "what is at the center of a black hole",
+        "when will the next eclipse happen",
+        "who was the first person on the Moon",
+        "how cold is it in outer space"
+      ]
+    },
+    sports: {
+      label: "Game On!",
+      items: [
+        "could the volleyball team win the gold",
+        "what time does the soccer game start",
+        "why did the coach call a timeout",
+        "will our team make the playoffs",
+        "when do practice drills end",
+        "how many points do we need to win",
+        "who scored the last goal",
+        "where will the championship be held"
+      ]
+    },
+    nature: {
+      label: "Out in Nature",
+      items: [
+        "why are the leaves turning red",
+        "could a storm reach us by morning",
+        "where does the river start",
+        "what makes the wind blow",
+        "when will the bears come out of their dens",
+        "how high can an eagle fly",
+        "why does the moon change shape",
+        "who left these tracks in the mud"
+      ]
+    }
+  },
+
+  // Theme banks for story_middle_end (each item = one beginning sentence)
+  story_themes: {
+    parade: {
+      label: "Stories on Parade",
+      items: [
+        "During the parade, a big balloon got loose in the wind.",
+        "Five jugglers jumped out of a purple bus.",
+        "A group of horses stopped right in front of us.",
+        "Some veterans rode by on shiny motorcycles.",
+        "Three clowns started juggling apples and oranges."
+      ]
+    },
+    forest: {
+      label: "Into the Forest",
+      items: [
+        "Something rustled in the bushes behind us.",
+        "A red squirrel dropped an acorn right on my head.",
+        "We followed a tiny stream until it got bigger.",
+        "The wind picked up and the tall trees began to sway.",
+        "A pair of bright eyes blinked at us from inside a hollow log."
+      ]
+    },
+    weather_day: {
+      label: "A Wild Weather Day",
+      items: [
+        "The sky turned dark green in the middle of the afternoon.",
+        "Hailstones the size of marbles bounced off the roof.",
+        "A rainbow appeared right over our house.",
+        "The wind blew my hat clear across the yard.",
+        "Snowflakes started falling, even though it was April."
+      ]
+    },
+    kitchen: {
+      label: "Trouble in the Kitchen",
+      items: [
+        "Mom was making pancakes when the doorbell rang.",
+        "The blender exploded with strawberries inside.",
+        "I dropped the eggs on the way to the bowl.",
+        "Something started smelling really good in the oven.",
+        "Our cat jumped onto the counter and stared at the fish."
+      ]
+    },
+    school_day: {
+      label: "A Day at School",
+      items: [
+        "The fire drill bell rang right in the middle of math.",
+        "Our class found a baby bird in the playground.",
+        "Someone left the gym door wide open in the rain.",
+        "Our teacher came in wearing a giant hat.",
+        "The whole gym went dark in the middle of dodgeball."
+      ]
+    }
+  },
+
+  // Theme banks for combine_sentences — each item: [s1, s2, keyword, modelCombined]
+  combine_themes: {
+    gardening: {
+      label: "Great Gardening Tips",
+      items: [
+        ["Fill a cup with water.", "Add some flower seeds.", "and", "Fill a cup with water and add some flower seeds."],
+        ["This will soften the seeds.", "They are hard.", "because", "This will soften the seeds because they are hard."],
+        ["Fill another cup with dirt.", "The seeds soak in water.", "while", "Fill another cup with dirt while the seeds soak in water."],
+        ["Bury the seeds in the cup.", "The dirt covers them.", "until", "Bury the seeds in the cup until the dirt covers them."],
+        ["Add water to the plant.", "Do not add too much.", "but", "Add water to the plant, but do not add too much."],
+        ["Set the cup in the sun.", "The plant will grow.", "so", "Set the cup in the sun so the plant will grow."]
+      ]
+    },
+    cooking: {
+      label: "Kitchen Helpers",
+      items: [
+        ["Wash the apples.", "Cut them into slices.", "and", "Wash the apples and cut them into slices."],
+        ["The soup smells great.", "Mom is making it.", "because", "The soup smells great because Mom is making it."],
+        ["Stir the batter.", "The oven heats up.", "while", "Stir the batter while the oven heats up."],
+        ["Keep mixing the dough.", "It is smooth.", "until", "Keep mixing the dough until it is smooth."],
+        ["I love hot cocoa.", "Mine had too much sugar.", "but", "I love hot cocoa, but mine had too much sugar."],
+        ["The cookies are done.", "We can eat them.", "so", "The cookies are done, so we can eat them."]
+      ]
+    },
+    animal_facts: {
+      label: "Did You Know? — Animals",
+      items: [
+        ["Bears have thick fur.", "They have lots of fat.", "and", "Bears have thick fur and they have lots of fat."],
+        ["Owls hunt at night.", "Their big eyes can see in the dark.", "because", "Owls hunt at night because their big eyes can see in the dark."],
+        ["Salmon swim upstream.", "Bears wait by the river.", "while", "Salmon swim upstream while bears wait by the river."],
+        ["Hummingbirds flap their wings.", "They look like tiny blurs.", "until", "Hummingbirds flap their wings until they look like tiny blurs."],
+        ["Foxes are quick.", "Rabbits are quicker.", "but", "Foxes are quick, but rabbits are quicker."],
+        ["Sea otters hold hands.", "They will not drift apart.", "so", "Sea otters hold hands so they will not drift apart."]
+      ]
+    },
+    weather: {
+      label: "Watching the Weather",
+      items: [
+        ["The sky is bright blue.", "The sun feels warm.", "and", "The sky is bright blue and the sun feels warm."],
+        ["I grabbed my umbrella.", "The clouds looked dark.", "because", "I grabbed my umbrella because the clouds looked dark."],
+        ["We waited inside.", "The thunder rolled away.", "while", "We waited inside while the thunder rolled away."],
+        ["The rain kept falling.", "the streets had puddles.", "until", "The rain kept falling until the streets had puddles."],
+        ["I wanted to play outside.", "it was way too windy.", "but", "I wanted to play outside, but it was way too windy."],
+        ["The driveway was icy.", "Dad sprinkled salt on it.", "so", "The driveway was icy, so Dad sprinkled salt on it."]
+      ]
+    }
+  },
+
+  // Theme banks for describing_words_fill — each item: [sentence with ___, sample answer]
+  describing_fill_themes: {
+    its_in_the_bag: {
+      label: "It's in the Bag",
+      items: [
+        ["My friend's ___ dog has fleas!", "scratchy"],
+        ["The ___ popcorn is in the big bowl.", "buttery"],
+        ["How did the ___ worm get on the sidewalk?", "wiggly"],
+        ["The ___ ocean waves crashed against the rocks.", "huge"],
+        ["The ___ ball broke a window at school!", "bouncy"],
+        ["My ___ skin itched from poison ivy.", "red"],
+        ["The two ___ squirrels chased each other up the tree.", "fluffy"],
+        ["The ___ sand felt good on my feet.", "warm"],
+        ["Are the ___ apples ready to be picked?", "shiny"],
+        ["The ___ ball was hard to catch.", "slippery"],
+        ["Is the ___ salamander hiding under the rock?", "spotted"],
+        ["The ___ snow cone quickly melted.", "icy"]
+      ]
+    },
+    around_the_house: {
+      label: "Around the House",
+      items: [
+        ["The ___ blanket kept me cozy all night.", "fluffy"],
+        ["My ___ socks slid across the floor.", "slippery"],
+        ["The ___ door creaked when I opened it.", "squeaky"],
+        ["I tripped over the ___ rug.", "bumpy"],
+        ["The ___ fridge hummed in the corner.", "noisy"],
+        ["Mom served us a ___ bowl of soup.", "steamy"],
+        ["The ___ cat purred in my lap.", "sleepy"],
+        ["The ___ window was hard to see through.", "foggy"],
+        ["Dad's ___ chair squeaked when he sat down.", "old"],
+        ["The ___ flowers brightened up the table.", "fresh"]
+      ]
+    },
+    outdoors: {
+      label: "The Great Outdoors",
+      items: [
+        ["The ___ leaves crunched under my boots.", "crispy"],
+        ["A ___ deer froze right in front of us.", "graceful"],
+        ["The ___ stream tumbled down the rocks.", "icy"],
+        ["A ___ owl watched us from a high branch.", "silent"],
+        ["The ___ campfire warmed our hands.", "crackling"],
+        ["Our ___ tent flapped in the wind all night.", "tiny"],
+        ["The ___ mountain peak poked through the clouds.", "snowy"],
+        ["A ___ moose stepped onto the trail.", "huge"],
+        ["The ___ trail led us down to the beach.", "rocky"],
+        ["I caught a ___ trout in the river.", "wiggly"]
+      ]
+    },
+    food: {
+      label: "Tasty Words",
+      items: [
+        ["The ___ pizza burned the roof of my mouth.", "hot"],
+        ["Grandma's ___ cookies are the best.", "warm"],
+        ["The ___ lemonade made my face pucker.", "sour"],
+        ["I bit into the ___ pickle.", "crunchy"],
+        ["The ___ chili made my eyes water.", "spicy"],
+        ["I love ___ apples in the fall.", "crisp"],
+        ["The ___ milkshake melted before I could finish it.", "thick"],
+        ["Mom's ___ stew warmed us up.", "hearty"],
+        ["Dad's ___ bread was a little burnt.", "smoky"],
+        ["My ___ cereal soaked up all the milk.", "sugary"]
+      ]
+    }
+  },
+
+  // For describing_words_choose — top section: pairs of [sentence start (no period), answer]
+  describing_choose_themes: {
+    touch: {
+      label: "What Does It Feel Like?",
+      sentences: [
+        ["Cotton candy is", "soft"],
+        ["Before it is cooked, a potato is", "hard"],
+        ["A peach's skin is", "fuzzy"],
+        ["A needle is", "sharp"],
+        ["Mashed potatoes are", "fluffy"],
+        ["Sandpaper feels", "rough"],
+        ["A baby's hair is", "silky"],
+        ["A pinecone is", "prickly"]
+      ],
+      // word search pool (mostly adjectives related to touch)
+      searchWords: ["thick", "bumpy", "rough", "sticky", "smooth", "shiny"]
+    },
+    taste: {
+      label: "What Does It Taste Like?",
+      sentences: [
+        ["Lemons taste", "sour"],
+        ["A cookie is", "sweet"],
+        ["Pretzels taste", "salty"],
+        ["Hot peppers are", "spicy"],
+        ["Plain rice tastes", "bland"],
+        ["Coffee tastes", "bitter"],
+        ["Watermelon is", "juicy"]
+      ],
+      searchWords: ["sweet", "sour", "salty", "spicy", "bitter", "juicy"]
+    },
+    sound: {
+      label: "What Does It Sound Like?",
+      sentences: [
+        ["A balloon popping is", "loud"],
+        ["A baby crying is", "shrill"],
+        ["A library is", "quiet"],
+        ["A thunderclap is", "booming"],
+        ["A whisper is", "soft"],
+        ["A buzzing bee is", "humming"]
+      ],
+      searchWords: ["loud", "quiet", "booming", "shrill", "humming", "buzzy"]
+    },
+    sight: {
+      label: "What Does It Look Like?",
+      sentences: [
+        ["A penny looks", "shiny"],
+        ["A foggy window looks", "blurry"],
+        ["A clean glass is", "clear"],
+        ["A dark room is", "shadowy"],
+        ["Velvet looks", "smooth"],
+        ["The night sky is", "starry"]
+      ],
+      searchWords: ["shiny", "blurry", "clear", "smooth", "starry", "dark"]
+    }
+  }
+};
+
+/* ============================================================
+   TEMPLATE — CAPITALIZE & PUNCTUATE QUESTIONS
+   Modeled after Scholastic "Ask Mother Goose" (Grade 2 Writing).
+   Maps to BC E1.13 / E3.13 (capitalization, punctuation conventions).
+============================================================ */
+window.TEMPLATES.capitalize_questions = {
+  id: "capitalize_questions",
+  label: "Capitalize & punctuate questions",
+  subject: "writing",
+  grades: ["1", "3"],
+  topicHint: "Conventions",
+
+  modifiers: [
+    { id: "theme", type: "select", label: "Theme",
+      options: [
+        { value: "random",       label: "Surprise me (random theme)" },
+        { value: "mother_goose", label: "Ask Mother Goose" },
+        { value: "animals",      label: "All About Animals" },
+        { value: "space",        label: "Out of This World" },
+        { value: "sports",       label: "Game On! (sports)" },
+        { value: "nature",       label: "Out in Nature" }
+      ], default: "random" },
+    { id: "count", type: "number", label: "# of questions", default: 5, min: 3, max: 10 }
+  ],
+
+  generate(m) {
+    const themes = window.WRITING_BANKS.question_themes;
+    const themeKey = pickThemeKey(themes, m.theme);
+    const theme = themes[themeKey];
+    const items = pickItems(theme.items, parseInt(m.count, 10));
+    const problems = items.map(raw => ({ raw, fixed: fixQuestionCase(raw) }));
+    return { themeKey, themeLabel: theme.label, problems, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+
+    let y = pdfDrawScholasticHeader(doc, "Capitalize/Punctuate questions", content.themeLabel, pageW, margin);
+
+    // Left: instruction.  Right: hint box.
+    const hintW = 200;
+    const hintX = pageW - margin - hintW;
+    const instrW = pageW - margin * 2 - hintW - 20;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(40);
+    const instrLines = doc.splitTextToSize("Rewrite the questions using capital letters and question marks.", instrW);
+    instrLines.forEach((line, i) => doc.text(line, margin, y + i * 14));
+
+    // Hint box
+    const hintLines = [
+      { text: "A sentence that asks", bold: false },
+      { text: "a question ends with a", bold: false },
+      { text: "question mark (?).", bold: false },
+      { text: "It often begins with one of", bold: false },
+      { text: "these words:", bold: false },
+      { text: "Who   What   Where   When", bold: true },
+      { text: "Why   Will   Could   How", bold: true }
+    ];
+    pdfDrawSideHintBox(doc, hintLines, hintX, y - 10, hintW);
+
+    y += instrLines.length * 14 + 30;
+
+    // Items
+    content.problems.forEach((p, i) => {
+      if (pdfNeedNewPage(doc, y, 56, margin)) y = pdfAddPageWithHeader(doc, content.themeLabel, pageW, margin);
+
+      // Numbered dot
+      pdfDrawNumberedDot(doc, String(i + 1), margin + 12, y + 6, 10);
+
+      // Lowercase question (the prompt)
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.setTextColor(20);
+      doc.text(p.raw, margin + 32, y + 10);
+
+      // Answer line
+      const lineY = y + 36;
+      doc.setDrawColor(20);
+      doc.setLineWidth(0.8);
+      doc.line(margin + 32, lineY, pageW - margin, lineY);
+
+      // Answer-key mode: write the fixed version in the line
+      if (opts.showAnswers) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(13);
+        doc.setTextColor(180, 30, 30);
+        doc.text(p.fixed, margin + 36, lineY - 4);
+      }
+
+      y += 56;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ============================================================
+   TEMPLATE — STORY MIDDLE & END
+   Modeled after Scholastic "Stories on Parade" (Grade 2 Writing).
+   Maps to BC E1.7 / E3.8 (writing process, story structure).
+============================================================ */
+window.TEMPLATES.story_middle_end = {
+  id: "story_middle_end",
+  label: "Story middles & endings",
+  subject: "writing",
+  grades: ["1", "3"],
+  topicHint: "Writing",
+
+  modifiers: [
+    { id: "theme", type: "select", label: "Theme",
+      options: [
+        { value: "random",       label: "Surprise me (random theme)" },
+        { value: "parade",       label: "Stories on Parade" },
+        { value: "forest",       label: "Into the Forest" },
+        { value: "weather_day",  label: "A Wild Weather Day" },
+        { value: "kitchen",      label: "Trouble in the Kitchen" },
+        { value: "school_day",   label: "A Day at School" }
+      ], default: "random" },
+    { id: "count", type: "number", label: "# of stories", default: 4, min: 2, max: 5 }
+  ],
+
+  generate(m) {
+    const themes = window.WRITING_BANKS.story_themes;
+    const themeKey = pickThemeKey(themes, m.theme);
+    const theme = themes[themeKey];
+    const beginnings = pickItems(theme.items, parseInt(m.count, 10));
+    const problems = beginnings.map(b => ({ beginning: b }));
+    return { themeKey, themeLabel: theme.label, problems, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    const TEAL_DARK = [33, 130, 130];
+
+    let y = pdfDrawScholasticHeader(doc, "Write the middle and end of stories", content.themeLabel, pageW, margin);
+
+    // Instructions
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(40);
+    const instrLines = doc.splitTextToSize("Stories have a beginning (B), a middle (M), and an end (E). Write a middle sentence that tells what happens next. Then write an ending sentence that tells what happens last.", pageW - margin * 2);
+    instrLines.forEach((line, i) => doc.text(line, margin, y + i * 14));
+    y += instrLines.length * 14 + 18;
+
+    const lineRowH = 28;
+    const blockH = 24 + lineRowH * 2 + 14; // B label + M line + E line + gap
+
+    content.problems.forEach(p => {
+      if (pdfNeedNewPage(doc, y, blockH, margin)) y = pdfAddPageWithHeader(doc, content.themeLabel, pageW, margin);
+
+      // B dot + beginning sentence
+      pdfDrawNumberedDot(doc, "B", margin + 12, y + 8, 10);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.setTextColor(20);
+      const bLines = doc.splitTextToSize(p.beginning, pageW - margin - 32 - margin);
+      bLines.forEach((line, i) => doc.text(line, margin + 32, y + 12 + i * 14));
+      y += Math.max(24, bLines.length * 14 + 6);
+
+      // M dot + "Next, ____"
+      pdfDrawNumberedDot(doc, "M", margin + 12, y + 6, 10, TEAL_DARK);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(20);
+      doc.text("Next,", margin + 32, y + 10);
+      doc.setDrawColor(20);
+      doc.setLineWidth(0.8);
+      doc.line(margin + 70, y + 12, pageW - margin, y + 12);
+      y += 24;
+
+      // E dot + "Last, ____"
+      pdfDrawNumberedDot(doc, "E", margin + 12, y + 6, 10, TEAL_DARK);
+      doc.text("Last,", margin + 32, y + 10);
+      doc.line(margin + 70, y + 12, pageW - margin, y + 12);
+      y += 28;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ============================================================
+   TEMPLATE — COMBINE SENTENCES
+   Modeled after Scholastic "Great Gardening Tips" (Grade 2 Writing).
+   Maps to BC E3.12 (compound sentence structure).
+============================================================ */
+window.TEMPLATES.combine_sentences = {
+  id: "combine_sentences",
+  label: "Combine sentences with a keyword",
+  subject: "writing",
+  grades: ["3"],
+  topicHint: "Grammar",
+
+  modifiers: [
+    { id: "theme", type: "select", label: "Theme",
+      options: [
+        { value: "random",     label: "Surprise me (random theme)" },
+        { value: "gardening",  label: "Great Gardening Tips" },
+        { value: "cooking",    label: "Kitchen Helpers" },
+        { value: "animal_facts", label: "Did You Know? — Animals" },
+        { value: "weather",    label: "Watching the Weather" }
+      ], default: "random" },
+    { id: "count", type: "number", label: "# of pairs", default: 6, min: 3, max: 8 }
+  ],
+
+  generate(m) {
+    const themes = window.WRITING_BANKS.combine_themes;
+    const themeKey = pickThemeKey(themes, m.theme);
+    const theme = themes[themeKey];
+    const items = pickItems(theme.items, parseInt(m.count, 10));
+    const problems = items.map(([s1, s2, keyword, answer]) => ({ s1, s2, keyword, answer }));
+    return { themeKey, themeLabel: theme.label, problems, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+
+    let y = pdfDrawScholasticHeader(doc, "Combine sentences", content.themeLabel, pageW, margin);
+
+    // Instruction (left) + hint box (right) with worked example
+    const hintW = 220;
+    const hintX = pageW - margin - hintW;
+    const instrW = pageW - margin * 2 - hintW - 20;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(40);
+    const instrLines = doc.splitTextToSize("Combine the two sentences using the key word. Write a new sentence on the line.", instrW);
+    instrLines.forEach((line, i) => doc.text(line, margin, y + i * 14));
+
+    const hintLines = [
+      "Sentences can be combined",
+      "to make them more",
+      "interesting. A key word can",
+      "tie two sentences together.",
+      "",
+      { text: "I will plan my garden.", bold: true },
+      { text: "I am waiting for spring.", bold: true },
+      "",
+      "I will plan my garden",
+      "while I am waiting for spring."
+    ];
+    pdfDrawSideHintBox(doc, hintLines, hintX, y - 10, hintW);
+
+    y += Math.max(instrLines.length * 14, hintLines.length * 13 + 16) + 16;
+
+    // Items
+    content.problems.forEach((p, i) => {
+      // Estimated block height: text + keyword pill + answer line
+      const sentencesStr = `${p.s1} ${p.s2}`;
+      const sentenceLines = doc.splitTextToSize(sentencesStr, pageW - margin - 32 - 90);
+      const blockH = sentenceLines.length * 14 + 50;
+      if (pdfNeedNewPage(doc, y, blockH, margin)) y = pdfAddPageWithHeader(doc, content.themeLabel, pageW, margin);
+
+      // Number dot
+      pdfDrawNumberedDot(doc, String(i + 1), margin + 12, y + 8, 10);
+
+      // Two sentences printed together
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      doc.setTextColor(20);
+      sentenceLines.forEach((line, j) => doc.text(line, margin + 32, y + 10 + j * 14));
+
+      // Keyword pill on the right
+      const kwX = pageW - margin - 80;
+      const kwY = y + 6;
+      doc.setFillColor(255, 245, 230);
+      doc.setDrawColor(SCHOLASTIC_ORANGE[0], SCHOLASTIC_ORANGE[1], SCHOLASTIC_ORANGE[2]);
+      doc.setLineWidth(0.8);
+      doc.roundedRect(kwX, kwY, 70, 22, 11, 11, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(...SCHOLASTIC_ORANGE);
+      doc.text(p.keyword, kwX + 35, kwY + 14, { align: "center" });
+      doc.setTextColor(20);
+
+      // Answer line
+      const lineY = y + 14 + Math.max(sentenceLines.length * 14, 24);
+      doc.setDrawColor(20);
+      doc.setLineWidth(0.8);
+      doc.line(margin + 32, lineY, pageW - margin, lineY);
+
+      if (opts.showAnswers) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(180, 30, 30);
+        const ansLines = doc.splitTextToSize(p.answer, pageW - margin - 32 - 8);
+        ansLines.slice(0, 1).forEach(line => doc.text(line, margin + 36, lineY - 4));
+      }
+
+      y = lineY + 18;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ============================================================
+   TEMPLATE — DESCRIBING WORDS (FILL IN THE BLANK)
+   Modeled after Scholastic "It's in the Bag" (Grade 2 Writing).
+   Maps to BC E3.10 (word patterns and vocabulary).
+============================================================ */
+window.TEMPLATES.describing_words_fill = {
+  id: "describing_words_fill",
+  label: "Add a describing word",
+  subject: "writing",
+  grades: ["1", "3"],
+  topicHint: "Vocabulary",
+
+  modifiers: [
+    { id: "theme", type: "select", label: "Theme",
+      options: [
+        { value: "random",            label: "Surprise me (random theme)" },
+        { value: "its_in_the_bag",    label: "It's in the Bag" },
+        { value: "around_the_house",  label: "Around the House" },
+        { value: "outdoors",          label: "The Great Outdoors" },
+        { value: "food",              label: "Tasty Words" }
+      ], default: "random" },
+    { id: "count", type: "number", label: "# of sentences", default: 10, min: 6, max: 14 }
+  ],
+
+  generate(m) {
+    const themes = window.WRITING_BANKS.describing_fill_themes;
+    const themeKey = pickThemeKey(themes, m.theme);
+    const theme = themes[themeKey];
+    const items = pickItems(theme.items, parseInt(m.count, 10));
+    const problems = items.map(([sentence, answer]) => ({ sentence, answer }));
+    return { themeKey, themeLabel: theme.label, problems, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+
+    let y = pdfDrawScholasticHeader(doc, "Write describing words", content.themeLabel, pageW, margin);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(40);
+    doc.text("Add a describing word to each sentence.", margin, y);
+    y += 24;
+
+    content.problems.forEach((p, i) => {
+      if (pdfNeedNewPage(doc, y, 32, margin)) y = pdfAddPageWithHeader(doc, content.themeLabel, pageW, margin);
+
+      pdfDrawNumberedDot(doc, String(i + 1), margin + 12, y + 6, 10);
+
+      // Render the sentence with the blank replaced by a long underline.
+      // The blank is "___" — we keep the text but draw a fat line under that span.
+      const parts = p.sentence.split("___");
+      const before = parts[0] || "";
+      const after = parts[1] || "";
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.setTextColor(20);
+
+      let cx = margin + 32;
+      const cyText = y + 10;
+      if (before) {
+        doc.text(before.trim() + " ", cx, cyText);
+        cx += doc.getTextWidth(before.trim() + " ");
+      }
+      // Underline / blank gap
+      const blankW = 90;
+      const blankY = cyText + 2;
+      doc.setDrawColor(20);
+      doc.setLineWidth(0.7);
+      doc.line(cx, blankY, cx + blankW, blankY);
+      if (opts.showAnswers) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.setTextColor(180, 30, 30);
+        doc.text(p.answer, cx + blankW / 2, cyText, { align: "center" });
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(20);
+        doc.setFontSize(12);
+      }
+      cx += blankW + 4;
+      if (after) {
+        doc.text(" " + after.trim(), cx, cyText);
+      }
+
+      y += 30;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ============================================================
+   TEMPLATE — DESCRIBING WORDS — CHOOSE + WORD SEARCH
+   Modeled after Scholastic "What Does It Feel Like?" (Grade 2 Writing).
+   Two-section worksheet: fill-in-with-word-bank + word search.
+   Maps to BC E3.10 / E3.13.
+============================================================ */
+window.TEMPLATES.describing_words_choose = {
+  id: "describing_words_choose",
+  label: "Choose describing words (+ word search)",
+  subject: "writing",
+  grades: ["1", "3"],
+  topicHint: "Vocabulary",
+
+  modifiers: [
+    { id: "theme", type: "select", label: "Theme",
+      options: [
+        { value: "random", label: "Surprise me (random theme)" },
+        { value: "touch",  label: "What Does It Feel Like? (touch)" },
+        { value: "taste",  label: "What Does It Taste Like?" },
+        { value: "sound",  label: "What Does It Sound Like?" },
+        { value: "sight",  label: "What Does It Look Like?" }
+      ], default: "random" },
+    { id: "count", type: "number", label: "# of sentences (top)", default: 5, min: 3, max: 8 },
+    { id: "includeWordSearch", type: "boolean", label: "Include a word search at the bottom", default: true },
+    { id: "wordSearchCount", type: "number", label: "# of words in search", default: 6, min: 4, max: 8 }
+  ],
+
+  generate(m) {
+    const themes = window.WRITING_BANKS.describing_choose_themes;
+    const themeKey = pickThemeKey(themes, m.theme);
+    const theme = themes[themeKey];
+    const sentencePicks = pickItems(theme.sentences, parseInt(m.count, 10));
+    const problems = sentencePicks.map(([sentence, answer]) => ({ sentence, answer }));
+    const sentenceBank = Array.from(new Set(problems.map(p => p.answer)));
+
+    let wordSearch = null;
+    if (m.includeWordSearch) {
+      const searchPool = [...theme.searchWords];
+      const searchPicks = pickItems(searchPool, parseInt(m.wordSearchCount, 10));
+      wordSearch = buildWordSearch(searchPicks, { rows: 5, cols: 9 });
+      wordSearch.words = searchPicks;
+    }
+
+    return { themeKey, themeLabel: theme.label, problems, sentenceBank, wordSearch, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+
+    let y = pdfDrawScholasticHeader(doc, "Choose describing words", content.themeLabel, pageW, margin);
+
+    // Two-column header: instruction (left) + hint box (right)
+    const hintW = 200;
+    const hintX = pageW - margin - hintW;
+    const instrW = pageW - margin * 2 - hintW - 20;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(40);
+    doc.text(doc.splitTextToSize("Choose the best describing word to complete each sentence.", instrW), margin, y);
+
+    const hintLines = [
+      "Describing words give",
+      "information about something",
+      "we can discover with our",
+      "senses."
+    ];
+    pdfDrawSideHintBox(doc, hintLines, hintX, y - 10, hintW);
+
+    y += 36;
+
+    // Sentences on the left, word bank on the right
+    const bankX = pageW - margin - 110;
+    const sentenceMaxW = bankX - margin - 40;
+
+    content.problems.forEach((p, i) => {
+      if (pdfNeedNewPage(doc, y, 30, margin)) y = pdfAddPageWithHeader(doc, content.themeLabel, pageW, margin);
+
+      pdfDrawNumberedDot(doc, String(i + 1), margin + 12, y + 6, 10);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.setTextColor(20);
+      const text = p.sentence.endsWith(" ") ? p.sentence : p.sentence + " ";
+      const cyText = y + 10;
+      let cx = margin + 32;
+      doc.text(text, cx, cyText);
+      cx += doc.getTextWidth(text);
+      // Blank line for the describing word
+      const blankW = 80;
+      doc.setDrawColor(20);
+      doc.setLineWidth(0.7);
+      doc.line(cx, cyText + 2, cx + blankW, cyText + 2);
+      doc.setTextColor(20);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(12);
+      doc.text(".", cx + blankW + 2, cyText);
+      if (opts.showAnswers) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(12);
+        doc.setTextColor(180, 30, 30);
+        doc.text(p.answer, cx + blankW / 2, cyText, { align: "center" });
+      }
+      y += 30;
+    });
+
+    // Word bank box for the top section
+    const bankY = y - content.problems.length * 30 - 6;
+    drawWordBankBox(doc, "Word Bank", content.sentenceBank, bankX, bankY, 110);
+
+    y += 14;
+
+    // Word search section
+    if (content.wordSearch) {
+      // Dotted separator
+      doc.setDrawColor(SCHOLASTIC_ORANGE[0], SCHOLASTIC_ORANGE[1], SCHOLASTIC_ORANGE[2]);
+      doc.setLineDashPattern([2, 3], 0);
+      doc.setLineWidth(0.8);
+      doc.line(margin, y, pageW - margin, y);
+      doc.setLineDashPattern([], 0);
+      y += 16;
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(11);
+      doc.setTextColor(40);
+      doc.text("Look at the words in the Word Bank. Find and circle each word in the word search.", margin, y);
+      y += 16;
+
+      // Render grid + word bank side-by-side
+      const gridW = pageW - margin * 2 - 130;
+      const gridY = y;
+      drawWordSearchGrid(doc, content.wordSearch.grid, margin, gridY, gridW, opts.showAnswers ? content.wordSearch.placements : null);
+      drawWordBankBox(doc, "Word Bank", content.wordSearch.words, pageW - margin - 110, gridY, 110);
+      y = gridY + content.wordSearch.grid.length * 24 + 16;
+    }
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+function drawWordBankBox(doc, title, words, x, y, w) {
+  const h = 30 + words.length * 18;
+  // Background
+  doc.setFillColor(232, 240, 244);
+  doc.roundedRect(x, y, w, h, 4, 4, "F");
+  // Title
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.setTextColor(40);
+  doc.text(title, x + w / 2, y + 16, { align: "center" });
+  // Underline under title
+  doc.setDrawColor(80);
+  doc.setLineWidth(0.6);
+  doc.line(x + 12, y + 20, x + w - 12, y + 20);
+  // Words
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.setTextColor(40);
+  words.forEach((word, i) => {
+    doc.text(word, x + w / 2, y + 36 + i * 18, { align: "center" });
+    doc.setDrawColor(160);
+    doc.setLineDashPattern([1, 1.5], 0);
+    doc.line(x + 12, y + 38 + i * 18, x + w - 12, y + 38 + i * 18);
+    doc.setLineDashPattern([], 0);
+  });
+}
+
+function drawWordSearchGrid(doc, grid, x, y, w, placementsToHighlight) {
+  const rows = grid.length;
+  const cols = grid[0].length;
+  const cellSize = Math.min(24, (w - 4) / cols);
+  const gridW = cols * cellSize;
+  const gridH = rows * cellSize;
+
+  // Decorative border around grid (jagged-ish)
+  doc.setDrawColor(SCHOLASTIC_ORANGE[0], SCHOLASTIC_ORANGE[1], SCHOLASTIC_ORANGE[2]);
+  doc.setLineWidth(0.5);
+  doc.roundedRect(x - 4, y - 4, gridW + 8, gridH + 8, 3, 3, "S");
+
+  // Letters
+  doc.setFont("courier", "normal");
+  doc.setFontSize(13);
+  doc.setTextColor(20);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cx = x + c * cellSize + cellSize / 2;
+      const cy = y + r * cellSize + cellSize / 2 + 4;
+      doc.text(grid[r][c], cx, cy, { align: "center" });
+    }
+  }
+
+  // Highlight placements for the answer key
+  if (placementsToHighlight) {
+    doc.setDrawColor(200, 60, 60);
+    doc.setLineWidth(1.4);
+    placementsToHighlight.forEach(pl => {
+      const r1 = pl.row;
+      const c1 = pl.col;
+      const len = pl.word.length;
+      const r2 = pl.dir === "vertical" ? r1 + len - 1 : r1;
+      const c2 = pl.dir === "horizontal" ? c1 + len - 1 : c1;
+      const padding = cellSize * 0.42;
+      // Oval over the word
+      doc.ellipse(
+        (x + c1 * cellSize + cellSize / 2 + x + c2 * cellSize + cellSize / 2) / 2,
+        (y + r1 * cellSize + cellSize / 2 + y + r2 * cellSize + cellSize / 2) / 2,
+        (Math.abs(c2 - c1) * cellSize / 2) + padding,
+        (Math.abs(r2 - r1) * cellSize / 2) + padding,
+        "S"
+      );
+    });
+  }
+}
+
+// Simple word search builder: places horizontally or vertically, no diagonal,
+// fills the rest with random uppercase letters.
+function buildWordSearch(words, opts) {
+  const rows = opts.rows || 6;
+  const cols = opts.cols || 9;
+  const grid = Array.from({ length: rows }, () => Array(cols).fill(null));
+  const placements = [];
+  const sorted = [...words].map(w => w.toUpperCase()).sort((a, b) => b.length - a.length);
+
+  for (const word of sorted) {
+    let placed = false;
+    for (let attempt = 0; attempt < 80 && !placed; attempt++) {
+      const horizontal = Math.random() < 0.65;
+      let row, col;
+      if (horizontal) {
+        if (word.length > cols) break;
+        row = Math.floor(Math.random() * rows);
+        col = Math.floor(Math.random() * (cols - word.length + 1));
+      } else {
+        if (word.length > rows) break;
+        row = Math.floor(Math.random() * (rows - word.length + 1));
+        col = Math.floor(Math.random() * cols);
+      }
+      // Conflict check (allow letter overlap if same)
+      let conflict = false;
+      for (let i = 0; i < word.length; i++) {
+        const r = row + (horizontal ? 0 : i);
+        const c = col + (horizontal ? i : 0);
+        if (grid[r][c] != null && grid[r][c] !== word[i]) { conflict = true; break; }
+      }
+      if (conflict) continue;
+      for (let i = 0; i < word.length; i++) {
+        const r = row + (horizontal ? 0 : i);
+        const c = col + (horizontal ? i : 0);
+        grid[r][c] = word[i];
+      }
+      placements.push({ word, row, col, dir: horizontal ? "horizontal" : "vertical" });
+      placed = true;
+    }
+  }
+  // Fill remaining with random uppercase letters
+  const ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (grid[r][c] == null) grid[r][c] = ALPHA[Math.floor(Math.random() * 26)];
+    }
+  }
+  return { grid, placements };
+}
 
 /* ============================================================
    TEMPLATE INDEX (helper for UI)

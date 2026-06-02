@@ -1319,7 +1319,180 @@ function renderTemplatePreviewHTML(ws) {
   if (ws.templateId === "time_telling") return previewTimeTelling(content, ws.modifiers);
   if (ws.templateId === "sight_words_practice") return previewSightWords(content, ws.modifiers);
   if (ws.templateId === "reading_passage_gr3") return previewReadingPassage(content, ws.modifiers);
+  if (ws.templateId === "capitalize_questions") return previewCapitalizeQuestions(content, ws.modifiers);
+  if (ws.templateId === "story_middle_end") return previewStoryMiddleEnd(content, ws.modifiers);
+  if (ws.templateId === "combine_sentences") return previewCombineSentences(content, ws.modifiers);
+  if (ws.templateId === "describing_words_fill") return previewDescribingFill(content, ws.modifiers);
+  if (ws.templateId === "describing_words_choose") return previewDescribingChoose(content, ws.modifiers);
   return "<p class='muted'>Preview not available for this template — but the PDF will render correctly.</p>";
+}
+
+/* -------- Scholastic-style previews -------- */
+
+function scholasticHeaderHTML(category, title) {
+  return `
+    <div style="background: #4c2f6e; color: #fff; padding: 10px 16px; font-size: 12px; margin: -1rem -1rem 0; border-radius: 8px 8px 0 0;">${escapeHtml(category)}</div>
+    <h2 style="color: #218282; font-family: Georgia, serif; margin: 12px 0 6px;">${escapeHtml(title)}</h2>
+  `;
+}
+function scholasticDotHTML(label, color) {
+  const c = color || "#e76938";
+  return `<span style="display:inline-block; width:22px; height:22px; border-radius:50%; background:${c}; color:#fff; font-weight:bold; text-align:center; line-height:22px; font-size:13px; margin-right: 8px; vertical-align: middle;">${escapeHtml(label)}</span>`;
+}
+function scholasticHintBoxHTML(lines) {
+  const innerLines = lines.map(line => {
+    if (typeof line === "string") return line ? `<div>${escapeHtml(line)}</div>` : `<div>&nbsp;</div>`;
+    return `<div style="font-weight:${line.bold ? "bold" : "normal"};">${escapeHtml(line.text)}</div>`;
+  }).join("");
+  return `<div style="background: #e8e2f0; padding: 10px 12px; border-radius: 8px; font-size: 12px; color: #2a2a2a;">${innerLines}</div>`;
+}
+
+function previewCapitalizeQuestions(content, m) {
+  const hint = scholasticHintBoxHTML([
+    "A sentence that asks",
+    "a question ends with a",
+    "question mark (?).",
+    "It often begins with one of",
+    "these words:",
+    "",
+    { text: "Who   What   Where   When", bold: true },
+    { text: "Why   Will   Could   How", bold: true }
+  ]);
+  const items = content.problems.map((p, i) => `
+    <div style="padding: 10px 0;">
+      <div style="display:flex; align-items:center;">${scholasticDotHTML(String(i + 1))}<span style="font-size:14px;">${escapeHtml(p.raw)}</span></div>
+      <div style="border-bottom: 1.5px solid #222; height: 24px; margin: 6px 0 0 30px;"></div>
+    </div>
+  `).join("");
+  return `
+    ${scholasticHeaderHTML("Capitalize/Punctuate questions", content.themeLabel)}
+    <div style="display:flex; gap: 16px; align-items: flex-start; margin-bottom: 14px;">
+      <p style="flex:1; margin: 0;">Rewrite the questions using capital letters and question marks.</p>
+      <div style="width: 220px;">${hint}</div>
+    </div>
+    ${items}
+  `;
+}
+
+function previewStoryMiddleEnd(content, m) {
+  const items = content.problems.map(p => `
+    <div style="padding: 14px 0;">
+      <div style="display:flex; align-items:center; margin-bottom: 6px;">${scholasticDotHTML("B")}<span style="font-size:13px;">${escapeHtml(p.beginning)}</span></div>
+      <div style="display:flex; align-items:center; margin-bottom: 10px;">${scholasticDotHTML("M", "#218282")}<strong style="margin-right: 4px;">Next,</strong><div style="flex:1; border-bottom: 1.5px solid #222; height: 22px;"></div></div>
+      <div style="display:flex; align-items:center;">${scholasticDotHTML("E", "#218282")}<strong style="margin-right: 4px;">Last,</strong><div style="flex:1; border-bottom: 1.5px solid #222; height: 22px;"></div></div>
+    </div>
+  `).join("");
+  return `
+    ${scholasticHeaderHTML("Write the middle and end of stories", content.themeLabel)}
+    <p style="margin: 0 0 14px;">Stories have a beginning <strong>(B)</strong>, a middle <strong>(M)</strong>, and an end <strong>(E)</strong>. Write a middle sentence that tells what happens next. Then write an ending sentence that tells what happens last.</p>
+    ${items}
+  `;
+}
+
+function previewCombineSentences(content, m) {
+  const hint = scholasticHintBoxHTML([
+    "Sentences can be combined",
+    "to make them more",
+    "interesting. A key word can",
+    "tie two sentences together.",
+    "",
+    { text: "I will plan my garden.", bold: true },
+    { text: "I am waiting for spring.", bold: true },
+    "",
+    "I will plan my garden while",
+    "I am waiting for spring."
+  ]);
+  const items = content.problems.map((p, i) => `
+    <div style="padding: 12px 0; display:grid; grid-template-columns: 30px 1fr 100px; gap: 8px; align-items: center;">
+      ${scholasticDotHTML(String(i + 1))}
+      <div style="font-size: 13px;">${escapeHtml(p.s1)} ${escapeHtml(p.s2)}</div>
+      <div style="text-align:center;">
+        <span style="display:inline-block; border:1.5px solid #e76938; color:#e76938; font-weight:bold; padding: 4px 14px; border-radius: 999px; font-size: 13px;">${escapeHtml(p.keyword)}</span>
+      </div>
+      <div></div>
+      <div style="grid-column: 2 / span 2; border-bottom: 1.5px solid #222; height: 24px;"></div>
+    </div>
+  `).join("");
+  return `
+    ${scholasticHeaderHTML("Combine sentences", content.themeLabel)}
+    <div style="display:flex; gap: 16px; align-items: flex-start; margin-bottom: 14px;">
+      <p style="flex:1; margin: 0;">Combine the two sentences using the key word. Write a new sentence on the line.</p>
+      <div style="width: 220px;">${hint}</div>
+    </div>
+    ${items}
+  `;
+}
+
+function previewDescribingFill(content, m) {
+  const items = content.problems.map((p, i) => {
+    const parts = p.sentence.split("___");
+    return `
+      <div style="padding: 8px 0; display:flex; align-items:center;">
+        ${scholasticDotHTML(String(i + 1))}
+        <span style="font-size:14px;">
+          ${escapeHtml(parts[0] || "")}
+          <span style="display:inline-block; min-width: 100px; border-bottom: 1.5px solid #222; height: 18px; vertical-align: text-bottom; margin: 0 4px;"></span>
+          ${escapeHtml(parts[1] || "")}
+        </span>
+      </div>
+    `;
+  }).join("");
+  return `
+    ${scholasticHeaderHTML("Write describing words", content.themeLabel)}
+    <p style="margin: 0 0 14px;">Add a describing word to each sentence.</p>
+    ${items}
+  `;
+}
+
+function previewDescribingChoose(content, m) {
+  const hint = scholasticHintBoxHTML([
+    "Describing words give",
+    "information about something",
+    "we can discover with our",
+    "senses."
+  ]);
+  const sentenceItems = content.problems.map((p, i) => `
+    <div style="padding: 8px 0; display:flex; align-items:center;">
+      ${scholasticDotHTML(String(i + 1))}
+      <span style="font-size:14px;">
+        ${escapeHtml(p.sentence)}
+        <span style="display:inline-block; min-width: 90px; border-bottom: 1.5px solid #222; height: 18px; vertical-align: text-bottom; margin: 0 4px;"></span>.
+      </span>
+    </div>
+  `).join("");
+  const bankHTML = (title, words) => `
+    <div style="background: #e8f0f4; padding: 10px 12px; border-radius: 6px; min-width: 100px;">
+      <div style="font-weight: bold; text-align:center; border-bottom: 1px solid #888; padding-bottom: 4px; margin-bottom: 6px;">${escapeHtml(title)}</div>
+      ${words.map(w => `<div style="text-align:center; font-size: 13px; padding: 3px 0; border-bottom: 1px dotted #aaa;">${escapeHtml(w)}</div>`).join("")}
+    </div>
+  `;
+  let wsHTML = "";
+  if (content.wordSearch) {
+    const grid = content.wordSearch.grid;
+    const cellSize = 26;
+    wsHTML = `
+      <hr style="border: none; border-top: 1.5px dotted #e76938; margin: 14px 0;"/>
+      <p style="margin: 0 0 8px;">Look at the words in the Word Bank. Find and circle each word in the word search.</p>
+      <div style="display:flex; gap: 14px; align-items: flex-start;">
+        <div style="border: 1.5px solid #e76938; padding: 6px; border-radius: 4px;">
+          ${grid.map(row => `<div style="display:flex;">${row.map(letter => `<div style="width:${cellSize}px; height:${cellSize}px; line-height:${cellSize}px; text-align:center; font-family: 'Courier New', monospace; font-size: 14px;">${letter}</div>`).join("")}</div>`).join("")}
+        </div>
+        ${bankHTML("Word Bank", content.wordSearch.words)}
+      </div>
+    `;
+  }
+  return `
+    ${scholasticHeaderHTML("Choose describing words", content.themeLabel)}
+    <div style="display:flex; gap: 16px; align-items: flex-start; margin-bottom: 14px;">
+      <p style="flex:1; margin: 0;">Choose the best describing word to complete each sentence.</p>
+      <div style="width: 200px;">${hint}</div>
+    </div>
+    <div style="display:flex; gap: 14px; align-items: flex-start;">
+      <div style="flex:1;">${sentenceItems}</div>
+      ${bankHTML("Word Bank", content.sentenceBank)}
+    </div>
+    ${wsHTML}
+  `;
 }
 
 function previewReadingPassage(content, m) {
