@@ -238,20 +238,122 @@ function renderContent() {
 /* ============================================================
    DASHBOARD TAB
 ============================================================ */
+/* ============================================================
+   ACHIEVEMENTS / MILESTONES — kid-facing motivation
+============================================================ */
+function computeAchievements(kid) {
+  const worksheets = state.worksheets[kid.id] || [];
+  const gradings = state.gradings[kid.id] || [];
+  const wc = worksheets.length;
+  const streak = computeStreak(worksheets);
+  const mc = countMastery(kid);
+  const mastered = mc.proficient + mc.extending;
+  const best = gradings.reduce((mx, g) => Math.max(mx, g.score || 0), 0);
+  const readingBooks = (state.readingLog[kid.id] || []).length;
+  const maxDiff = Math.max(kid.difficulty.math, kid.difficulty.reading, kid.difficulty.writing);
+
+  const defs = [
+    { id: "first",   icon: "🌱", label: "First Steps",    desc: "Finish your first worksheet", current: wc, target: 1 },
+    { id: "ten",     icon: "📚", label: "Bookworm",       desc: "Finish 10 worksheets",        current: wc, target: 10 },
+    { id: "tfive",   icon: "🎯", label: "Sharpshooter",   desc: "Finish 25 worksheets",        current: wc, target: 25 },
+    { id: "fifty",   icon: "🏅", label: "Champion",       desc: "Finish 50 worksheets",        current: wc, target: 50 },
+    { id: "streak3", icon: "🔥", label: "On Fire",        desc: "3 days in a row",             current: streak, target: 3 },
+    { id: "streak7", icon: "⚡", label: "Unstoppable",    desc: "7 days in a row",             current: streak, target: 7 },
+    { id: "perfect", icon: "💯", label: "Perfect!",       desc: "Score 100% on a worksheet",   current: best >= 100 ? 1 : 0, target: 1 },
+    { id: "star5",   icon: "⭐", label: "Rising Star",    desc: "Master 5 skills",             current: mastered, target: 5 },
+    { id: "star15",  icon: "🌟", label: "Superstar",      desc: "Master 15 skills",            current: mastered, target: 15 },
+    { id: "levelup", icon: "🧗", label: "Level Up",       desc: "Reach Level 7 in a subject",  current: maxDiff, target: 7 },
+    { id: "reader",  icon: "📖", label: "Reading Rocket", desc: "Log 10 books read",           current: readingBooks, target: 10 }
+  ];
+  defs.forEach(d => { d.earned = d.current >= d.target; });
+  return defs;
+}
+
+function achievementsHTML(kid) {
+  const all = computeAchievements(kid);
+  const earned = all.filter(a => a.earned);
+  const next = all.filter(a => !a.earned)
+    .sort((a, b) => (b.current / b.target) - (a.current / a.target))
+    .slice(0, 3);
+
+  const earnedChips = earned.length
+    ? earned.map(a => `<span title="${escapeAttr(a.desc)}" style="display:inline-flex; align-items:center; gap:5px; background:#fff5d6; border:1px solid #f0d98a; color:#7a5c00; border-radius:999px; padding:5px 12px; font-size:0.85rem; font-weight:600;">${a.icon} ${a.label}</span>`).join("")
+    : `<span class="muted" style="font-size:0.85rem;">No badges yet — finish a worksheet to earn your first! 🌱</span>`;
+
+  const nextChips = next.map(a => {
+    const pct = Math.min(100, Math.round((a.current / a.target) * 100));
+    return `
+      <div style="flex:1; min-width:150px; background:#f6f6f4; border-radius:8px; padding:10px 12px;">
+        <div style="font-size:0.85rem; font-weight:600; opacity:0.7;">${a.icon} ${a.label}</div>
+        <div style="height:8px; background:#e2e2e2; border-radius:4px; overflow:hidden; margin:6px 0 4px;">
+          <div style="width:${pct}%; height:100%; background:#7fb3e0;"></div>
+        </div>
+        <div class="muted" style="font-size:0.72rem;">${a.current}/${a.target} — ${escapeHtml(a.desc)}</div>
+      </div>`;
+  }).join("");
+
+  return `
+    <div class="card">
+      <div class="card-title">🏆 ${kid.name}'s badges <span class="muted" style="font-weight:400; font-size:0.8rem;">— ${earned.length} of ${all.length} earned</span></div>
+      <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:${next.length ? "14px" : "0"};">${earnedChips}</div>
+      ${next.length ? `<div class="muted" style="font-size:0.78rem; margin-bottom:6px;">Next up:</div><div style="display:flex; flex-wrap:wrap; gap:10px;">${nextChips}</div>` : ""}
+    </div>
+  `;
+}
+
+function subjectFeedbackHTML(kid, subject, snap) {
+  const meta = { math: "🔢 Math", reading: "📖 Reading", writing: "✏️ Writing" };
+  const s = snap[subject];
+  const grs = gradingsForSubject(kid, subject);
+  const last = grs[0], prev = grs[1];
+
+  let emoji, msg;
+  if (!last) { emoji = "🚀"; msg = "Just getting started — let's go!"; }
+  else if (last.score >= 85) { emoji = "🌟"; msg = "Crushing it!"; }
+  else if (prev && last.score > prev.score) { emoji = "📈"; msg = "Getting better!"; }
+  else if (last.score < 65) { emoji = "💪"; msg = "Keep practicing — you've got this!"; }
+  else { emoji = "👍"; msg = "Steady progress!"; }
+
+  const lastBadge = last
+    ? `<span class="score-badge ${last.score >= 85 ? "score-high" : last.score >= 65 ? "score-mid" : "score-low"}">${last.score}%</span>`
+    : `<span class="muted" style="font-size:0.78rem;">no marks yet</span>`;
+
+  return `
+    <div class="card" style="display:flex; flex-direction:column; gap:0.45rem;">
+      <div class="row-between">
+        <strong>${meta[subject]}</strong>
+        <span class="tag tag-accent">Level ${s.difficulty}/10</span>
+      </div>
+      ${masteryBarHTML(s.mastery)}
+      <div class="row-between" style="align-items:center;">
+        <span style="font-size:0.9rem;">${emoji} ${msg}</span>
+        ${lastBadge}
+      </div>
+      <button class="btn btn-ghost" data-goto-subject="${subject}" style="align-self:flex-start; font-size:0.8rem; padding:0.3rem 0.6rem;">Practice ${subject} →</button>
+    </div>
+  `;
+}
+
 function renderDashboard(kid) {
   const worksheets = state.worksheets[kid.id] || [];
   const gradings = state.gradings[kid.id] || [];
   const recent = [...worksheets].sort((a, b) => b.generatedAt - a.generatedAt).slice(0, 5);
   const recentGradings = [...gradings].sort((a, b) => b.gradedAt - a.gradedAt).slice(0, 5);
 
-  // Streak: consecutive days with at least one worksheet generated
   const streak = computeStreak(worksheets);
   const totalWorksheets = worksheets.length;
-  const avgScore = computeAvgScore(gradings);
-  const masteryCount = countMastery(kid);
-
-  // 30-day heatmap
+  const badges = computeAchievements(kid);
+  const badgesEarned = badges.filter(b => b.earned).length;
+  const snap = buildProgressSnapshot(kid);
   const heatmap = build30DayHeatmap(worksheets);
+
+  // Motivational hero line
+  let hero;
+  if (streak >= 7) hero = `🔥 ${streak}-day streak — incredible work, ${kid.name}!`;
+  else if (streak >= 3) hero = `🔥 ${streak} days in a row — keep the streak alive!`;
+  else if (streak > 0) hero = `Nice — ${streak}-day streak going. Let's keep it up!`;
+  else if (totalWorksheets > 0) hero = `Ready for a great day of learning, ${kid.name}?`;
+  else hero = `Welcome, ${kid.name}! Finish a worksheet to start earning badges. 🌱`;
 
   return `
     <div class="content-header">
@@ -261,23 +363,20 @@ function renderDashboard(kid) {
       </div>
     </div>
 
-    <div class="grid grid-4" style="margin-bottom: 1.5rem;">
-      <div class="card kpi-card">
-        <div class="kpi-value">${totalWorksheets}</div>
-        <div class="kpi-label">Worksheets done</div>
+    <div class="card" style="margin-bottom:1.2rem;">
+      <div style="font-size:1.05rem; font-weight:600; margin-bottom:0.7rem;">${hero}</div>
+      <div class="grid grid-3">
+        <div class="kpi-card" style="padding:0.4rem;"><div class="kpi-value">🔥 ${streak}</div><div class="kpi-label">Day streak</div></div>
+        <div class="kpi-card" style="padding:0.4rem;"><div class="kpi-value">✅ ${totalWorksheets}</div><div class="kpi-label">Worksheets done</div></div>
+        <div class="kpi-card" style="padding:0.4rem;"><div class="kpi-value">🏅 ${badgesEarned}/${badges.length}</div><div class="kpi-label">Badges earned</div></div>
       </div>
-      <div class="card kpi-card">
-        <div class="kpi-value">${streak}</div>
-        <div class="kpi-label">Day streak</div>
-      </div>
-      <div class="card kpi-card">
-        <div class="kpi-value">${avgScore === null ? "—" : avgScore + "%"}</div>
-        <div class="kpi-label">Avg. graded score</div>
-      </div>
-      <div class="card kpi-card">
-        <div class="kpi-value">${masteryCount.proficient + masteryCount.extending}</div>
-        <div class="kpi-label">Standards mastered</div>
-      </div>
+    </div>
+
+    <div style="margin-bottom:1.2rem;">${achievementsHTML(kid)}</div>
+
+    <div class="card-title" style="margin-bottom:0.6rem;">📊 How each subject is going</div>
+    <div class="grid grid-3" style="margin-bottom:1.4rem;">
+      ${["math", "reading", "writing"].map(subj => subjectFeedbackHTML(kid, subj, snap)).join("")}
     </div>
 
     <div class="grid grid-2">
@@ -290,30 +389,17 @@ function renderDashboard(kid) {
       </div>
 
       <div class="card">
-        <div class="card-title">🎯 Difficulty levels</div>
-        <div class="stack">
-          ${["math","reading","writing"].map(subj => `
-            <div class="row-between">
-              <div><strong style="text-transform: capitalize;">${subj}</strong></div>
-              <div class="tag tag-accent">Level ${kid.difficulty[subj]} / 10</div>
-            </div>
-          `).join("")}
-        </div>
-        <p class="muted" style="margin-top: 0.8rem;">Auto-adjusted based on graded scores. You can override in Settings.</p>
-      </div>
-
-      <div class="card">
-        <div class="card-title">📝 Recent worksheets</div>
-        ${recent.length === 0
-          ? `<div class="empty"><div class="empty-icon">📄</div>No worksheets yet. Generate one from the Math, Reading, or Writing tab.</div>`
-          : `<div class="history-list">${recent.map(w => historyItemHTML(w, findGrading(w.id))).join("")}</div>`}
-      </div>
-
-      <div class="card">
         <div class="card-title">✅ Recent gradings</div>
         ${recentGradings.length === 0
           ? `<div class="empty"><div class="empty-icon">📥</div>No gradings yet. After ${kid.name} finishes a worksheet, upload a photo to mark it.</div>`
           : `<div class="history-list">${recentGradings.map(g => gradingItemHTML(g)).join("")}</div>`}
+      </div>
+
+      <div class="card" style="grid-column: 1 / -1;">
+        <div class="card-title">📝 Recent worksheets</div>
+        ${recent.length === 0
+          ? `<div class="empty"><div class="empty-icon">📄</div>No worksheets yet. Generate one from the Math, Reading, or Writing tab.</div>`
+          : `<div class="history-list">${recent.map(w => historyItemHTML(w, findGrading(w.id))).join("")}</div>`}
       </div>
     </div>
   `;
@@ -331,6 +417,9 @@ function attachDashboardListeners(kid) {
   });
   document.querySelectorAll("[data-action='del-ws']").forEach(el => {
     el.addEventListener("click", (e) => { e.stopPropagation(); deleteWorksheet(el.dataset.worksheetId); });
+  });
+  document.querySelectorAll("[data-goto-subject]").forEach(btn => {
+    btn.addEventListener("click", () => setCurrentTab(btn.dataset.gotoSubject));
   });
 }
 
@@ -1419,6 +1508,7 @@ function renderTemplatePreviewHTML(ws) {
   if (ws.templateId === "add_subtract_10")     return previewAddSubtract10(content, ws.modifiers);
   if (ws.templateId === "place_value_expanded") return previewPlaceValue(content, ws.modifiers);
   if (ws.templateId === "tracing_letters_numbers") return previewTracing(content, ws.modifiers, ws.kidId);
+  if (ws.templateId === "tracing_words") return previewTracingWords(content, ws.modifiers);
   if (ws.templateId === "tracing_shapes") return previewTracingShapes(content, ws.modifiers);
   if (ws.templateId === "count_to_10") return previewCountTo10(content, ws.modifiers);
   if (ws.templateId === "ways_to_make") return previewWaysToMake(content, ws.modifiers);
@@ -1919,6 +2009,49 @@ function previewTracingShapes(content, m) {
           ${divider}
           ${demo}
           ${dot}
+          ${ghosts}
+        </svg>
+      </div>
+    `;
+  }).join("");
+}
+
+function previewTracingWords(content, m) {
+  const words = content.words || [];
+  if (words.length === 0) {
+    return `<p class="muted">No words yet. Type some words above, or pick a word list.</p>`;
+  }
+  const fontSize = words.length <= 6 ? 40 : 34;
+  const padTop = 4;
+  const baseline = padTop + fontSize * 0.82;
+  const topLine = padTop + fontSize * 0.12;
+  const midLine = padTop + fontSize * 0.55;
+  const rowH = baseline + fontSize * 0.18;
+  const totalW = 800;
+
+  const guideLines = m.showGuideLines ? `
+    <line x1="0" y1="${topLine}" x2="${totalW}" y2="${topLine}" stroke="#bbb" stroke-width="0.8"/>
+    <line x1="0" y1="${midLine}" x2="${totalW}" y2="${midLine}" stroke="#bbb" stroke-width="0.8" stroke-dasharray="3 3"/>
+    <line x1="0" y1="${baseline}" x2="${totalW}" y2="${baseline}" stroke="#bbb" stroke-width="0.8"/>
+  ` : "";
+
+  return words.map(word => {
+    const safe = escapeHtml(word);
+    const demoW = fontSize * 0.6 * word.length + 30;
+    const ghostW = fontSize * 0.62 * word.length;
+    const gap = fontSize * 0.7;
+    const copies = [];
+    let x = demoW + 14;
+    while (x + ghostW <= totalW) { copies.push(x); x += ghostW + gap; }
+    const ghosts = copies.map(cx => `<text x="${cx}" y="${baseline}" font-family="KGPrimaryDots, Helvetica, Arial, sans-serif" font-size="${fontSize * 1.05}" fill="#666">${safe}</text>`).join("");
+    const dot = m.showStartDot ? `<circle cx="8" cy="${topLine + 3}" r="2.4" fill="#b53c3c"/>` : "";
+    return `
+      <div style="margin-bottom: 2px;">
+        <svg width="100%" viewBox="0 0 ${totalW} ${rowH}" preserveAspectRatio="xMinYMid meet" style="display:block;">
+          ${guideLines}
+          ${dot}
+          <line x1="${demoW - 10}" y1="${topLine - 4}" x2="${demoW - 10}" y2="${baseline + 4}" stroke="#999" stroke-width="0.6" stroke-dasharray="2 2"/>
+          <text x="14" y="${baseline}" font-family="Helvetica, Arial, sans-serif" font-weight="bold" font-size="${fontSize}" fill="#1f2024">${safe}</text>
           ${ghosts}
         </svg>
       </div>

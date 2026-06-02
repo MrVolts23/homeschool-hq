@@ -3870,6 +3870,154 @@ function buildWordSearch(words, opts) {
 }
 
 /* ============================================================
+   TEMPLATE — TRACING WORDS (handwriting, lowercase by default)
+   Maps to BC E1.11 / E3.11 (legible printing). Reuses the KG
+   Primary Dots tracing font: each ghost word is dotted to trace.
+============================================================ */
+window.TEMPLATES.tracing_words = {
+  id: "tracing_words",
+  label: "Tracing words (handwriting)",
+  subject: "writing",
+  grades: ["K", "1", "3"],
+  topicHint: "Handwriting",
+
+  modifiers: [
+    { id: "wordList", type: "select", label: "Words to trace",
+      options: [
+        { value: "custom",  label: "My own words (type below)" },
+        { value: "cvc",     label: "Starter words (cat, dog, sun…)" },
+        { value: "sight_k", label: "Kindergarten sight words" },
+        { value: "sight_1", label: "Grade 1 sight words" }
+      ], default: "cvc" },
+    { id: "customWords", type: "text", label: "My words (separate with spaces or commas)", default: "cat dog sun mom" },
+    { id: "letterCase", type: "select", label: "Letter case",
+      options: [
+        { value: "lower",    label: "lowercase (abc)" },
+        { value: "title",    label: "Capitalized (Abc)" },
+        { value: "as_typed", label: "As I typed them" }
+      ], default: "lower" },
+    { id: "maxWords", type: "number", label: "Max # of words", default: 8, min: 3, max: 14 },
+    { id: "showGuideLines", type: "boolean", label: "Show handwriting guide lines", default: true },
+    { id: "showStartDot", type: "boolean", label: "Show a starting dot on each word", default: false }
+  ],
+
+  generate(m) {
+    let raw;
+    if (m.wordList === "cvc") {
+      raw = ["cat", "dog", "sun", "hat", "pig", "bed", "cup", "map", "fox", "bus", "net", "jam"];
+    } else if (m.wordList === "sight_k") {
+      raw = (window.SIGHT_WORDS && window.SIGHT_WORDS.K) || [];
+    } else if (m.wordList === "sight_1") {
+      raw = (window.SIGHT_WORDS && window.SIGHT_WORDS["1"]) || [];
+    } else {
+      raw = (m.customWords || "").split(/[\s,]+/);
+    }
+    let words = raw.map(w => w.trim()).filter(Boolean);
+    words = words.map(w => {
+      if (m.letterCase === "lower") return w.toLowerCase();
+      if (m.letterCase === "title") return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+      return w;
+    });
+    words = words.slice(0, parseInt(m.maxWords, 10) || 8);
+    return { words, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const words = content.words || [];
+    const title = m.letterCase === "lower" ? "Tracing Words (lowercase)" : "Tracing Words";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(doc, "Trace each word. Start at the dot if shown, and write neatly on the lines.", y, pageW, margin);
+    y += 4;
+
+    const rowH = words.length <= 6 ? 86 : 74;
+    const fontSize = words.length <= 6 ? 40 : 34;
+
+    words.forEach(word => {
+      if (pdfNeedNewPage(doc, y, rowH, margin)) y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      drawTracingWordRow(doc, word, y, pageW, margin, fontSize, m, opts);
+      y += rowH;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+function drawTracingWordRow(doc, word, y, pageW, margin, fontSize, m, opts) {
+  const baseline = y + fontSize * 0.82 + 4;
+  const topLine  = y + fontSize * 0.12 + 4;
+  const midLine  = y + fontSize * 0.55 + 4;
+
+  // 3-line handwriting guides
+  if (m.showGuideLines) {
+    doc.setDrawColor(150, 150, 150);
+    doc.setLineWidth(0.5);
+    doc.line(margin, baseline, pageW - margin, baseline);
+    doc.line(margin, topLine, pageW - margin, topLine);
+    doc.setLineDashPattern([2.5, 3], 0);
+    doc.line(margin, midLine, pageW - margin, midLine);
+    doc.setLineDashPattern([], 0);
+  }
+
+  // Demo word — solid, bold (the model to copy)
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(fontSize);
+  doc.setTextColor(30, 30, 30);
+  doc.text(word, margin + 14, baseline);
+  const demoW = doc.getTextWidth(word) + 36;
+
+  if (m.showStartDot) {
+    doc.setFillColor(180, 60, 60);
+    doc.circle(margin + 10, topLine + 3, 1.8, "F");
+  }
+
+  // Divider between demo and tracing area
+  doc.setDrawColor(140, 140, 140);
+  doc.setLineWidth(0.4);
+  doc.setLineDashPattern([1.5, 2], 0);
+  doc.line(margin + demoW - 10, topLine - 4, margin + demoW - 10, baseline + 4);
+  doc.setLineDashPattern([], 0);
+
+  // Ghost copies in the dotted tracing font, repeated across the line
+  const useTracingFont = ensureTracingFontRegistered(doc);
+  const traceFontName = useTracingFont ? window.TRACING_FONT_NAME : "helvetica";
+  doc.setFont(traceFontName, "normal");
+  doc.setFontSize(fontSize * 1.05);
+  doc.setTextColor(90, 90, 90);
+  const ghostW = doc.getTextWidth(word);
+  const gap = fontSize * 0.7;
+  let x = margin + demoW + 14;
+  let drawn = 0;
+  while (x + ghostW <= pageW - margin) {
+    doc.text(word, x, baseline);
+    x += ghostW + gap;
+    drawn++;
+  }
+  // Guarantee at least one ghost copy even for a long word
+  if (drawn === 0 && margin + demoW + 14 + ghostW <= pageW - margin + ghostW) {
+    doc.text(word, margin + demoW + 14, baseline);
+  }
+
+  // Answer-key mode: overlay solid completed copies
+  if (opts.showAnswers) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(fontSize);
+    doc.setTextColor(30, 30, 30);
+    let ax = margin + demoW + 14;
+    while (ax + ghostW <= pageW - margin) {
+      doc.text(word, ax, baseline);
+      ax += ghostW + gap;
+    }
+  }
+  doc.setTextColor(0, 0, 0);
+}
+
+/* ============================================================
    SHARED AI-TEMPLATE HELPERS
 ============================================================ */
 // Robust JSON extraction shared by AI templates.
