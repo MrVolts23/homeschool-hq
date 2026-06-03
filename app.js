@@ -66,28 +66,35 @@ const uiTemplate = { math: null, reading: null, writing: null, geography: null }
 /* ------------------------------------------------------------
    STORAGE
 ------------------------------------------------------------ */
+// Grade ordering for per-subject levels (K through 6).
+const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6"];
+function gradeRank(g) { const i = GRADE_ORDER.indexOf(g); return i < 0 ? 0 : i; }
+function nextGrade(g) { const i = GRADE_ORDER.indexOf(g); return (i >= 0 && i < GRADE_ORDER.length - 1) ? GRADE_ORDER[i + 1] : null; }
+function gradeName(g) { return g === "K" ? "Kindergarten" : "Grade " + g; }
+function kidLevel(kid, subject) { return (kid.levels && kid.levels[subject]) || kid.gradeKey; }
+
 function loadState() {
+  let merged;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(DEFAULT_STATE);
-    const parsed = JSON.parse(raw);
-    // shallow-merge defaults so new fields don't break old data
-    const merged = { ...structuredClone(DEFAULT_STATE), ...parsed };
-    // Migrate kids to add new fields (references, etc.)
-    Object.keys(merged.kids || {}).forEach(kidId => {
-      const kid = merged.kids[kidId];
-      if (!kid.references) kid.references = {};
-      if (!kid.difficulty) kid.difficulty = {};
-      ["math", "reading", "writing", "geography"].forEach(s => {
-        if (!kid.references[s]) kid.references[s] = [];
-        if (kid.difficulty[s] == null) kid.difficulty[s] = kid.gradeKey === "K" && kid.age < 5 ? 3 : 5;
-      });
-    });
-    return merged;
+    merged = raw ? { ...structuredClone(DEFAULT_STATE), ...JSON.parse(raw) } : structuredClone(DEFAULT_STATE);
   } catch (e) {
     console.error("Failed to load state", e);
-    return structuredClone(DEFAULT_STATE);
+    merged = structuredClone(DEFAULT_STATE);
   }
+  // Normalize every kid (runs on fresh AND loaded state) so new fields always exist.
+  Object.keys(merged.kids || {}).forEach(kidId => {
+    const kid = merged.kids[kidId];
+    if (!kid.references) kid.references = {};
+    if (!kid.difficulty) kid.difficulty = {};
+    if (!kid.levels) kid.levels = {};
+    ["math", "reading", "writing", "geography"].forEach(s => {
+      if (!kid.references[s]) kid.references[s] = [];
+      if (kid.difficulty[s] == null) kid.difficulty[s] = (kid.gradeKey === "K" && kid.age < 5) ? 3 : 5;
+      if (!kid.levels[s]) kid.levels[s] = kid.gradeKey; // per-subject level seeds from nominal grade
+    });
+  });
+  return merged;
 }
 
 function saveState() {
@@ -322,15 +329,16 @@ function subjectFeedbackHTML(kid, subject, snap) {
     ? `<span class="score-badge ${last.score >= 85 ? "score-high" : last.score >= 65 ? "score-mid" : "score-low"}">${last.score}%</span>`
     : `<span class="muted" style="font-size:0.78rem;">no marks yet</span>`;
 
+  const readyChip = s.readyToAdvance ? ` <span class="tag" style="background:#dff3df; color:#2f7a2f;">⤴ ready to level up</span>` : "";
   return `
     <div class="card" style="display:flex; flex-direction:column; gap:0.45rem;">
       <div class="row-between">
         <strong>${meta[subject]}</strong>
-        <span class="tag tag-accent">Level ${s.difficulty}/10</span>
+        <span><span class="tag tag-accent">${gradeName(s.level)}</span> <span class="tag" style="font-size:0.7rem;">Diff ${s.difficulty}/10</span></span>
       </div>
       ${masteryBarHTML(s.mastery)}
       <div class="row-between" style="align-items:center;">
-        <span style="font-size:0.9rem;">${emoji} ${msg}</span>
+        <span style="font-size:0.9rem;">${emoji} ${msg}${readyChip}</span>
         ${lastBadge}
       </div>
       <button class="btn btn-ghost" data-goto-subject="${subject}" style="align-self:flex-start; font-size:0.8rem; padding:0.3rem 0.6rem;">Practice ${subject} →</button>
@@ -366,6 +374,8 @@ function renderDashboard(kid) {
         <div class="subtitle">${gradeLabel(kid)} • BC Curriculum</div>
       </div>
     </div>
+
+    ${promotionBannerHTML(kid, snap)}
 
     <div class="card" style="margin-bottom:1.2rem;">
       <div style="font-size:1.05rem; font-weight:600; margin-bottom:0.7rem;">${hero}</div>
@@ -425,6 +435,58 @@ function attachDashboardListeners(kid) {
   document.querySelectorAll("[data-goto-subject]").forEach(btn => {
     btn.addEventListener("click", () => setCurrentTab(btn.dataset.gotoSubject));
   });
+  document.querySelectorAll("[data-promote]").forEach(btn => {
+    btn.addEventListener("click", () => promoteSubject(state.currentKidId, btn.dataset.promote));
+  });
+  document.querySelectorAll("[data-promote-dismiss]").forEach(btn => {
+    btn.addEventListener("click", () => dismissPromotion(state.currentKidId, btn.dataset.promoteDismiss));
+  });
+}
+
+/* ============================================================
+   LEVEL PROGRESSION — promote a subject to the next grade
+============================================================ */
+function promoteSubject(kidId, subject) {
+  const kid = state.kids[kidId];
+  const nxt = nextGrade(kidLevel(kid, subject));
+  if (!nxt) { toast(`${kid.name} is already at the top grade for ${subjectLabel(subject)}.`, "error"); return; }
+  if (!kid.levels) kid.levels = {};
+  kid.levels[subject] = nxt;
+  kid.difficulty[subject] = 4;           // reset difficulty for the fresh level
+  uiTemplate[subject] = null;            // re-pick a default template for the new level
+  if (kid.promoteDismissed) delete kid.promoteDismissed[subject];
+  saveState();
+  toast(`🎉 ${kid.name} promoted to ${gradeName(nxt)} ${subjectLabel(subject)}!`, "success");
+  renderContent();
+}
+
+function dismissPromotion(kidId, subject) {
+  const kid = state.kids[kidId];
+  kid.promoteDismissed = kid.promoteDismissed || {};
+  kid.promoteDismissed[subject] = kidLevel(kid, subject); // don't nag again at this level
+  saveState();
+  renderContent();
+}
+
+function promotionBannerHTML(kid, snap) {
+  const dismissed = kid.promoteDismissed || {};
+  const ready = SUBJECTS.filter(s => snap[s].readyToAdvance && dismissed[s] !== snap[s].level);
+  if (!ready.length) return "";
+  return `
+    <div class="card" style="border:2px solid #6bbf6b; background:#f1fbf1; margin-bottom:1.2rem;">
+      <div style="font-weight:700; margin-bottom:0.5rem;">🎉 ${kid.name} is ready to level up!</div>
+      ${ready.map(s => {
+        const sn = snap[s];
+        return `<div class="row-between" style="align-items:center; padding:8px 0; border-top:1px solid #d8efd8; gap:0.8rem; flex-wrap:wrap;">
+          <div style="font-size:0.9rem;">${SUBJECT_META[s]} — mastered <strong>${gradeName(sn.level)}</strong> (${Math.round(sn.masteredRatio * 100)}% of standards at difficulty ${sn.difficulty}/10).</div>
+          <div style="white-space:nowrap;">
+            <button class="btn btn-primary" data-promote="${s}">Promote to ${gradeName(sn.nextGrade)} →</button>
+            <button class="btn btn-ghost" data-promote-dismiss="${s}" style="margin-left:4px;">Not yet</button>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>
+  `;
 }
 
 function gradeLabel(kid) {
@@ -520,7 +582,7 @@ function renderSubject(kid, subject) {
     .sort((a, b) => b.generatedAt - a.generatedAt)
     .slice(0, 8);
 
-  const templates = window.getTemplatesForSubjectGrade(subject, kid.gradeKey);
+  const templates = window.getTemplatesForSubjectGrade(subject, kidLevel(kid, subject));
   if (uiTemplate[subject] === null && templates.length > 0) {
     uiTemplate[subject] = templates[0].id;
   }
@@ -533,7 +595,7 @@ function renderSubject(kid, subject) {
     <div class="content-header">
       <div>
         <h2>${subjectLabel(subject)}</h2>
-        <div class="subtitle">${kid.name} • ${gradeLabel(kid)} • Difficulty ${kid.difficulty[subject]}/10</div>
+        <div class="subtitle">${kid.name} • ${gradeName(kidLevel(kid, subject))} ${subjectLabel(subject).toLowerCase()} • Difficulty ${kid.difficulty[subject]}/10</div>
       </div>
       <button class="btn btn-secondary" id="uploadGradeBtn">📤 Upload completed worksheet</button>
     </div>
@@ -904,9 +966,10 @@ function subjectLabel(s) {
 }
 
 function getCurriculumForKid(kid, subject) {
-  if (subject === "math") return window.CURRICULUM.math[kid.gradeKey];
-  if (subject === "geography") return window.CURRICULUM.geography[kid.gradeKey];
-  return window.CURRICULUM.ela[kid.gradeKey]; // reading + writing share ELA
+  const lvl = kidLevel(kid, subject); // per-subject level, not the nominal grade
+  if (subject === "math") return window.CURRICULUM.math[lvl];
+  if (subject === "geography") return window.CURRICULUM.geography[lvl];
+  return window.CURRICULUM.ela[lvl]; // reading + writing share ELA
 }
 
 function getTopicsForSubject(curriculum, subject) {
@@ -1313,10 +1376,11 @@ async function callClaudeForWorksheet({ kid, subject, topicId, count, difficulty
 }
 
 function buildWorksheetPrompt({ kid, subject, standardText, count, difficulty, notes, hasReferences }) {
-  const isPreK = kid.gradeKey === "K" && kid.age < 5;
+  const lvl = kidLevel(kid, subject);
+  const isPreK = lvl === "K" && kid.age < 5;
   return `You are a BC-curriculum-aligned worksheet generator for a homeschooled child.
 
-CHILD: ${kid.name}, age ${kid.age}, ${kid.gradeKey === "K" ? "Kindergarten" : "Grade " + kid.gradeKey} level${isPreK ? " (Pre-K bridge — keep it gentle and playful)" : ""}.
+CHILD: ${kid.name}, age ${kid.age}, ${gradeName(lvl)} level${isPreK ? " (Pre-K bridge — keep it gentle and playful)" : ""}.
 INTERESTS: ${kid.interests || "general"}
 PARENT NOTES: ${kid.notes || "none"}
 
@@ -1344,7 +1408,7 @@ Generate fresh questions in the SAME style as those references, never copy their
 }
 
 GUIDELINES:
-- Calibrate to BC curriculum for ${kid.gradeKey === "K" ? "Kindergarten" : "Grade " + kid.gradeKey}.
+- Calibrate to BC curriculum for ${gradeName(lvl)}.
 - For age 4 (Pre-K bridge), favor tracing, matching, picture-based questions.
 - For age 6 (Grade 1), favor short, concrete questions with visual or sentence-level scaffolding.
 - For age 8 (Grade 3), allow short word problems and multi-step thinking.
@@ -2653,15 +2717,20 @@ function upgradeState(current, steps) {
    STANDARDS TAB
 ============================================================ */
 function renderStandards(kid) {
+  const mathLvl = kidLevel(kid, "math");
+  const readLvl = kidLevel(kid, "reading");
+  const writeLvl = kidLevel(kid, "writing");
+  const geoLvl = kidLevel(kid, "geography");
   const subjects = [
-    { key: "math", label: "Math", curriculum: window.CURRICULUM.math[kid.gradeKey] },
-    { key: "ela",  label: "Reading & Writing", curriculum: window.CURRICULUM.ela[kid.gradeKey] }
+    { key: "math", label: `Math (${gradeName(mathLvl)})`, curriculum: window.CURRICULUM.math[mathLvl] },
+    { key: "ela",  label: `Reading & Writing (${gradeName(readLvl)}${writeLvl !== readLvl ? " / " + gradeName(writeLvl) : ""})`, curriculum: window.CURRICULUM.ela[readLvl] },
+    { key: "geography", label: `Geography (${gradeName(geoLvl)})`, curriculum: window.CURRICULUM.geography[geoLvl] }
   ];
   return `
     <div class="content-header">
       <div>
-        <h2>BC Standards — ${kid.name}</h2>
-        <div class="subtitle">${gradeLabel(kid)} • Tap a status pill to update mastery manually</div>
+        <h2>Standards — ${kid.name}</h2>
+        <div class="subtitle">Per-subject levels • Tap a status pill to update mastery manually</div>
       </div>
     </div>
 
@@ -2793,8 +2862,18 @@ function buildProgressSnapshot(kid) {
       focus = `Strong across the board — keep practicing and extend.`;
     }
 
+    // Level + readiness to advance to the next grade.
+    const level = kidLevel(kid, subject);
+    const next = nextGrade(level);
+    const masteredRatio = mastery.total > 0 ? (mastery.proficient + mastery.extending) / mastery.total : 0;
+    const readyToAdvance = !!next && mastery.total > 0 && masteredRatio >= 0.8 && kid.difficulty[subject] >= 8;
+
     subjects[subject] = {
       difficulty: kid.difficulty[subject],
+      level,
+      nextGrade: next,
+      readyToAdvance,
+      masteredRatio,
       mastery,
       lastGrading,
       lastActivity,
@@ -2829,7 +2908,7 @@ function masteryBarHTML(mastery) {
 
 // Pick the single best-fit template for a subject given the kid's grade + current focus.
 function recommendTemplateForSubject(kid, subject, s) {
-  const avail = window.getTemplatesForSubjectGrade(subject, kid.gradeKey);
+  const avail = window.getTemplatesForSubjectGrade(subject, kidLevel(kid, subject));
   if (!avail.length) return null;
   const availIds = new Set(avail.map(t => t.id));
   const weakText = ((s.weakStandards[0] && s.weakStandards[0].text) || "").toLowerCase();
@@ -2886,7 +2965,7 @@ function renderDailyPlan(kid) {
     return `
       <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:0.8rem;">
         <div style="min-width:0;">
-          <div><strong>${SUBJECT_META[subject]}</strong> <span class="tag tag-accent" style="margin-left:6px;">Lvl ${s.difficulty}</span></div>
+          <div><strong>${SUBJECT_META[subject]}</strong> <span class="tag tag-accent" style="margin-left:6px;">${gradeName(s.level)}</span> <span class="tag" style="font-size:0.7rem;">Diff ${s.difficulty}</span></div>
           <div style="margin-top:5px;">📄 <strong>${escapeHtml(tmpl.label)}</strong>${tmpl.usesAI ? " ✨" : ""}</div>
           <div class="muted" style="font-size:0.8rem; margin-top:3px;">${escapeHtml(reason)}</div>
         </div>
@@ -2903,7 +2982,7 @@ function renderDailyPlan(kid) {
       : `<span class="muted" style="font-size:0.78rem;">no marks yet</span>`;
     return `
       <div class="card" style="display:flex; flex-direction:column; gap:0.35rem;">
-        <div class="row-between"><strong>${SUBJECT_META[subject]}</strong><span class="tag tag-accent">Lvl ${s.difficulty}/10</span></div>
+        <div class="row-between"><strong>${SUBJECT_META[subject]}</strong><span><span class="tag tag-accent">${gradeName(s.level)}</span> <span class="tag" style="font-size:0.7rem;">Diff ${s.difficulty}/10</span></span></div>
         ${masteryBarHTML(s.mastery)}
         <div class="row-between" style="align-items:center;">${lastLine}</div>
       </div>
@@ -3039,7 +3118,7 @@ function attachReadingLogListeners(kid) {
 function renderPortfolio(kid) {
   const counts = countMastery(kid);
   const total = Object.values(counts).reduce((a, b) => a + b, 0);
-  const totalStandards = (window.CURRICULUM.math[kid.gradeKey]?.content.length || 0) + (window.CURRICULUM.ela[kid.gradeKey]?.content.length || 0);
+  const totalStandards = (window.CURRICULUM.math[kidLevel(kid, "math")]?.content.length || 0) + (window.CURRICULUM.ela[kidLevel(kid, "reading")]?.content.length || 0) + (window.CURRICULUM.geography[kidLevel(kid, "geography")]?.content.length || 0);
   return `
     <div class="content-header">
       <div>
@@ -3102,9 +3181,9 @@ function exportPortfolioPDF(kid) {
   doc.text(`Books in reading log: ${state.readingLog[kid.id]?.length || 0}`, margin + 14, y); y += 16;
   doc.text(`Average score: ${computeAvgScore(state.gradings[kid.id] || []) ?? "—"}%`, margin + 14, y); y += 24;
 
-  // Standards detail by subject
-  ["math", "ela"].forEach(subject => {
-    const c = window.CURRICULUM[subject][kid.gradeKey];
+  // Standards detail by subject (each at its own level)
+  [["math", "math"], ["ela", "reading"], ["geography", "geography"]].forEach(([cKey, levelSubject]) => {
+    const c = window.CURRICULUM[cKey][kidLevel(kid, levelSubject)];
     if (!c) return;
     doc.addPage(); y = margin;
     doc.setFont("helvetica", "bold"); doc.setFontSize(14);
@@ -3136,6 +3215,7 @@ function openSettings() {
 
 function renderKidProfilesEdit() {
   const wrap = document.getElementById("kidProfilesEdit");
+  const gradeOpts = (sel) => GRADE_ORDER.map(g => `<option value="${g}" ${sel === g ? "selected" : ""}>${gradeName(g)}</option>`).join("");
   wrap.innerHTML = Object.values(state.kids).map(kid => `
     <div style="border: 1px solid var(--border); border-radius: 6px; padding: 0.8rem; margin-bottom: 0.8rem;">
       <h4 style="margin-bottom: 0.5rem;">${kid.name}</h4>
@@ -3145,12 +3225,19 @@ function renderKidProfilesEdit() {
           <input type="number" data-kid-field="age" data-kid-id="${kid.id}" value="${kid.age}" />
         </div>
         <div class="form-group">
-          <label>Grade level (K, 1, 3)</label>
-          <select data-kid-field="gradeKey" data-kid-id="${kid.id}">
-            <option value="K" ${kid.gradeKey === "K" ? "selected" : ""}>BC Kindergarten</option>
-            <option value="1" ${kid.gradeKey === "1" ? "selected" : ""}>BC Grade 1</option>
-            <option value="3" ${kid.gradeKey === "3" ? "selected" : ""}>BC Grade 3</option>
-          </select>
+          <label>Nominal grade (for display)</label>
+          <select data-kid-field="gradeKey" data-kid-id="${kid.id}">${gradeOpts(kid.gradeKey)}</select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Per-subject levels <span class="muted" style="font-weight:400;">— each subject advances on its own; the app suggests promotions, but you can set them here too</span></label>
+        <div class="grid grid-2">
+          ${["math", "reading", "writing", "geography"].map(subj => `
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+              <span style="min-width:70px; font-size:0.85rem; text-transform:capitalize;">${subj}</span>
+              <select data-kid-level="${subj}" data-kid-id="${kid.id}" style="flex:1;">${gradeOpts(kidLevel(kid, subj))}</select>
+            </div>
+          `).join("")}
         </div>
       </div>
       <div class="form-group">
@@ -3169,13 +3256,20 @@ function saveSettings() {
   state.settings.apiKey = document.getElementById("apiKeyInput").value.trim();
   state.settings.model = document.getElementById("modelSelect").value;
 
-  // Save kid profiles
-  document.querySelectorAll("[data-kid-id]").forEach(el => {
+  // Save kid profiles (plain fields)
+  document.querySelectorAll("[data-kid-field]").forEach(el => {
     const id = el.dataset.kidId;
     const field = el.dataset.kidField;
     let val = el.value;
     if (field === "age") val = parseInt(val, 10) || state.kids[id].age;
     state.kids[id][field] = val;
+  });
+  // Save per-subject levels
+  document.querySelectorAll("[data-kid-level]").forEach(el => {
+    const id = el.dataset.kidId;
+    const subj = el.dataset.kidLevel;
+    if (!state.kids[id].levels) state.kids[id].levels = {};
+    state.kids[id].levels[subj] = el.value;
   });
 
   saveState();

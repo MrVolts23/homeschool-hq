@@ -2712,19 +2712,22 @@ window.TEMPLATES.reading_passage_gr3 = {
       mixed:      "an age-appropriate passage — you choose fiction or nonfiction"
     }[mods.genre] || "an original short passage";
 
+    const lvl = tmplLevel(kid, this.subject);
+    const gw = gradeWord(lvl);
+
     const topic = mods.topicHint && mods.topicHint.trim()
       ? `The topic must be: ${mods.topicHint.trim()}.`
       : (kid.interests
           ? `Theme it around the child's interests when possible: ${kid.interests}.`
-          : "Pick a topic a Grade 3 reader would find engaging — nature, animals, history, sports, science, or everyday life.");
+          : `Pick a topic a ${gw} reader would find engaging — nature, animals, history, sports, science, or everyday life.`);
 
     const extras = [];
     if (mods.includeVocab) extras.push("Include exactly one vocabulary question that asks the meaning of a specific word from the passage (give the word in quotes).");
     if (mods.includeInference) extras.push("Include exactly one inference question that asks \"Why do you think…\" or \"What does this tell us about…\"");
 
-    return `You are a BC-curriculum-aligned worksheet generator for a homeschooled Grade 3 student.
+    return `You are a BC-curriculum-aligned worksheet generator for a homeschooled ${gw} student.
 
-CHILD: ${kid.name}, age ${kid.age}, BC Grade 3 reading level.
+CHILD: ${kid.name}, age ${kid.age}, ${gw} reading level.
 INTERESTS: ${kid.interests || "(none specified)"}
 PARENT NOTES: ${kid.notes || "(none)"}
 
@@ -2733,7 +2736,7 @@ TASK: Write ${genreText}, ${wordRange} long, and ${mods.questionCount} comprehen
 ${topic}
 
 WRITING REQUIREMENTS:
-- Reading level: BC Grade 3 (vocabulary mostly 1–2 syllables, some 3-syllable words OK).
+- Reading level: ${gw} (calibrate vocabulary and sentence complexity to this grade).
 - Sentence variety: short and medium sentences mixed; at least 2 compound sentences.
 - Voice: warm, clear, age-appropriate. No violence, no scary content.
 - Give the passage a short engaging title.
@@ -4029,8 +4032,14 @@ function parseAIJSON(text) {
   return JSON.parse(m[0]);
 }
 
-function gradeWord(kid) {
-  return kid.gradeKey === "K" ? "Kindergarten" : "Grade " + kid.gradeKey;
+// Per-subject level (falls back to nominal grade). Mirrors app.js kidLevel.
+function tmplLevel(kid, subject) {
+  return (kid.levels && kid.levels[subject]) || kid.gradeKey;
+}
+// Accepts a grade string ("K","1",...,"6"). Back-compat: if passed a kid object, use its nominal grade.
+function gradeWord(g) {
+  if (g && typeof g === "object") g = g.gradeKey;
+  return g === "K" ? "Kindergarten" : "Grade " + g;
 }
 
 /* ============================================================
@@ -4062,18 +4071,23 @@ window.TEMPLATES.math_word_problems = {
   ],
 
   buildPrompt(mods, kid) {
+    const lvl = tmplLevel(kid, this.subject);
     const gradeBand = {
       "K": "Numbers and totals must stay within 10. One-step only. Very concrete (counting toys, snacks, animals).",
       "1": "Numbers within 20. One-step addition or subtraction. Concrete, everyday situations.",
-      "3": "Numbers within 1000 for + and −. Multiplication/division facts within 12×12. One or two steps allowed."
-    }[kid.gradeKey] || "Grade-appropriate numbers, one step.";
+      "2": "Numbers within 100. One- or two-step addition and subtraction. Everyday situations.",
+      "3": "Numbers within 1000 for + and −. Multiplication/division facts within 12×12. One or two steps.",
+      "4": "Numbers within 10 000; multiplication/division of 2–3 digit by 1 digit; simple fractions/decimals. Two steps OK.",
+      "5": "Multi-digit multiplication/division; decimals to thousandths; fractions with like denominators. Multi-step.",
+      "6": "Decimals, fractions, percents, integers, and order of operations. Multi-step reasoning expected."
+    }[lvl] || "Grade-appropriate numbers and steps.";
 
     const opText = {
       auto: "Choose operations appropriate to the grade.",
       addition: "All problems should use addition.",
       subtraction: "All problems should use subtraction.",
       add_sub: "Mix addition and subtraction.",
-      mult_div: "Use multiplication and division (Grade 3 level, facts within 12×12)."
+      mult_div: "Use multiplication and division appropriate to the grade level."
     }[mods.operation] || "Choose operations appropriate to the grade.";
 
     const theme = mods.topicHint && mods.topicHint.trim()
@@ -4083,7 +4097,7 @@ window.TEMPLATES.math_word_problems = {
 
     return `You are a BC-curriculum math worksheet generator for a homeschooled child.
 
-CHILD: ${kid.name}, age ${kid.age}, ${gradeWord(kid)} level.
+CHILD: ${kid.name}, age ${kid.age}, ${gradeWord(lvl)} level.
 INTERESTS: ${kid.interests || "(none specified)"}
 
 TASK: Write ${mods.count} math STORY problems (word problems).
@@ -4245,9 +4259,13 @@ window.TEMPLATES.spelling_with_sentences = {
   ],
 
   buildPrompt(mods, kid) {
-    const level = kid.gradeKey === "1"
-      ? "Grade 1 spelling: mostly 3–4 letter CVC words, simple blends, common sight words."
-      : "Grade 3 spelling: 1–2 syllable words, blends, digraphs, long-vowel patterns, common irregular words.";
+    const lvl = tmplLevel(kid, this.subject);
+    const r = ["K", "1", "2", "3", "4", "5", "6"].indexOf(lvl);
+    const level = r <= 1
+      ? `${gradeWord(lvl)} spelling: mostly 3–4 letter CVC words, simple blends, common sight words.`
+      : r <= 3
+        ? `${gradeWord(lvl)} spelling: 1–2 syllable words, blends, digraphs, long-vowel patterns, common irregular words.`
+        : `${gradeWord(lvl)} spelling: multisyllabic words, prefixes/suffixes, roots, and commonly misspelled words.`;
 
     const focusText = {
       mixed: "A balanced mix appropriate to the grade.",
@@ -4260,7 +4278,7 @@ window.TEMPLATES.spelling_with_sentences = {
 
     return `You are a BC-curriculum spelling worksheet generator.
 
-CHILD: ${kid.name}, age ${kid.age}, ${gradeWord(kid)} level.
+CHILD: ${kid.name}, age ${kid.age}, ${gradeWord(lvl)} level.
 
 TASK: Choose ${mods.count} spelling words and write one simple example sentence for each.
 
@@ -4442,7 +4460,7 @@ window.TEMPLATES.story_starters = {
       ? `Weave in the child's interests where natural: ${kid.interests}.`
       : "Use universally appealing kid topics.";
 
-    return `You are a creative-writing prompt generator for a homeschooled ${gradeWord(kid)} child named ${kid.name} (age ${kid.age}).
+    return `You are a creative-writing prompt generator for a homeschooled ${gradeWord(tmplLevel(kid, this.subject))} child named ${kid.name} (age ${kid.age}).
 
 TASK: Write ${mods.count} story-starter prompts featuring ${vibeText}.
 
@@ -4728,11 +4746,16 @@ window.TEMPLATES.geography_worksheet = {
   ],
 
   buildPrompt(mods, kid) {
+    const lvl = tmplLevel(kid, this.subject);
     const band = {
       "K": "Kindergarten: very concrete — home, family, community, land vs water, weather/seasons, simple position words. Picture-friendly, 1-step recall.",
       "1": "Grade 1: simple maps & keys, the 4 cardinal directions, the community, intro to continents/oceans, Canada & BC, basic landforms.",
-      "3": "Grade 3: map tools (key, compass rose, grid), the 7 continents and 5 oceans, Canada's provinces/territories & capitals, BC features, landforms, climate, how geography affects people."
-    }[kid.gradeKey] || "Grade-appropriate geography.";
+      "2": "Grade 2: maps & globes, cardinal directions, communities around the world, Canada's regions, landforms and bodies of water.",
+      "3": "Grade 3: map tools (key, compass rose, grid), the 7 continents and 5 oceans, Canada's provinces/territories & capitals, BC features, landforms, climate.",
+      "4": "Grade 4: grid/scale/legend, Canada's provinces & physical regions, climate zones, natural resources, Indigenous territories.",
+      "5": "Grade 5: latitude/longitude & hemispheres, Canada's physical/political geography, North America, biomes, settlement and human impact.",
+      "6": "Grade 6: world regions and countries, capitals, global climate zones/biomes, major physical features, economic geography, map projections."
+    }[lvl] || "Grade-appropriate geography.";
 
     const topicText = {
       auto: "Choose a geography topic appropriate to the grade.",
@@ -4753,7 +4776,7 @@ window.TEMPLATES.geography_worksheet = {
 
     return `You are a geography worksheet generator for a homeschooled child.
 
-CHILD: ${kid.name}, age ${kid.age}, ${gradeWord(kid)} level.
+CHILD: ${kid.name}, age ${kid.age}, ${gradeWord(lvl)} level.
 INTERESTS: ${kid.interests || "(none specified)"}
 
 GRADE CALIBRATION: ${band}
@@ -4874,6 +4897,26 @@ RETURN VALID JSON ONLY (no markdown fences):
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
 
-window.getTemplatesForSubjectGrade = function (subject, gradeKey) {
-  return window.TEMPLATES_LIST.filter(t => t.subject === subject && t.grades.includes(gradeKey));
+// Template availability is a RANGE: from the lowest grade it lists, open-ended
+// upward — unless it's a young-only template capped here. This way kids who
+// advance keep their templates (AI + difficulty handle harder calibration).
+const GRADE_SEQ = ["K", "1", "2", "3", "4", "5", "6"];
+function gSeqRank(g) { const i = GRADE_SEQ.indexOf(g); return i < 0 ? 0 : i; }
+const TEMPLATE_MAX_GRADE = {
+  count_to_10: "1", ways_to_make: "2",
+  tracing_shapes: "1", tracing_letters_numbers: "2", tracing_words: "3",
+  sight_words_practice: "2",
+  capitalize_questions: "3", story_middle_end: "3", combine_sentences: "3",
+  describing_words_fill: "3", describing_words_choose: "3"
+};
+
+window.getTemplatesForSubjectGrade = function (subject, level) {
+  const L = gSeqRank(level);
+  return window.TEMPLATES_LIST.filter(t => {
+    if (t.subject !== subject) return false;
+    const min = Math.min.apply(null, t.grades.map(gSeqRank));
+    const capG = t.maxGrade != null ? t.maxGrade : TEMPLATE_MAX_GRADE[t.id];
+    const max = capG != null ? gSeqRank(capG) : Infinity;
+    return L >= min && L <= max;
+  });
 };
