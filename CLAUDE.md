@@ -27,10 +27,10 @@ All state lives in browser `localStorage` under the key `homeschoolHQ_v1`.
 ## Architecture quick reference
 
 - **Stack**: Vanilla HTML/CSS/JS, no build, no framework, no package.json.
-- **Script load order matters** (declared in `index.html`): `curriculum.js` → `tracing-font.js` → `worksheet-templates.js` → `app.js`.
+- **Script load order matters** (declared in `index.html`): `curriculum.js` → `map-data.js` → `tracing-font.js` → `worksheet-templates.js` → `app.js`.
 - **State**: `localStorage["homeschoolHQ_v1"]` — single JSON blob. See `DEFAULT_STATE` in `app.js` for shape.
 - **AI calls**: `callClaudeAPI()` in `app.js` (~line 1087). POSTs directly to `https://api.anthropic.com/v1/messages` with `anthropic-dangerous-direct-browser-access: true`. The key is whatever the user typed into Settings.
-- **Cache-busting**: `index.html` appends `?v=kgdots1` to script tags. Bump this string when shipping JS changes if you want forced reloads.
+- **Cache-busting**: script tags carry a `?v=DATE` query (e.g. `?v=2026-06-02d`). **Bump it on every JS/data change** — the local server sends no cache headers, so a stale file will otherwise load (this has bitten us: a stale `curriculum.js` crashed the dashboard). `tracing-font.js` keeps its own `?v=kgdots1` since it never changes.
 
 ## File map
 
@@ -41,6 +41,7 @@ All state lives in browser `localStorage` under the key `homeschoolHQ_v1`.
 | `curriculum.js` | BC curriculum data — Math + ELA, K through Gr 3, each standard has a stable ID for mastery tracking |
 | `worksheet-templates.js` | Scholastic-style printable worksheet generators (jsPDF). Each template has `generate(mods)` + `renderPDF(doc, content, mods, kid)` |
 | `tracing-font.js` | Base64-embedded TTF for handwriting/tracing worksheets — big file (~157KB) because the font is inlined |
+| `map-data.js` | `window.MAP_DATA` — simplified, projected outline polygons for Canada (13 provinces/territories) and the USA (lower-48 states), used by the `map_label` template. Built from public GeoJSON, decimated + normalized to 0–1 coords (~98KB) |
 | `styles.css` | Visual design, per-kid color themes, modals |
 
 ## The data model

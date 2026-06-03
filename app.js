@@ -1532,7 +1532,44 @@ function renderTemplatePreviewHTML(ws) {
   if (ws.templateId === "spelling_with_sentences") return previewSpelling(content, ws.modifiers);
   if (ws.templateId === "story_starters") return previewStoryStarters(content, ws.modifiers);
   if (ws.templateId === "geography_worksheet") return previewGeography(content, ws.modifiers);
+  if (ws.templateId === "map_label") return previewMapLabel(content, ws.modifiers);
   return "<p class='muted'>Preview not available for this template — but the PDF will render correctly.</p>";
+}
+
+function previewMapLabel(content, m) {
+  const isColor = content.mode === "color";
+  const H = 260, W = Math.round(content.aspect * H);
+  const polys = content.regions.map(r => r.rings.map(ring => {
+    const pts = ring.map(([x, y]) => `${(x * W).toFixed(1)},${(y * H).toFixed(1)}`).join(" ");
+    return `<polygon points="${pts}" fill="#f5f6f4" stroke="#464646" stroke-width="0.7"/>`;
+  }).join("")).join("");
+  const numbers = isColor ? "" : content.regions.map(r => {
+    const cx = (r.label[0] * W).toFixed(1), cy = (r.label[1] * H).toFixed(1);
+    return `<circle cx="${cx}" cy="${cy}" r="8" fill="#fff" stroke="#666" stroke-width="0.5"/><text x="${cx}" y="${parseFloat(cy) + 3}" text-anchor="middle" font-size="9" font-weight="bold" fill="#222">${r.number}</text>`;
+  }).join("");
+
+  const wordBank = content.showWordBank
+    ? `<div style="background:#ecf0e9; border-radius:6px; padding:8px 12px; margin:12px 0; font-size:13px;"><strong>Word bank:</strong> ${content.wordBank.map(escapeHtml).join(" &nbsp;•&nbsp; ")}</div>`
+    : "";
+
+  let list = "";
+  if (!isColor) {
+    const cols = content.regions.length <= 16 ? 2 : 3;
+    list = `<div style="columns:${cols}; column-gap:24px; margin-top:8px;">` +
+      content.regions.map(r => `<div style="font-size:13px; padding:4px 0; break-inside:avoid;"><strong>${r.number}.</strong> <span style="display:inline-block; border-bottom:1.5px solid #222; min-width:120px; height:16px; vertical-align:middle;"></span></div>`).join("") +
+      `</div>`;
+  }
+
+  return `
+    <div style="text-align:center;">
+      <svg width="100%" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" style="max-height:300px; border:1px solid #eee; background:#fff;">
+        ${polys}
+        ${numbers}
+      </svg>
+    </div>
+    ${wordBank}
+    ${list}
+  `;
 }
 
 function previewGeography(content, m) {

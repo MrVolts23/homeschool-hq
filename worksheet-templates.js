@@ -4549,6 +4549,147 @@ RETURN VALID JSON ONLY (no markdown fences):
 };
 
 /* ============================================================
+   TEMPLATE — LABEL THE MAP (Canada / USA)  — local, no AI
+   Draws a simplified projected outline map from window.MAP_DATA,
+   numbers each region, and gives a fill-in list + word bank.
+   Answer-key mode fills the names.
+============================================================ */
+window.TEMPLATES.map_label = {
+  id: "map_label",
+  label: "Label the map (Canada / USA)",
+  subject: "geography",
+  grades: ["1", "3"],
+  topicHint: "Maps",
+
+  modifiers: [
+    { id: "country", type: "select", label: "Map",
+      options: [
+        { value: "canada", label: "Canada — provinces & territories" },
+        { value: "usa",    label: "USA — states (lower 48)" }
+      ], default: "canada" },
+    { id: "mode", type: "select", label: "Activity",
+      options: [
+        { value: "label", label: "Number the regions + write the names" },
+        { value: "color", label: "Color the map (outlines only)" }
+      ], default: "label" },
+    { id: "wordBank", type: "boolean", label: "Show a word bank of the names", default: true }
+  ],
+
+  generate(m) {
+    const data = (window.MAP_DATA || {})[m.country] || { regions: [], aspect: 1 };
+    const regions = data.regions.map(r => ({ name: r.name, rings: r.rings, label: r.label }));
+    // Number in reading order (top→bottom, then left→right within a band)
+    regions.sort((a, b) => (a.label[1] - b.label[1]) || (a.label[0] - b.label[0]));
+    regions.forEach((r, i) => { r.number = i + 1; });
+    // Word bank = shuffled names
+    const wordBank = regions.map(r => r.name);
+    for (let i = wordBank.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const t = wordBank[i]; wordBank[i] = wordBank[j]; wordBank[j] = t;
+    }
+    return { country: m.country, aspect: data.aspect, regions, wordBank, mode: m.mode, showWordBank: m.wordBank };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const isColor = content.mode === "color";
+    const title = content.country === "usa"
+      ? (isColor ? "Color the United States" : "Label the United States (Lower 48)")
+      : (isColor ? "Color the Provinces & Territories of Canada" : "Label the Provinces & Territories of Canada");
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    const instr = isColor
+      ? "Color each region a different color. Try not to let two touching regions share a color!"
+      : "Each region has a number. Write its name next to the matching number below.";
+    y = pdfDrawInstruction(doc, instr, y, pageW, margin);
+
+    // Fit the map box by aspect, capped in height to leave room for the list
+    const usableW = pageW - margin * 2;
+    const capH = content.mode === "color" ? 560 : 330;
+    let mapW = Math.min(usableW, capH * content.aspect);
+    let mapH = mapW / content.aspect;
+    if (mapH > capH) { mapH = capH; mapW = capH * content.aspect; }
+    const box = { x: margin + (usableW - mapW) / 2, y: y, w: mapW, h: mapH };
+
+    // Draw regions (light fill + outline)
+    content.regions.forEach(r => {
+      r.rings.forEach(ring => pdfDrawMapRing(doc, ring, box));
+    });
+    // Numbers on top (label mode)
+    if (!isColor) {
+      content.regions.forEach(r => {
+        const cx = box.x + r.label[0] * box.w;
+        const cy = box.y + r.label[1] * box.h;
+        doc.setFillColor(255, 255, 255);
+        doc.circle(cx, cy, 7, "F");
+        doc.setDrawColor(60); doc.setLineWidth(0.4); doc.circle(cx, cy, 7, "S");
+        doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(20);
+        doc.text(String(r.number), cx, cy + 3, { align: "center" });
+      });
+    }
+    y = box.y + mapH + 16;
+
+    // Word bank
+    if (content.showWordBank) {
+      const names = content.wordBank.join("   •   ");
+      const lines = doc.splitTextToSize(names, usableW - 20);
+      const bh = lines.length * 13 + 22;
+      if (pdfNeedNewPage(doc, y, bh, margin)) y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      doc.setFillColor(236, 240, 233);
+      doc.roundedRect(margin, y, usableW, bh, 5, 5, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(40);
+      doc.text("Word bank", margin + 10, y + 14);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(30);
+      doc.text(lines, margin + 10, y + 28);
+      y += bh + 14;
+    }
+
+    // Numbered fill-in list (label mode)
+    if (!isColor) {
+      const n = content.regions.length;
+      const cols = n <= 16 ? 2 : n <= 33 ? 3 : 4;
+      const colW = usableW / cols;
+      const rowH = 20;
+      const rows = Math.ceil(n / cols);
+      const startY = y;
+      content.regions.forEach((r, i) => {
+        const col = Math.floor(i / rows);
+        const row = i % rows;
+        const cx = margin + col * colW;
+        const cy = startY + row * rowH;
+        if (cy + rowH > pageH - margin - 30) return; // safety: skip overflow (rare)
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(20);
+        doc.text(String(r.number) + ".", cx, cy + 10);
+        doc.setDrawColor(120); doc.setLineWidth(0.5);
+        doc.line(cx + 18, cy + 12, cx + colW - 12, cy + 12);
+        if (opts.showAnswers) {
+          doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(140, 30, 30);
+          doc.text(r.name, cx + 22, cy + 9);
+          doc.setTextColor(20);
+        }
+      });
+    }
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+function pdfDrawMapRing(doc, ring, box) {
+  if (!ring || ring.length < 3) return;
+  const pts = ring.map(([x, y]) => [box.x + x * box.w, box.y + y * box.h]);
+  const deltas = [];
+  for (let i = 1; i < pts.length; i++) deltas.push([pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]]);
+  doc.setFillColor(245, 246, 244);
+  doc.setDrawColor(70, 70, 70);
+  doc.setLineWidth(0.6);
+  doc.lines(deltas, pts[0][0], pts[0][1], [1, 1], "FD", true);
+}
+
+/* ============================================================
    AI TEMPLATE — GEOGRAPHY WORKSHEET (K, Gr1, Gr3)
    Flexible Q&A geography sheet. Topic-selectable (or custom, so the
    parent can steer it), grade-calibrated, rendered as a numbered
