@@ -35,6 +35,17 @@ function startServer() {
       try {
         let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
         if (urlPath === '/' || urlPath === '') urlPath = '/index.html';
+        // Serve saved completed-worksheet images from the app's data folder.
+        if (urlPath.startsWith('/_gradeimg/')) {
+          const name = path.basename(urlPath); // strip any path components for safety
+          const imgPath = path.join(gradeImagesDir(), name);
+          fs.readFile(imgPath, (err, data) => {
+            if (err) { res.writeHead(404); res.end('Not found'); return; }
+            res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+            res.end(data);
+          });
+          return;
+        }
         // Resolve safely inside APP_ROOT (no path traversal)
         const filePath = path.normalize(path.join(APP_ROOT, urlPath));
         if (!filePath.startsWith(APP_ROOT)) { res.writeHead(403); res.end('Forbidden'); return; }
@@ -118,6 +129,26 @@ function writeBackup(json) {
   }
 }
 
+// Saved completed-worksheet photos live in the data folder (survives updates),
+// not in localStorage — keeps the data store small.
+function gradeImagesDir() { return path.join(app.getPath('userData'), 'grade-images'); }
+
+function writeGradeImage(id, dataUrl) {
+  try {
+    if (!id || !dataUrl) return { ok: false, error: 'missing' };
+    const m = String(dataUrl).match(/^data:image\/[^;]+;base64,(.+)$/);
+    if (!m) return { ok: false, error: 'bad data url' };
+    const dir = gradeImagesDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const safe = String(id).replace(/[^a-zA-Z0-9_-]/g, '') + '.jpg';
+    fs.writeFileSync(path.join(dir, safe), Buffer.from(m[1], 'base64'));
+    return { ok: true, file: safe };
+  } catch (e) {
+    console.error('[gradeimg]', e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
 function registerBackupHandlers() {
   ipcMain.handle('hs-backup-save', (_e, json) => writeBackup(json));
   ipcMain.handle('hs-backup-open', () => {
@@ -126,6 +157,7 @@ function registerBackupHandlers() {
     shell.openPath(d);
     return true;
   });
+  ipcMain.handle('hs-gradeimg-save', (_e, id, dataUrl) => writeGradeImage(id, dataUrl));
 }
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────

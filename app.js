@@ -2634,18 +2634,38 @@ function renderGradingInto(resultDiv, grading, worksheet, kidId, previous) {
   }
 }
 
+// Resolve the saved completed-worksheet photo for a grading (disk path or base64 fallback).
+function gradeImageSrc(grading) {
+  if (grading && grading.imageFile) return "/_gradeimg/" + encodeURIComponent(grading.imageFile) + "?t=" + (grading.gradedAt || 0);
+  if (grading && grading.image) return grading.image;
+  return null;
+}
+function showSavedGradeImage(grading) {
+  const gp = document.getElementById("gradePreview");
+  if (!gp) return;
+  const src = gradeImageSrc(grading);
+  if (src) {
+    gp.hidden = false;
+    gp.innerHTML = `<p class="muted" style="margin-top:0.6rem; font-size:0.8rem;">The sheet you uploaded:</p><img src="${src}" alt="Completed worksheet" style="max-width:100%; max-height:340px; border-radius:6px; margin-top:0.3rem;" />`;
+  }
+}
+
 function openGradeModal(worksheetId) {
   currentGradeWorksheetId = worksheetId || null;
   currentGradeFile = null;
-  document.getElementById("gradePreview").hidden = true;
+  const gp = document.getElementById("gradePreview");
+  gp.hidden = true; gp.innerHTML = "";
   document.getElementById("runGradingBtn").disabled = true;
   document.getElementById("gradeFileInput").value = "";
   const resultDiv = document.getElementById("gradeResult");
   resultDiv.hidden = true;
   resultDiv.innerHTML = "";
-  // If this worksheet was already marked, show that mark right away (persistent memory).
+  // If this worksheet was already marked, show that mark + the photo right away.
   const existing = worksheetId ? findGrading(worksheetId) : null;
-  if (existing) renderGradingInto(resultDiv, existing, findWorksheet(worksheetId), state.currentKidId, true);
+  if (existing) {
+    showSavedGradeImage(existing);
+    renderGradingInto(resultDiv, existing, findWorksheet(worksheetId), state.currentKidId, true);
+  }
   document.getElementById("gradeModal").hidden = false;
 }
 
@@ -2655,11 +2675,13 @@ function viewGrading(gradingId) {
   if (!hit) return;
   currentGradeWorksheetId = hit.grading.worksheetId || null;
   currentGradeFile = null;
-  document.getElementById("gradePreview").hidden = true;
+  const gp = document.getElementById("gradePreview");
+  gp.hidden = true; gp.innerHTML = "";
   document.getElementById("runGradingBtn").disabled = true;
   document.getElementById("gradeFileInput").value = "";
   const resultDiv = document.getElementById("gradeResult");
   const ws = hit.grading.worksheetId ? findWorksheet(hit.grading.worksheetId) : null;
+  showSavedGradeImage(hit.grading);
   renderGradingInto(resultDiv, hit.grading, ws, hit.kidId, true);
   document.getElementById("gradeModal").hidden = false;
 }
@@ -2691,6 +2713,18 @@ async function runGrading() {
   try {
     const worksheet = currentGradeWorksheetId ? findWorksheet(currentGradeWorksheetId) : null;
     const grading = await callClaudeForGrading(currentGradeFile, worksheet);
+
+    // Save a compact copy of the completed photo so it can be reviewed later.
+    // Disk (Mac app) keeps localStorage small; base64 is a browser-only fallback.
+    try {
+      const small = await resizeImageToDataUrl(currentGradeFile, 1100, 0.6);
+      if (window.hsBackup && window.hsBackup.saveGradeImage) {
+        const r = await window.hsBackup.saveGradeImage(grading.id, small);
+        if (r && r.ok) grading.imageFile = r.file;
+      } else {
+        grading.image = small;
+      }
+    } catch (imgErr) { /* image is optional — don't block grading */ }
 
     // Persist
     const kidId = state.currentKidId;
