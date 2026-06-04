@@ -14,3 +14,7 @@ homeschoolHQ-export-*.json
 .env
 .env.local
 *.local
+
+# Electron
+node_modules/
+dist/
