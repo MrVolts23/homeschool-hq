@@ -457,6 +457,9 @@ function attachDashboardListeners(kid) {
   document.querySelectorAll("[data-action='del-ws']").forEach(el => {
     el.addEventListener("click", (e) => { e.stopPropagation(); deleteWorksheet(el.dataset.worksheetId); });
   });
+  document.querySelectorAll("[data-action='view-grading']").forEach(el => {
+    el.addEventListener("click", (e) => { e.stopPropagation(); viewGrading(el.dataset.gradingId); });
+  });
   document.querySelectorAll("[data-goto-subject]").forEach(btn => {
     btn.addEventListener("click", () => setCurrentTab(btn.dataset.gotoSubject));
   });
@@ -529,7 +532,7 @@ function historyItemHTML(w, grading) {
         <div class="meta-title">${escapeHtml(w.title)}</div>
         <div class="meta-sub">${formatDate(w.generatedAt)} • ${capitalize(w.subject)} • Difficulty ${w.difficulty}</div>
       </div>
-      ${score !== null ? `<span class="score-badge ${scoreClass}">${score}%</span>` : `<button class="btn btn-ghost" data-action="grade" data-worksheet-id="${w.id}" title="Upload completed photo to mark">Mark</button>`}
+      ${score !== null ? `<span class="score-badge ${scoreClass}" data-action="view-grading" data-grading-id="${grading.id}" style="cursor:pointer;" title="View the mark & Claude's notes">${score}%</span>` : `<button class="btn btn-ghost" data-action="grade" data-worksheet-id="${w.id}" title="Upload completed photo to mark">Mark</button>`}
       ${arrow}
       <button class="icon-btn" data-action="del-ws" data-worksheet-id="${w.id}" title="Delete">✕</button>
     </div>
@@ -542,10 +545,10 @@ function gradingItemHTML(g) {
   const arrow = difficultyArrow(g.recommendation);
   const ws = findWorksheet(g.worksheetId);
   return `
-    <div class="history-item">
+    <div class="history-item" data-action="view-grading" data-grading-id="${g.id}" style="cursor:pointer;" title="View the mark & Claude's notes">
       <div class="meta">
         <div class="meta-title">${escapeHtml(ws ? ws.title : "Worksheet")}</div>
-        <div class="meta-sub">Marked ${formatDate(g.gradedAt)} • ${capitalize(g.recommendation)}</div>
+        <div class="meta-sub">Marked ${formatDate(g.gradedAt)} • ${capitalize(g.recommendation)} • tap to view notes</div>
       </div>
       <span class="score-badge ${scoreClass}">${score}%</span>
       ${arrow}
@@ -650,17 +653,21 @@ function renderSubject(kid, subject) {
         <div class="card-title">📂 Recent ${subjectLabel(subject)} worksheets</div>
         ${recent.length === 0
           ? `<div class="empty"><div class="empty-icon">📄</div>No ${subjectLabel(subject)} worksheets yet. Worksheets save here once you download them.</div>`
-          : `<div class="history-list">${recent.map(w => `
+          : `<div class="history-list">${recent.map(w => {
+              const g = findGrading(w.id);
+              const badge = g ? `<span class="score-badge ${g.score >= 85 ? "score-high" : g.score >= 65 ? "score-mid" : "score-low"}" data-action="view-grading" data-grading-id="${g.id}" style="cursor:pointer;" title="View the mark & Claude's notes">${g.score}%</span>` : "";
+              return `
               <div class="history-item">
                 <div class="meta">
                   <div class="meta-title">${escapeHtml(w.title)}</div>
                   <div class="meta-sub">${formatDate(w.generatedAt)} • ${w.templateId ? "Template" : "AI"} • ${w.questions ? w.questions.length + " qs" : ""}</div>
                 </div>
+                ${badge}
                 <button class="btn btn-ghost" data-action="open" data-worksheet-id="${w.id}" title="View">View</button>
-                <button class="btn btn-secondary" data-action="grade" data-worksheet-id="${w.id}" title="Upload completed photo to mark">Mark</button>
+                <button class="btn btn-secondary" data-action="grade" data-worksheet-id="${w.id}" title="${g ? "View the mark or re-mark" : "Upload completed photo to mark"}">${g ? "Mark ✓" : "Mark"}</button>
                 <button class="icon-btn" data-action="del-ws" data-worksheet-id="${w.id}" title="Delete (skipped or made by accident)">✕</button>
               </div>
-            `).join("")}</div>`}
+            `; }).join("")}</div>`}
       </div>
     </div>
 
@@ -830,6 +837,9 @@ function attachSubjectListeners(kid, subject) {
   });
   document.querySelectorAll("[data-action='grade']").forEach(el => {
     el.addEventListener("click", () => openGradeModal(el.dataset.worksheetId));
+  });
+  document.querySelectorAll("[data-action='view-grading']").forEach(el => {
+    el.addEventListener("click", (e) => { e.stopPropagation(); viewGrading(el.dataset.gradingId); });
   });
   document.querySelectorAll("[data-action='del-ws']").forEach(el => {
     el.addEventListener("click", () => deleteWorksheet(el.dataset.worksheetId));
@@ -2569,13 +2579,88 @@ function buildPDF(ws, { includeAnswers }) {
 let currentGradeFile = null;
 let currentGradeWorksheetId = null;
 
+// Renders a saved grading's full detail (score, recommendation, notes, per-question).
+// Shared by live marking and by re-opening a past mark.
+function gradingResultHTML(grading, worksheet, kidName, previous) {
+  const score = grading.score;
+  const cls = score >= 85 ? "score-high" : score >= 65 ? "score-mid" : "score-low";
+  const pq = (grading.perQuestion || []).filter(q => q && (q.kidAnswer || q.feedback || q.correct === true || q.correct === false));
+  const pqHTML = pq.length ? `
+    <div style="margin-top:0.8rem;">
+      <strong style="font-size:0.85rem;">Per-question</strong>
+      <div style="margin-top:0.4rem; display:flex; flex-direction:column; gap:3px;">
+        ${pq.map((q, i) => `<div style="font-size:0.82rem;">${q.correct === false ? "✗" : q.correct === true ? "✓" : "•"} <strong>Q${i + 1}</strong>${q.kidAnswer ? ` — wrote: ${escapeHtml(String(q.kidAnswer))}` : ""}${q.feedback ? ` <span class="muted">(${escapeHtml(q.feedback)})</span>` : ""}</div>`).join("")}
+      </div>
+    </div>` : "";
+  return `
+    <hr/>
+    <h3>${previous ? "Last mark" : "Result"} <span class="muted" style="font-weight:400; font-size:0.8rem;">— ${formatDate(grading.gradedAt)}</span></h3>
+    <div class="row-between" style="margin-bottom: 0.6rem;">
+      <div><div class="kpi-value">${score}%</div><div class="kpi-label">Score</div></div>
+      <div style="text-align:right;">${difficultyArrow(grading.recommendation)}<p class="muted" style="margin-top: 0.3rem;">Next worksheet: <strong>${grading.recommendation}</strong>${grading.confidence ? ` • confidence: ${grading.confidence}` : ""}</p></div>
+    </div>
+    <p><strong>Claude's notes:</strong> ${escapeHtml(grading.notes || "—")}</p>
+    ${pqHTML}
+    ${(worksheet && score < 90) ? `
+      <div style="margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid #eee;">
+        <button class="btn btn-primary" id="reteachBtn">✨ Generate a re-teach worksheet</button>
+        <p class="muted" style="margin-top: 0.4rem;">Builds a fresh practice page targeting exactly what ${escapeHtml(kidName || "")} missed.</p>
+      </div>` : ""}
+    ${previous ? `<p class="muted" style="margin-top: 0.6rem; font-size: 0.8rem;">To re-mark, upload a new photo above and tap “Mark It.”</p>` : ""}
+  `;
+}
+
+function renderGradingInto(resultDiv, grading, worksheet, kidId, previous) {
+  resultDiv.hidden = false;
+  resultDiv.innerHTML = gradingResultHTML(grading, worksheet, state.kids[kidId] && state.kids[kidId].name, previous);
+  const reteachBtn = resultDiv.querySelector("#reteachBtn");
+  if (reteachBtn) {
+    reteachBtn.addEventListener("click", async () => {
+      reteachBtn.disabled = true;
+      reteachBtn.innerHTML = '<span class="spinner"></span> Generating…';
+      try {
+        const reteach = await generateReteachWorksheet(state.kids[kidId], worksheet, grading);
+        reteach._unsaved = true;
+        closeAllModals();
+        openWorksheetModal(reteach);
+        toast("Re-teach worksheet ready — preview below.", "success");
+      } catch (err) {
+        console.error(err);
+        toast("Re-teach generation failed: " + err.message, "error");
+        reteachBtn.disabled = false;
+        reteachBtn.innerHTML = "✨ Generate a re-teach worksheet";
+      }
+    });
+  }
+}
+
 function openGradeModal(worksheetId) {
   currentGradeWorksheetId = worksheetId || null;
   currentGradeFile = null;
   document.getElementById("gradePreview").hidden = true;
-  document.getElementById("gradeResult").hidden = true;
   document.getElementById("runGradingBtn").disabled = true;
   document.getElementById("gradeFileInput").value = "";
+  const resultDiv = document.getElementById("gradeResult");
+  resultDiv.hidden = true;
+  resultDiv.innerHTML = "";
+  // If this worksheet was already marked, show that mark right away (persistent memory).
+  const existing = worksheetId ? findGrading(worksheetId) : null;
+  if (existing) renderGradingInto(resultDiv, existing, findWorksheet(worksheetId), state.currentKidId, true);
+  document.getElementById("gradeModal").hidden = false;
+}
+
+// Open the grade modal focused on one specific past grading (from the dashboard).
+function viewGrading(gradingId) {
+  const hit = findGradingById(gradingId);
+  if (!hit) return;
+  currentGradeWorksheetId = hit.grading.worksheetId || null;
+  currentGradeFile = null;
+  document.getElementById("gradePreview").hidden = true;
+  document.getElementById("runGradingBtn").disabled = true;
+  document.getElementById("gradeFileInput").value = "";
+  const resultDiv = document.getElementById("gradeResult");
+  const ws = hit.grading.worksheetId ? findWorksheet(hit.grading.worksheetId) : null;
+  renderGradingInto(resultDiv, hit.grading, ws, hit.kidId, true);
   document.getElementById("gradeModal").hidden = false;
 }
 
@@ -2615,51 +2700,8 @@ async function runGrading() {
     applyGradingFeedback(kidId, worksheet, grading);
     saveState();
 
-    // Show result
-    const resultDiv = document.getElementById("gradeResult");
-    resultDiv.hidden = false;
-    resultDiv.innerHTML = `
-      <hr/>
-      <h3>Result</h3>
-      <div class="row-between" style="margin-bottom: 0.8rem;">
-        <div>
-          <div class="kpi-value">${grading.score}%</div>
-          <div class="kpi-label">Score</div>
-        </div>
-        <div>
-          ${difficultyArrow(grading.recommendation)}
-          <p class="muted" style="margin-top: 0.3rem;">Next worksheet: <strong>${grading.recommendation}</strong></p>
-        </div>
-      </div>
-      <p><strong>Claude's notes:</strong> ${escapeHtml(grading.notes || "—")}</p>
-      ${(worksheet && grading.score < 90) ? `
-        <div style="margin-top: 0.8rem; padding-top: 0.8rem; border-top: 1px solid #eee;">
-          <button class="btn btn-primary" id="reteachBtn">✨ Generate a re-teach worksheet</button>
-          <p class="muted" style="margin-top: 0.4rem;">Builds a fresh practice page targeting exactly what ${state.kids[kidId].name} missed.</p>
-        </div>` : ""}
-    `;
-
-    // Wire the re-teach button (only present when a worksheet is linked and score < 90)
-    const reteachBtn = document.getElementById("reteachBtn");
-    if (reteachBtn) {
-      reteachBtn.addEventListener("click", async () => {
-        reteachBtn.disabled = true;
-        reteachBtn.innerHTML = '<span class="spinner"></span> Generating…';
-        try {
-          const kid = state.kids[kidId];
-          const reteach = await generateReteachWorksheet(kid, worksheet, grading);
-          reteach._unsaved = true;
-          closeAllModals();
-          openWorksheetModal(reteach);
-          toast("Re-teach worksheet ready — preview below.", "success");
-        } catch (err) {
-          console.error(err);
-          toast("Re-teach generation failed: " + err.message, "error");
-          reteachBtn.disabled = false;
-          reteachBtn.innerHTML = "✨ Generate a re-teach worksheet";
-        }
-      });
-    }
+    // Show result (shared renderer — same view you get when re-opening the mark later)
+    renderGradingInto(document.getElementById("gradeResult"), grading, worksheet, kidId, false);
 
     toast("Marked! Difficulty adjusted.", "success");
     renderContent(); // refresh dashboards/subject pages
@@ -3430,9 +3472,19 @@ function findWorksheet(id) {
   return null;
 }
 function findGrading(worksheetId) {
+  let best = null;
   for (const kidId of Object.keys(state.gradings)) {
-    const g = state.gradings[kidId].find(g => g.worksheetId === worksheetId);
-    if (g) return g;
+    for (const g of (state.gradings[kidId] || [])) {
+      if (g.worksheetId === worksheetId && (!best || g.gradedAt > best.gradedAt)) best = g;
+    }
+  }
+  return best;
+}
+
+function findGradingById(id) {
+  for (const kidId of Object.keys(state.gradings)) {
+    const g = (state.gradings[kidId] || []).find(g => g.id === id);
+    if (g) return { grading: g, kidId };
   }
   return null;
 }
