@@ -1231,6 +1231,46 @@ function contentToQuestions(content, template) {
       type: "trace"
     }));
   }
+  if (template.id === "count_to_10") {
+    return (content.problems || []).map(p => ({ q: "How many dots?", answer: String(p.n), type: "fill_in" }));
+  }
+  if (template.id === "ways_to_make") {
+    return (content.problems || []).map(p => {
+      const left = p.blankPos === "left" ? "___" : String(p.knownAddend);
+      const right = p.blankPos === "left" ? String(p.knownAddend) : "___";
+      return { q: `${left} + ${right} = ${p.target}`, answer: String(p.missing), type: "fill_in" };
+    });
+  }
+  if (template.id === "ab_patterns") {
+    const lbl = (t) => content.elementType === "shapes" ? (window.SHAPES[t]?.label || t) : t;
+    return (content.problems || []).map(p => ({
+      q: `Finish the pattern: ${p.shown.map(lbl).join(", ")} → ?`,
+      answer: p.expected.map(lbl).join(", "),
+      type: "draw"
+    }));
+  }
+  if (template.id === "multiplication_facts") {
+    return (content.problems || []).map(p => ({ q: `${p.a} ${p.op} ${p.b} = ___`, answer: String(p.answer), type: "fill_in" }));
+  }
+  if (template.id === "fractions_visual") {
+    return (content.problems || []).map(p => ({
+      q: p.mode === "shade" ? `Shade ${p.numerator}/${p.denominator} of the ${p.shape}` : `Write the fraction shaded in the ${p.shape}`,
+      answer: `${p.numerator}/${p.denominator}`,
+      type: p.mode === "shade" ? "draw" : "fill_in"
+    }));
+  }
+  if (template.id === "time_telling") {
+    return (content.problems || []).map(p => ({ q: "What time is on the clock?", answer: `${p.hour}:${String(p.minute).padStart(2, "0")}`, type: "fill_in" }));
+  }
+  if (template.id === "tracing_words") {
+    return (content.words || []).map(w => ({ q: `Trace and write: ${w}`, answer: w, type: "trace" }));
+  }
+  if (template.id === "sight_words_practice") {
+    return (content.words || []).map(w => ({ q: `Read and write: ${w}`, answer: w, type: "trace" }));
+  }
+  if (template.id === "map_label") {
+    return (content.regions || []).map(r => ({ q: `Name region #${r.number} on the map`, answer: r.name, type: "fill_in" }));
+  }
   return [];
 }
 
@@ -2649,9 +2689,12 @@ async function callClaudeForGrading(file, worksheet) {
 }
 
 function buildGradingPrompt(worksheet) {
-  const ws = worksheet
+  // If we have the worksheet's questions/answers, give them as the key.
+  // Otherwise (older sheets, or templates without a recorded key) read the photo
+  // directly — never tell the grader "0 questions", which makes it mark nothing.
+  const ws = (worksheet && worksheet.questions && worksheet.questions.length)
     ? `The worksheet had ${worksheet.questions.length} questions:\n${worksheet.questions.map((q, i) => `${i + 1}. ${q.q}\n   Answer key: ${q.answer}`).join("\n")}\n`
-    : "The worksheet structure is unknown — infer it from the photo.";
+    : "The worksheet's questions weren't recorded — read the photo carefully and mark exactly what the child wrote or drew, inferring the task from the page.";
 
   return `You are marking a homeschool worksheet completed by a child.
 
