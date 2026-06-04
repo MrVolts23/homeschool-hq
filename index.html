@@ -110,8 +110,12 @@
         <div class="btn-row">
           <button class="btn btn-secondary" id="exportDataBtn">Export all data (JSON)</button>
           <button class="btn btn-secondary" id="importDataBtn">Import data</button>
+          <button class="btn btn-secondary" id="openBackupsBtn" hidden>Open auto-backups folder</button>
           <input type="file" id="importDataInput" accept="application/json" hidden />
         </div>
+        <p class="muted" id="backupsNote" style="font-size:0.8rem; margin-top:0.4rem;" hidden>
+          This app auto-saves a timestamped backup to <strong>Documents → Homeschool HQ Backups</strong> on launch and after changes. To restore one, use “Import data” and pick a backup file.
+        </p>
       </div>
       <footer class="modal-footer">
         <button class="btn btn-primary" id="saveSettingsBtn">Save</button>
@@ -123,10 +127,10 @@
   <div id="toast" class="toast" hidden></div>
 
   <!-- Scripts (load order matters: data first, then app) -->
-  <script src="curriculum.js?v=2026-06-02f"></script>
-  <script src="map-data.js?v=2026-06-02f"></script>
+  <script src="curriculum.js?v=2026-06-02g"></script>
+  <script src="map-data.js?v=2026-06-02g"></script>
   <script src="tracing-font.js?v=kgdots1"></script>
-  <script src="worksheet-templates.js?v=2026-06-02f"></script>
-  <script src="app.js?v=2026-06-02f"></script>
+  <script src="worksheet-templates.js?v=2026-06-02g"></script>
+  <script src="app.js?v=2026-06-02g"></script>
 </body>
 </html>

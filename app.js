@@ -104,6 +104,22 @@ function saveState() {
     console.error("Failed to save state", e);
     toast("Couldn't save data — storage may be full", "error");
   }
+  scheduleBackup();
+}
+
+// Auto-backup (Mac app only): debounce-write a full JSON copy to disk after changes.
+// In the plain browser version window.hsBackup is absent, so this is a no-op there.
+let _backupTimer = null;
+function scheduleBackup() {
+  if (!window.hsBackup) return;
+  clearTimeout(_backupTimer);
+  _backupTimer = setTimeout(() => {
+    try { window.hsBackup.save(JSON.stringify(state)); } catch (e) { /* best-effort */ }
+  }, 4000);
+}
+function backupNow() {
+  if (!window.hsBackup) return;
+  try { window.hsBackup.save(JSON.stringify(state)); } catch (e) {}
 }
 
 /* ------------------------------------------------------------
@@ -130,6 +146,7 @@ document.addEventListener("DOMContentLoaded", () => {
   renderSidebar();
   renderContent();
   attachGlobalListeners();
+  backupNow(); // snapshot the pre-session state immediately on launch (Mac app only)
 });
 
 function injectTracingFontCSS() {
@@ -168,6 +185,14 @@ function attachGlobalListeners() {
   document.getElementById("exportDataBtn").addEventListener("click", exportData);
   document.getElementById("importDataBtn").addEventListener("click", () => document.getElementById("importDataInput").click());
   document.getElementById("importDataInput").addEventListener("change", importData);
+
+  // Auto-backup controls — only meaningful in the Mac app (window.hsBackup present)
+  if (window.hsBackup) {
+    const btn = document.getElementById("openBackupsBtn");
+    const note = document.getElementById("backupsNote");
+    if (btn) { btn.hidden = false; btn.addEventListener("click", () => window.hsBackup.openFolder()); }
+    if (note) note.hidden = false;
+  }
 }
 
 /* ------------------------------------------------------------

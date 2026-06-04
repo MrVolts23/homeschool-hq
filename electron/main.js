@@ -1,4 +1,4 @@
-const { app, BrowserWindow, shell, Menu, dialog } = require('electron');
+const { app, BrowserWindow, shell, Menu, dialog, ipcMain } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -61,6 +61,7 @@ function createWindow() {
     backgroundColor: '#f6f6f4',
     title: 'Homeschool HQ',
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
@@ -88,9 +89,44 @@ app.whenReady().then(async () => {
     return;
   }
   Menu.setApplicationMenu(Menu.buildFromTemplate(defaultMenu()));
+  registerBackupHandlers();
   createWindow();
   setupUpdater();
 });
+
+// ── Auto-backup ───────────────────────────────────────────────────────────────
+// The renderer sends its full state JSON; we write a timestamped copy to
+// ~/Documents/Homeschool HQ Backups/ and keep the most recent 30. This means the
+// data is recoverable even if localStorage is ever lost/corrupted/cleared.
+function backupsDir() { return path.join(app.getPath('documents'), 'Homeschool HQ Backups'); }
+
+function writeBackup(json) {
+  try {
+    if (!json || typeof json !== 'string') return { ok: false, error: 'empty' };
+    const dir = backupsDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    fs.writeFileSync(path.join(dir, `homeschool-backup-${ts}.json`), json, 'utf8');
+    const files = fs.readdirSync(dir)
+      .filter(f => f.startsWith('homeschool-backup-') && f.endsWith('.json'))
+      .sort();
+    while (files.length > 30) { try { fs.unlinkSync(path.join(dir, files.shift())); } catch (_) {} }
+    return { ok: true };
+  } catch (e) {
+    console.error('[backup]', e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+function registerBackupHandlers() {
+  ipcMain.handle('hs-backup-save', (_e, json) => writeBackup(json));
+  ipcMain.handle('hs-backup-open', () => {
+    const d = backupsDir();
+    try { fs.mkdirSync(d, { recursive: true }); } catch (_) {}
+    shell.openPath(d);
+    return true;
+  });
+}
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
 function setupUpdater() {
