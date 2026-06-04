@@ -1,7 +1,11 @@
-const { app, BrowserWindow, shell, Menu } = require('electron');
+const { app, BrowserWindow, shell, Menu, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
+const { spawn } = require('child_process');
+
+let downloadedUpdateFile = null; // staged update .zip from electron-updater
 
 // Serve the app from a fixed localhost origin (like the Trading Journal does).
 // A stable http origin means: localStorage persists across launches, and the
@@ -85,7 +89,71 @@ app.whenReady().then(async () => {
   }
   Menu.setApplicationMenu(Menu.buildFromTemplate(defaultMenu()));
   createWindow();
+  setupUpdater();
 });
+
+// ── Auto-updater ──────────────────────────────────────────────────────────────
+function setupUpdater() {
+  if (!app.isPackaged) return; // only the installed app updates
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on('update-downloaded', (info) => {
+    downloadedUpdateFile = info && info.downloadedFile || null;
+    dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'Update ready',
+      message: 'A new version of Homeschool HQ has been downloaded. Restart to apply it.',
+      buttons: ['Restart now', 'Later']
+    }).then(({ response }) => { if (response === 0) applyUpdateAndRestart(); });
+  });
+  autoUpdater.on('error', err => console.error('[updater]', err && err.message));
+
+  autoUpdater.checkForUpdates();
+  setInterval(() => autoUpdater.checkForUpdates(), 15 * 60 * 1000);
+}
+
+// macOS Squirrel refuses to auto-apply updates to UNSIGNED apps, so we swap the
+// bundle ourselves: a detached script waits for this process to exit, replaces the
+// app, strips quarantine, and relaunches it. (Same approach as the Trading Journal.)
+function findStagedZip() {
+  if (downloadedUpdateFile && fs.existsSync(downloadedUpdateFile)) return downloadedUpdateFile;
+  try {
+    const dir = path.join(app.getPath('home'), 'Library/Caches', `${app.getName()}-updater`, 'pending');
+    const f = fs.readdirSync(dir).find(n => n.toLowerCase().endsWith('.zip'));
+    return f ? path.join(dir, f) : null;
+  } catch { return null; }
+}
+
+function applyUpdateAndRestart() {
+  try {
+    const zip = findStagedZip();
+    const appPath = path.resolve(process.execPath, '..', '..', '..'); // /Applications/Homeschool HQ.app
+    if (!zip || !appPath.endsWith('.app')) { autoUpdater.quitAndInstall(); return; }
+    const tmp = path.join(app.getPath('temp'), 'hs-update-extract');
+    const script = path.join(app.getPath('temp'), 'hs-apply-update.sh');
+    const sh = `#!/bin/bash
+APP_PID="$1"; ZIP="$2"; APP_PATH="$3"; TMP="$4"
+for i in $(seq 1 120); do kill -0 "$APP_PID" 2>/dev/null || break; sleep 0.5; done
+rm -rf "$TMP"; mkdir -p "$TMP"
+/usr/bin/ditto -x -k "$ZIP" "$TMP" || exit 1
+NEW_APP="$(/usr/bin/find "$TMP" -maxdepth 1 -name '*.app' | head -1)"
+if [ -n "$NEW_APP" ]; then
+  rm -rf "$APP_PATH"
+  /usr/bin/ditto "$NEW_APP" "$APP_PATH"
+  /usr/bin/xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true
+  /usr/bin/open "$APP_PATH"
+fi
+rm -rf "$TMP"
+`;
+    fs.writeFileSync(script, sh, { mode: 0o755 });
+    spawn('/bin/bash', [script, String(process.pid), zip, appPath, tmp], { detached: true, stdio: 'ignore' }).unref();
+    setTimeout(() => app.quit(), 250);
+  } catch (e) {
+    console.error('[updater] custom install failed:', e.message);
+    try { autoUpdater.quitAndInstall(); } catch (_) {}
+  }
+}
 
 app.on('activate', () => { if (mainWindow === null) createWindow(); });
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

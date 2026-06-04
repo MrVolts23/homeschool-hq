@@ -1,6 +1,6 @@
 {
   "name": "homeschool-hq",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Homeschool HQ — BC-curriculum worksheet generator & progress tracker (desktop app)",
   "author": "Mike Volts",
   "license": "UNLICENSED",
@@ -10,7 +10,11 @@
     "start": "electron .",
     "dev": "electron .",
     "build": "electron-builder --mac",
-    "build:dir": "electron-builder --mac --dir"
+    "build:dir": "electron-builder --mac --dir",
+    "build:publish": "electron-builder --mac --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3"
   },
   "devDependencies": {
     "electron": "^29.0.0",
@@ -34,13 +38,32 @@
       "category": "public.app-category.education",
       "icon": "build/icon.png",
       "target": [
-        { "target": "dmg", "arch": ["arm64"] },
-        { "target": "zip", "arch": ["arm64"] }
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
       ]
     },
     "dmg": {
       "title": "Homeschool HQ",
-      "window": { "width": 540, "height": 380 }
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "MrVolts23",
+      "repo": "homeschool-hq",
+      "releaseType": "release"
     }
   }
 }
