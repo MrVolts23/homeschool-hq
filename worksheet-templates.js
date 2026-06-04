@@ -51,10 +51,22 @@ function pdfDrawWorkedExampleBox(doc, render, y, pageW, margin, height) {
 }
 
 function pdfDrawNameDateLine(doc, y, pageW, margin) {
-  doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.setTextColor(60, 60, 60);
-  doc.text("Name: ______________________________     Date: ______________", margin, y);
+  const name = (window.__wsKidName || "").trim();
+  if (name) {
+    // Pre-printed with the child's name; only the date is left blank.
+    doc.setFont("helvetica", "normal");
+    doc.text("Name: ", margin, y);
+    const labelW = doc.getTextWidth("Name: ");
+    doc.setFont("helvetica", "bold");
+    doc.text(name, margin + labelW, y);
+    doc.setFont("helvetica", "normal");
+    doc.text("Date: ______________", pageW - margin, y, { align: "right" });
+  } else {
+    doc.setFont("helvetica", "normal");
+    doc.text("Name: ______________________________     Date: ______________", margin, y);
+  }
   return y + 18;
 }
 

@@ -2366,7 +2366,7 @@ function openWorksheetModal(worksheetIdOrObject) {
       <div class="ws-header" style="background:#dcdcdc; padding: 0.8rem 1rem; border-radius: 8px;">
         <h3 style="margin:0;">${escapeHtml(ws.title)}</h3>
       </div>
-      <p style="font-size: 0.85rem; color: #666; margin-top: 0.6rem;">Name: ______________________________     Date: ______________</p>
+      <p style="font-size: 0.85rem; color: #666; margin-top: 0.6rem;">Name: <strong style="color:#222;">${escapeHtml((state.kids[ws.kidId] && state.kids[ws.kidId].name) || "")}</strong>     Date: ______________</p>
       ${ws.instructions ? `<p style="margin-top: 0.6rem;"><em>${escapeHtml(ws.instructions)}</em></p>` : ""}
       <hr style="border:0; border-top:1px solid #ccc; margin: 1rem 0;"/>
       <div style="display: grid; gap: 0.6rem;">
@@ -2410,6 +2410,9 @@ function buildPDF(ws, { includeAnswers }) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "pt", format: "letter" });
 
+  // Pre-print the child's name on the sheet (read by pdfDrawNameDateLine + below).
+  window.__wsKidName = (state.kids[ws.kidId] && state.kids[ws.kidId].name) || "";
+
   // If this is a template-based worksheet, dispatch to template renderer
   if (ws.templateId && window.TEMPLATES[ws.templateId]) {
     const template = window.TEMPLATES[ws.templateId];
@@ -2432,7 +2435,15 @@ function buildPDF(ws, { includeAnswers }) {
 
   doc.setFont("times", "normal");
   doc.setFontSize(11);
-  doc.text("Name: ______________________________     Date: ____________", margin, y);
+  const _name = (window.__wsKidName || "").trim();
+  if (_name) {
+    doc.text("Name: ", margin, y);
+    const _lw = doc.getTextWidth("Name: ");
+    doc.setFont("times", "bold"); doc.text(_name, margin + _lw, y); doc.setFont("times", "normal");
+    doc.text("Date: ____________", pageW - margin, y, { align: "right" });
+  } else {
+    doc.text("Name: ______________________________     Date: ____________", margin, y);
+  }
   y += 20;
 
   doc.setFontSize(12);
