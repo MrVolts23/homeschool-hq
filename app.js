@@ -396,7 +396,8 @@ function renderDashboard(kid) {
   const recentGradings = [...gradings].sort((a, b) => b.gradedAt - a.gradedAt).slice(0, 5);
 
   const streak = computeStreak(worksheets);
-  const totalWorksheets = worksheets.length;
+  const totalWorksheets = worksheets.length;                 // assigned (generated)
+  const markedCount = new Set(gradings.map(g => g.worksheetId).filter(Boolean)).size; // done (marked)
   const badges = computeAchievements(kid);
   const badgesEarned = badges.filter(b => b.earned).length;
   const snap = buildProgressSnapshot(kid);
@@ -422,9 +423,10 @@ function renderDashboard(kid) {
 
     <div class="card" style="margin-bottom:1.2rem;">
       <div style="font-size:1.05rem; font-weight:600; margin-bottom:0.7rem;">${hero}</div>
-      <div class="grid grid-3">
+      <div class="grid grid-4">
         <div class="kpi-card" style="padding:0.4rem;"><div class="kpi-value">🔥 ${streak}</div><div class="kpi-label">Day streak</div></div>
-        <div class="kpi-card" style="padding:0.4rem;"><div class="kpi-value">✅ ${totalWorksheets}</div><div class="kpi-label">Worksheets done</div></div>
+        <div class="kpi-card" style="padding:0.4rem;"><div class="kpi-value">📝 ${totalWorksheets}</div><div class="kpi-label">Worksheets assigned</div></div>
+        <div class="kpi-card" style="padding:0.4rem;"><div class="kpi-value">✅ ${markedCount}</div><div class="kpi-label">Done (marked)</div></div>
         <div class="kpi-card" style="padding:0.4rem;"><div class="kpi-value">🏅 ${badgesEarned}/${badges.length}</div><div class="kpi-label">Badges earned</div></div>
       </div>
     </div>
