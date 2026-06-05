@@ -67,6 +67,16 @@ const uiTemplate = { math: null, reading: null, writing: null, geography: null }
 let uiGradingDate = null;       // "YYYY-MM-DD"; null means "today"
 let uiGradingKid = "all";       // "all" | kidId
 
+// Per-kid accent colors — kept in sync with the body.kid-* themes in styles.css.
+// Used to color each child's name wherever multiple kids appear together.
+const KID_COLORS = { aubrey: "#2c5b8a", makena: "#c25775", oakley: "#5a8a3a" };
+const KID_PALETTE = ["#2c5b8a", "#c25775", "#5a8a3a", "#b3742a", "#6a4ca0", "#1f7a7a"];
+function kidColor(kidId) {
+  if (KID_COLORS[kidId]) return KID_COLORS[kidId];
+  const i = Object.keys(state.kids).indexOf(kidId);
+  return KID_PALETTE[(i < 0 ? 0 : i) % KID_PALETTE.length];
+}
+
 /* ------------------------------------------------------------
    STORAGE
 ------------------------------------------------------------ */
@@ -209,8 +219,9 @@ function renderHeader() {
   switcher.innerHTML = "";
   Object.values(state.kids).forEach(kid => {
     const btn = document.createElement("button");
-    btn.className = "kid-pill" + (kid.id === state.currentKidId ? " active" : "");
-    btn.innerHTML = `<span class="kid-name">${kid.name}</span><span class="age">${kid.age} • ${kid.gradeKey === "K" ? "K" : "Gr " + kid.gradeKey}</span>`;
+    const isActive = kid.id === state.currentKidId;
+    btn.className = "kid-pill" + (isActive ? " active" : "");
+    btn.innerHTML = `<span class="kid-name"${isActive ? "" : ` style="color:${kidColor(kid.id)};"`}>${kid.name}</span><span class="age">${kid.age} • ${kid.gradeKey === "K" ? "K" : "Gr " + kid.gradeKey}</span>`;
     btn.addEventListener("click", () => setCurrentKid(kid.id));
     switcher.appendChild(btn);
   });
@@ -3165,10 +3176,13 @@ function renderGrading(kid) {
   const fk = uiGradingKid || "all";
   const sheets = worksheetsOnDate(key, fk);
 
-  const chip = (id, label) =>
-    `<button class="btn ${fk === id ? "btn-primary" : "btn-ghost"}" data-grading-kid="${id}" style="font-size:0.82rem; padding:0.32rem 0.75rem;">${escapeHtml(label)}</button>`;
+  const chip = (id, label, color) => {
+    const active = fk === id;
+    const tint = (!active && color) ? ` color:${color};` : "";
+    return `<button class="btn ${active ? "btn-primary" : "btn-ghost"}" data-grading-kid="${id}" style="font-size:0.82rem; padding:0.32rem 0.75rem;${tint}">${escapeHtml(label)}</button>`;
+  };
   const kidChips = [chip("all", "All kids")]
-    .concat(Object.values(state.kids).map(k => chip(k.id, k.name))).join(" ");
+    .concat(Object.values(state.kids).map(k => chip(k.id, k.name, kidColor(k.id)))).join(" ");
 
   // Quick day-shift buttons + native date picker.
   const dateControls = `
@@ -3208,9 +3222,32 @@ function renderGrading(kid) {
   `;
 }
 
+// Small first-page preview used as a clickable thumbnail in the Grading list.
+// Reuses the same preview HTML the full modal renders, scaled down via CSS.
+function wsThumbInnerHTML(w) {
+  const title = escapeHtml(w.title || "Worksheet");
+  const name = (state.kids[w.kidId] && state.kids[w.kidId].name) || "";
+  let body;
+  if (w.templateId && window.TEMPLATES[w.templateId]) {
+    body = renderTemplatePreviewHTML(w);
+  } else {
+    const qs = (w.questions || []).slice(0, 14).map((q, i) =>
+      `<div style="padding:6px 0; border-bottom:1px dashed #ddd;"><b>${i + 1}.</b> ${escapeHtml(q.q || "").replace(/\n/g, "<br>")}</div>`).join("");
+    body = `${w.instructions ? `<p style="font-style:italic;">${escapeHtml(w.instructions)}</p>` : ""}${qs}`;
+  }
+  return `<div class="worksheet-preview" style="padding:20px 24px; font-size:15px; color:#222;">
+    <div style="border-bottom:2px solid #333; padding-bottom:8px; margin-bottom:14px;">
+      <h3 style="margin:0; font-size:21px;">${title}</h3>
+      <div style="font-size:13px; color:#555; margin-top:4px;">Name: <b>${escapeHtml(name)}</b> &nbsp; Date: ____________</div>
+    </div>
+    ${body}
+  </div>`;
+}
+
 function gradingRowHTML(w) {
   const st = worksheetStatus(w);
   const kidName = (state.kids[w.kidId] && state.kids[w.kidId].name) || "";
+  const nameHTML = `<span style="color:${kidColor(w.kidId)}; font-weight:600;">${escapeHtml(kidName)}</span>`;
   let badge;
   if (st.state === "graded") {
     const sc = st.grading.score;
@@ -3221,7 +3258,7 @@ function gradingRowHTML(w) {
   } else {
     badge = `<span class="tag" style="background:#fbecd2; color:#875a13;">⏳ to mark</span>`;
   }
-  const viewBtn = `<button class="btn btn-ghost" data-action="view-ws" data-worksheet-id="${w.id}" title="Preview this exact sheet so you can match it to the paper in hand">👁 View</button>`;
+  const thumb = `<div class="ws-thumb" data-action="view-ws" data-worksheet-id="${w.id}" title="Click to preview this sheet (first page)"><div class="ws-thumb-inner">${wsThumbInnerHTML(w)}</div><div class="ws-thumb-zoom">🔍</div></div>`;
   const markBtn = `<button class="btn btn-secondary" data-action="grade" data-worksheet-id="${w.id}" title="Upload the completed sheet & mark it">${st.state === "graded" ? "View / re-mark" : "Mark"}</button>`;
   const reprintBtn = `<button class="btn btn-ghost" data-action="reprint" data-worksheet-id="${w.id}" title="Print this exact sheet again">🖨 Reprint</button>`;
   const doneToggle = st.state === "incomplete"
@@ -3229,12 +3266,12 @@ function gradingRowHTML(w) {
     : `<button class="btn btn-ghost" data-action="mark-incomplete" data-worksheet-id="${w.id}" title="Flag as not completed — it'll show in the Daily Plan to redo">Not done</button>`;
   return `
     <div class="history-item">
+      ${thumb}
       <div class="meta" data-action="view-ws" data-worksheet-id="${w.id}" style="cursor:pointer;" title="Click to preview this sheet">
         <div class="meta-title">${escapeHtml(w.title || "Worksheet")}</div>
-        <div class="meta-sub">${escapeHtml(kidName)} • ${capitalize(w.subject)}${w.difficulty ? " • Difficulty " + w.difficulty : ""}</div>
+        <div class="meta-sub">${nameHTML} • ${capitalize(w.subject)}${w.difficulty ? " • Difficulty " + w.difficulty : ""}</div>
       </div>
       ${badge}
-      ${viewBtn}
       ${markBtn}
       ${reprintBtn}
       ${doneToggle}

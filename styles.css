@@ -305,6 +305,45 @@ textarea { min-height: 80px; resize: vertical; }
 .history-item .meta { flex: 1; }
 .history-item .meta-title { font-weight: 500; }
 .history-item .meta-sub { font-size: 0.8rem; color: var(--text-muted); }
+
+/* Clickable first-page thumbnail of a worksheet (Grading list) */
+.ws-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 92px;
+  height: 119px;            /* ~ US-letter aspect ratio (8.5 : 11) */
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.ws-thumb:hover {
+  transform: scale(1.03);
+  box-shadow: 0 3px 10px rgba(0,0,0,0.18);
+  border-color: var(--kid-accent);
+}
+.ws-thumb-inner {
+  width: 612px;             /* virtual full-page width; scaled down to fit */
+  transform: scale(0.1503); /* 92 / 612 */
+  transform-origin: top left;
+  pointer-events: none;     /* clicks fall through to .ws-thumb */
+}
+.ws-thumb-zoom {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  font-size: 11px;
+  line-height: 1;
+  background: rgba(255,255,255,0.85);
+  border-radius: 4px;
+  padding: 2px 3px;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.ws-thumb:hover .ws-thumb-zoom { opacity: 1; }
 .score-badge {
   font-weight: 600;
   padding: 0.2rem 0.55rem;
