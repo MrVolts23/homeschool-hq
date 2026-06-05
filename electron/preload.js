@@ -6,3 +6,9 @@ contextBridge.exposeInMainWorld('hsBackup', {
   openFolder: () => ipcRenderer.invoke('hs-backup-open'),
   saveGradeImage: (id, dataUrl) => ipcRenderer.invoke('hs-gradeimg-save', id, dataUrl)
 });
+
+// Expose the running app version (read synchronously at load) so the UI can show
+// exactly which build is running — confirming it's the Mac app, not a browser.
+let __appVersion = '';
+try { __appVersion = ipcRenderer.sendSync('hs-app-version'); } catch (e) { /* not in Electron */ }
+contextBridge.exposeInMainWorld('hsApp', { version: __appVersion });

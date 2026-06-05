@@ -150,6 +150,8 @@ function writeGradeImage(id, dataUrl) {
 }
 
 function registerBackupHandlers() {
+  // Synchronous version lookup so the renderer can show the running build at load.
+  ipcMain.on('hs-app-version', (e) => { e.returnValue = app.getVersion(); });
   ipcMain.handle('hs-backup-save', (_e, json) => writeBackup(json));
   ipcMain.handle('hs-backup-open', () => {
     const d = backupsDir();

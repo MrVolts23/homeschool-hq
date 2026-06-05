@@ -3667,6 +3667,12 @@ function openSettings() {
   document.getElementById("apiKeyInput").value = state.settings.apiKey;
   document.getElementById("modelSelect").value = state.settings.model;
   renderKidProfilesEdit();
+  // Show which build is running (sourced from the Mac app itself, so it can't drift).
+  const vLine = document.getElementById("appVersionLine");
+  if (vLine) {
+    const v = (window.hsApp && window.hsApp.version) ? window.hsApp.version : null;
+    vLine.textContent = v ? `Homeschool HQ v${v}` : "Homeschool HQ • browser preview";
+  }
   document.getElementById("settingsModal").hidden = false;
 }
 

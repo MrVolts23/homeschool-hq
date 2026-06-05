@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Homeschool HQ — Aubrey, Makena & Oakley</title>
-  <link rel="stylesheet" href="styles.css?v=2026-06-05g" />
+  <link rel="stylesheet" href="styles.css?v=2026-06-05h" />
   <!-- jsPDF for printable worksheet generation (vendored locally so the app works offline) -->
   <script src="vendor/jspdf.umd.min.js"></script>
 </head>
@@ -118,7 +118,8 @@
           This app auto-saves a timestamped backup to <strong>Documents → Homeschool HQ Backups</strong> on launch and after changes. To restore one, use “Import data” and pick a backup file.
         </p>
       </div>
-      <footer class="modal-footer">
+      <footer class="modal-footer" style="justify-content:space-between; align-items:center;">
+        <span class="muted" id="appVersionLine" style="font-size:0.78rem;"></span>
         <button class="btn btn-primary" id="saveSettingsBtn">Save</button>
       </footer>
     </div>
@@ -128,10 +129,10 @@
   <div id="toast" class="toast" hidden></div>
 
   <!-- Scripts (load order matters: data first, then app) -->
-  <script src="curriculum.js?v=2026-06-05g"></script>
-  <script src="map-data.js?v=2026-06-05g"></script>
+  <script src="curriculum.js?v=2026-06-05h"></script>
+  <script src="map-data.js?v=2026-06-05h"></script>
   <script src="tracing-font.js?v=kgdots1"></script>
-  <script src="worksheet-templates.js?v=2026-06-05g"></script>
-  <script src="app.js?v=2026-06-05g"></script>
+  <script src="worksheet-templates.js?v=2026-06-05h"></script>
+  <script src="app.js?v=2026-06-05h"></script>
 </body>
 </html>
