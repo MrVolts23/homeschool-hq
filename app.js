@@ -2447,35 +2447,12 @@ function openWorksheetModal(worksheetIdOrObject) {
   currentWorksheetForModal = ws;
   document.getElementById("worksheetModalTitle").textContent = ws.title;
 
-  if (ws.templateId) {
-    // Template worksheet — render a real visual preview matching the PDF layout
-    const template = window.TEMPLATES[ws.templateId];
-    document.getElementById("worksheetPreview").innerHTML = `
-      <div class="ws-header" style="background:#dcdcdc; padding: 0.8rem 1rem; border-radius: 8px;">
-        <h3 style="margin:0;">${escapeHtml(ws.title)}</h3>
-      </div>
-      <p class="muted" style="margin-top: 0.5rem;">Template: ${escapeHtml(template.label)} • Generated locally • The PDF will render this exact layout, just on a printable page.</p>
-      ${renderTemplatePreviewHTML(ws)}
-    `;
-  } else {
-    // AI-generated worksheet — give it the same Scholastic-style header treatment
-    document.getElementById("worksheetPreview").innerHTML = `
-      <div class="ws-header" style="background:#dcdcdc; padding: 0.8rem 1rem; border-radius: 8px;">
-        <h3 style="margin:0;">${escapeHtml(ws.title)}</h3>
-      </div>
-      <p style="font-size: 0.85rem; color: #666; margin-top: 0.6rem;">Name: <strong style="color:#222;">${escapeHtml((state.kids[ws.kidId] && state.kids[ws.kidId].name) || "")}</strong>     Date: ______________</p>
-      ${ws.instructions ? `<p style="margin-top: 0.6rem;"><em>${escapeHtml(ws.instructions)}</em></p>` : ""}
-      <hr style="border:0; border-top:1px solid #ccc; margin: 1rem 0;"/>
-      <div style="display: grid; gap: 0.6rem;">
-        ${(ws.questions || []).map((q, i) => `
-          <div style="padding: 0.6rem 0; border-bottom: 1px dashed #ddd;">
-            <span style="font-weight: 600; color: #444; margin-right: 0.6rem;">${i + 1}.</span>
-            <span>${escapeHtml(q.q).replace(/\n/g, "<br>")}</span>
-          </div>
-        `).join("")}
-      </div>
-    `;
-  }
+  // Show the REAL worksheet — the exact PDF that prints — not an approximate preview.
+  const url = wsPdfBlobUrl(ws);
+  document.getElementById("worksheetPreview").innerHTML = url
+    ? `<iframe class="ws-pdf-frame" src="${url}#toolbar=0&navpanes=0&view=FitH" title="${escapeAttr(ws.title)}"></iframe>`
+    : `<p class="muted">Couldn't render the preview — use Download PDF or Print to see this sheet.</p>`;
+
   document.getElementById("worksheetModal").hidden = false;
 }
 
@@ -3222,26 +3199,22 @@ function renderGrading(kid) {
   `;
 }
 
-// Small first-page preview used as a clickable thumbnail in the Grading list.
-// Reuses the same preview HTML the full modal renders, scaled down via CSS.
-function wsThumbInnerHTML(w) {
-  const title = escapeHtml(w.title || "Worksheet");
-  const name = (state.kids[w.kidId] && state.kids[w.kidId].name) || "";
-  let body;
-  if (w.templateId && window.TEMPLATES[w.templateId]) {
-    body = renderTemplatePreviewHTML(w);
-  } else {
-    const qs = (w.questions || []).slice(0, 14).map((q, i) =>
-      `<div style="padding:6px 0; border-bottom:1px dashed #ddd;"><b>${i + 1}.</b> ${escapeHtml(q.q || "").replace(/\n/g, "<br>")}</div>`).join("");
-    body = `${w.instructions ? `<p style="font-style:italic;">${escapeHtml(w.instructions)}</p>` : ""}${qs}`;
+// Render the REAL worksheet PDF (the exact thing that prints) to a blob URL,
+// cached per worksheet id. Saved worksheets are immutable, so the cache is safe;
+// it also keeps the Grading list fast when you toggle dates/kids.
+const _wsPdfBlob = {};
+function wsPdfBlobUrl(w) {
+  const key = w.id || "__preview__";
+  if (_wsPdfBlob[key]) return _wsPdfBlob[key];
+  try {
+    const doc = buildPDFDoc(w, { includeAnswers: false });
+    if (!doc) return "";
+    _wsPdfBlob[key] = String(doc.output("bloburl"));
+    return _wsPdfBlob[key];
+  } catch (e) {
+    console.error("[thumb] PDF render failed", e);
+    return "";
   }
-  return `<div class="worksheet-preview" style="padding:20px 24px; font-size:15px; color:#222;">
-    <div style="border-bottom:2px solid #333; padding-bottom:8px; margin-bottom:14px;">
-      <h3 style="margin:0; font-size:21px;">${title}</h3>
-      <div style="font-size:13px; color:#555; margin-top:4px;">Name: <b>${escapeHtml(name)}</b> &nbsp; Date: ____________</div>
-    </div>
-    ${body}
-  </div>`;
 }
 
 function gradingRowHTML(w) {
@@ -3258,7 +3231,14 @@ function gradingRowHTML(w) {
   } else {
     badge = `<span class="tag" style="background:#fbecd2; color:#875a13;">⏳ to mark</span>`;
   }
-  const thumb = `<div class="ws-thumb" data-action="view-ws" data-worksheet-id="${w.id}" title="Click to preview this sheet (first page)"><div class="ws-thumb-inner">${wsThumbInnerHTML(w)}</div><div class="ws-thumb-zoom">🔍</div></div>`;
+  const pdfUrl = wsPdfBlobUrl(w);
+  const thumb = `<div class="ws-thumb" title="Click to preview the real worksheet">
+      ${pdfUrl
+        ? `<iframe class="ws-thumb-frame" src="${pdfUrl}#toolbar=0&navpanes=0&scrollbar=0&view=Fit" loading="lazy" tabindex="-1" scrolling="no"></iframe>`
+        : `<div class="ws-thumb-fallback">📄</div>`}
+      <div class="ws-thumb-hit" data-action="view-ws" data-worksheet-id="${w.id}"></div>
+      <div class="ws-thumb-zoom">🔍</div>
+    </div>`;
   const markBtn = `<button class="btn btn-secondary" data-action="grade" data-worksheet-id="${w.id}" title="Upload the completed sheet & mark it">${st.state === "graded" ? "View / re-mark" : "Mark"}</button>`;
   const reprintBtn = `<button class="btn btn-ghost" data-action="reprint" data-worksheet-id="${w.id}" title="Print this exact sheet again">🖨 Reprint</button>`;
   const doneToggle = st.state === "incomplete"

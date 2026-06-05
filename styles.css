@@ -325,16 +325,36 @@ textarea { min-height: 80px; resize: vertical; }
   box-shadow: 0 3px 10px rgba(0,0,0,0.18);
   border-color: var(--kid-accent);
 }
-.ws-thumb-inner {
-  width: 612px;             /* virtual full-page width; scaled down to fit */
-  transform: scale(0.1503); /* 92 / 612 */
+.ws-thumb-frame {
+  position: absolute;
+  top: 0; left: 0;
+  width: 612px;             /* full US-letter width in pt; visually scaled below */
+  height: 792px;
+  border: 0;
+  background: #fff;
+  transform: scale(0.1503); /* 92 / 612 → fills the 92×119 card */
   transform-origin: top left;
-  pointer-events: none;     /* clicks fall through to .ws-thumb */
+  pointer-events: none;     /* clicks fall through to .ws-thumb-hit */
+}
+.ws-thumb-hit { position: absolute; inset: 0; z-index: 2; cursor: pointer; }
+.ws-thumb-fallback {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%; font-size: 30px; color: #c4c4c4;
+}
+/* Real-PDF preview inside the worksheet modal */
+.ws-pdf-frame {
+  width: 100%;
+  height: 74vh;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
 }
 .ws-thumb-zoom {
   position: absolute;
   right: 3px;
   bottom: 3px;
+  z-index: 3;
+  pointer-events: none;
   font-size: 11px;
   line-height: 1;
   background: rgba(255,255,255,0.85);
