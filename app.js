@@ -461,6 +461,9 @@ function attachDashboardListeners(kid) {
   document.querySelectorAll("[data-action='grade']").forEach(el => {
     el.addEventListener("click", () => openGradeModal(el.dataset.worksheetId));
   });
+  document.querySelectorAll("[data-action='reprint-ws']").forEach(el => {
+    el.addEventListener("click", (e) => { e.stopPropagation(); const w = findWorksheet(el.dataset.worksheetId); if (w) printWorksheet(w, { includeAnswers: false }); });
+  });
   document.querySelectorAll("[data-action='del-ws']").forEach(el => {
     el.addEventListener("click", (e) => { e.stopPropagation(); deleteWorksheet(el.dataset.worksheetId); });
   });
@@ -541,6 +544,7 @@ function historyItemHTML(w, grading) {
       </div>
       ${score !== null ? `<span class="score-badge ${scoreClass}" data-action="view-grading" data-grading-id="${grading.id}" style="cursor:pointer;" title="View the mark & Claude's notes">${score}%</span>` : `<button class="btn btn-ghost" data-action="grade" data-worksheet-id="${w.id}" title="Upload completed photo to mark">Mark</button>`}
       ${arrow}
+      <button class="icon-btn" data-action="reprint-ws" data-worksheet-id="${w.id}" title="Reprint this exact sheet">🖨</button>
       <button class="icon-btn" data-action="del-ws" data-worksheet-id="${w.id}" title="Delete">✕</button>
     </div>
   `;
@@ -1057,10 +1061,10 @@ async function generateWorksheet(kid, subject) {
       worksheet = generateFromTemplate(kid, subject, templateId);
     }
 
-    // DON'T save yet — only save when user downloads (signals they're actually using it)
+    // DON'T save yet — only save once the user actually uses it (prints or downloads).
     worksheet._unsaved = true;
     openWorksheetModal(worksheet);
-    toast("Worksheet ready — preview below. It will save to your list when you download.", "success");
+    toast("Worksheet ready — preview below. It saves to the child's file when you print or download.", "success");
   } catch (e) {
     console.error(e);
     toast("Worksheet generation failed: " + e.message, "error");
@@ -2488,7 +2492,7 @@ function commitWorksheetIfNew(ws) {
     delete ws._unsaved;
     state.worksheets[ws.kidId].push(ws);
     saveState();
-    toast("Saved to recent worksheets", "success");
+    toast("Saved to the child's file — find it any time in Grading or the dashboard.", "success");
     // Re-render so the new worksheet appears in the list behind the modal
     renderContent();
   }
