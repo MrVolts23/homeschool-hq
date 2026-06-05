@@ -63,6 +63,10 @@ let state = loadState();
 // Non-persistent UI state: which template is selected in each subject tab
 const uiTemplate = { math: null, reading: null, writing: null, geography: null };
 
+// Non-persistent UI state for the Grading tab (date being viewed + kid filter)
+let uiGradingDate = null;       // "YYYY-MM-DD"; null means "today"
+let uiGradingKid = "all";       // "all" | kidId
+
 /* ------------------------------------------------------------
    STORAGE
 ------------------------------------------------------------ */
@@ -132,6 +136,7 @@ const TABS = [
   { id: "writing",     label: "Writing",     icon: "✏️", section: "" },
   { id: "geography",   label: "Geography",   icon: "🌍", section: "" },
   { id: "standards",   label: "Standards",   icon: "📚", section: "Track" },
+  { id: "grading",     label: "Grading",     icon: "✅", section: "" },
   { id: "plan",        label: "Daily Plan",  icon: "📅", section: "" },
   { id: "reading-log", label: "Reading Log", icon: "📕", section: "" },
   { id: "portfolio",   label: "Portfolio",   icon: "🗂️", section: "" }
@@ -265,6 +270,7 @@ function renderContent() {
     case "writing":     c.innerHTML = renderSubject(kid, "writing"); attachSubjectListeners(kid, "writing"); break;
     case "geography":   c.innerHTML = renderSubject(kid, "geography"); attachSubjectListeners(kid, "geography"); break;
     case "standards":   c.innerHTML = renderStandards(kid); attachStandardsListeners(kid); break;
+    case "grading":     c.innerHTML = renderGrading(kid); attachGradingListeners(kid); break;
     case "plan":        c.innerHTML = renderDailyPlan(kid); attachPlanListeners(kid); break;
     case "reading-log": c.innerHTML = renderReadingLog(kid); attachReadingLogListeners(kid); break;
     case "portfolio":   c.innerHTML = renderPortfolio(kid); attachPortfolioListeners(kid); break;
@@ -2767,9 +2773,16 @@ async function runGrading() {
       }
     } catch (imgErr) { /* image is optional — don't block grading */ }
 
-    // Persist
-    const kidId = state.currentKidId;
+    // Persist — attribute to the worksheet's owner (the Grading tab can mark any
+    // kid's sheet while a different kid is the active profile), falling back to the
+    // active kid for ad-hoc uploads with no source worksheet.
+    const kidId = (worksheet && worksheet.kidId) || state.currentKidId;
+    if (!state.gradings[kidId]) state.gradings[kidId] = [];
     state.gradings[kidId].push(grading);
+
+    // A graded sheet is done — clear any "not done / redo" flag so it leaves the
+    // Daily Plan's carry-forward list and the Grading tab shows the score.
+    if (worksheet) { worksheet.markedIncomplete = false; worksheet.carryForward = false; }
 
     // Update difficulty + mastery based on recommendation
     applyGradingFeedback(kidId, worksheet, grading);
@@ -3140,8 +3153,131 @@ function recommendTemplateForSubject(kid, subject, s) {
   return window.TEMPLATES[byPref] || avail[0];
 }
 
+/* ============================================================
+   GRADING TAB — pick a day, mark each kid's work, or flag to redo
+============================================================ */
+function renderGrading(kid) {
+  const key = uiGradingDate || todayKey();
+  const fk = uiGradingKid || "all";
+  const sheets = worksheetsOnDate(key, fk);
+
+  const chip = (id, label) =>
+    `<button class="btn ${fk === id ? "btn-primary" : "btn-ghost"}" data-grading-kid="${id}" style="font-size:0.82rem; padding:0.32rem 0.75rem;">${escapeHtml(label)}</button>`;
+  const kidChips = [chip("all", "All kids")]
+    .concat(Object.values(state.kids).map(k => chip(k.id, k.name))).join(" ");
+
+  // Quick day-shift buttons + native date picker.
+  const dateControls = `
+    <div style="display:flex; flex-wrap:wrap; align-items:center; gap:0.6rem;">
+      <button class="btn btn-ghost" data-grading-shift="-1" title="Previous day" style="padding:0.3rem 0.6rem;">‹</button>
+      <input type="date" id="gradingDate" value="${key}" max="${todayKey()}" style="padding:0.35rem 0.5rem; border:1px solid var(--border); border-radius:var(--radius-sm); font:inherit;">
+      <button class="btn btn-ghost" data-grading-shift="1" title="Next day" style="padding:0.3rem 0.6rem;">›</button>
+      <strong style="margin-left:0.3rem;">${dateKeyLabel(key)}</strong>
+      ${key !== todayKey() ? `<button class="btn btn-ghost" data-grading-today style="font-size:0.8rem;">Jump to today</button>` : ""}
+    </div>`;
+
+  // Summary counts for the day.
+  const counts = sheets.reduce((a, w) => { a[worksheetStatus(w).state]++; return a; }, { graded: 0, incomplete: 0, pending: 0 });
+  const summary = sheets.length
+    ? `<div class="muted" style="font-size:0.82rem; margin:0.2rem 0 0.8rem;">${sheets.length} sheet${sheets.length === 1 ? "" : "s"} • ${counts.graded} marked • ${counts.pending} to mark${counts.incomplete ? ` • ${counts.incomplete} not done` : ""}</div>`
+    : "";
+
+  const rows = sheets.length
+    ? sheets.map(gradingRowHTML).join("")
+    : `<div class="empty"><div class="empty-icon">📭</div>No worksheets were generated on ${dateKeyLabel(key).toLowerCase()}${fk !== "all" && state.kids[fk] ? " for " + escapeHtml(state.kids[fk].name) : ""}.<br><span class="muted">Sheets appear here for the day you create them — generate one from a subject tab or the Daily Plan.</span></div>`;
+
+  return `
+    <div class="content-header">
+      <div>
+        <h2>Grading</h2>
+        <div class="subtitle">Pick a day, mark each kid's completed work, reprint, or flag it to redo.</div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1rem;">
+      ${dateControls}
+      <div style="display:flex; flex-wrap:wrap; gap:0.4rem; margin-top:0.7rem;">${kidChips}</div>
+    </div>
+
+    ${summary}
+    <div class="history-list">${rows}</div>
+  `;
+}
+
+function gradingRowHTML(w) {
+  const st = worksheetStatus(w);
+  const kidName = (state.kids[w.kidId] && state.kids[w.kidId].name) || "";
+  let badge;
+  if (st.state === "graded") {
+    const sc = st.grading.score;
+    const cls = sc >= 85 ? "score-high" : sc >= 65 ? "score-mid" : "score-low";
+    badge = `<span class="score-badge ${cls}" data-action="view-grading" data-grading-id="${st.grading.id}" style="cursor:pointer;" title="View mark & notes">${sc}% ${difficultyArrow(st.grading.recommendation)}</span>`;
+  } else if (st.state === "incomplete") {
+    badge = `<span class="tag" style="background:#f6d8d4; color:#8a2a22;">✗ not done${w.carryForward ? " · ↻ redo" : ""}</span>`;
+  } else {
+    badge = `<span class="tag" style="background:#fbecd2; color:#875a13;">⏳ to mark</span>`;
+  }
+  const markBtn = `<button class="btn btn-secondary" data-action="grade" data-worksheet-id="${w.id}" title="Upload the completed sheet & mark it">${st.state === "graded" ? "View / re-mark" : "Mark"}</button>`;
+  const reprintBtn = `<button class="btn btn-ghost" data-action="reprint" data-worksheet-id="${w.id}" title="Print this exact sheet again">🖨 Reprint</button>`;
+  const doneToggle = st.state === "incomplete"
+    ? `<button class="btn btn-ghost" data-action="clear-incomplete" data-worksheet-id="${w.id}" title="Remove the not-done flag">Undo</button>`
+    : `<button class="btn btn-ghost" data-action="mark-incomplete" data-worksheet-id="${w.id}" title="Flag as not completed — it'll show in the Daily Plan to redo">Not done</button>`;
+  return `
+    <div class="history-item">
+      <div class="meta">
+        <div class="meta-title">${escapeHtml(w.title || "Worksheet")}</div>
+        <div class="meta-sub">${escapeHtml(kidName)} • ${capitalize(w.subject)}${w.difficulty ? " • Difficulty " + w.difficulty : ""}</div>
+      </div>
+      ${badge}
+      ${markBtn}
+      ${reprintBtn}
+      ${doneToggle}
+    </div>
+  `;
+}
+
+function attachGradingListeners(kid) {
+  const dateEl = document.getElementById("gradingDate");
+  if (dateEl) dateEl.addEventListener("change", e => { uiGradingDate = e.target.value || todayKey(); renderContent(); });
+  document.querySelectorAll("[data-grading-shift]").forEach(b => b.addEventListener("click", () => {
+    const cur = uiGradingDate || todayKey();
+    const [y, m, d] = cur.split("-").map(Number);
+    const nd = new Date(y, m - 1, d);
+    nd.setDate(nd.getDate() + Number(b.dataset.gradingShift));
+    if (dateKeyOf(nd) <= todayKey()) { uiGradingDate = dateKeyOf(nd); renderContent(); }
+  }));
+  const todayBtn = document.querySelector("[data-grading-today]");
+  if (todayBtn) todayBtn.addEventListener("click", () => { uiGradingDate = todayKey(); renderContent(); });
+  document.querySelectorAll("[data-grading-kid]").forEach(b => b.addEventListener("click", () => { uiGradingKid = b.dataset.gradingKid; renderContent(); }));
+  document.querySelectorAll("[data-action='grade']").forEach(el => el.addEventListener("click", () => openGradeModal(el.dataset.worksheetId)));
+  document.querySelectorAll("[data-action='view-grading']").forEach(el => el.addEventListener("click", ev => { ev.stopPropagation(); viewGrading(el.dataset.gradingId); }));
+  document.querySelectorAll("[data-action='reprint']").forEach(el => el.addEventListener("click", () => { const w = findWorksheet(el.dataset.worksheetId); if (w) printWorksheet(w, { includeAnswers: false }); }));
+  document.querySelectorAll("[data-action='mark-incomplete']").forEach(el => el.addEventListener("click", () => markIncomplete(el.dataset.worksheetId, true)));
+  document.querySelectorAll("[data-action='clear-incomplete']").forEach(el => el.addEventListener("click", () => clearIncomplete(el.dataset.worksheetId)));
+}
+
 function renderDailyPlan(kid) {
   const snap = buildProgressSnapshot(kid);
+
+  // ── Carry-forward: sheets flagged "not done" that should be redone first ──
+  const carry = carryForwardSheets(kid.id);
+  const carryHTML = carry.length ? `
+    <div class="card-title" style="margin-bottom:0.6rem;">↻ Finish first — flagged not done</div>
+    <div class="grid grid-2" style="margin-bottom:1.4rem;">
+      ${carry.map(w => `
+        <div class="card" style="display:flex; align-items:center; justify-content:space-between; gap:0.8rem; border-left:3px solid #d99;">
+          <div style="min-width:0;">
+            <div><strong>${capitalize(w.subject)}</strong> <span class="tag" style="background:#f6d8d4; color:#8a2a22; font-size:0.7rem;">not done ${dateKeyLabel(dateKeyOf(w.generatedAt)).toLowerCase()}</span></div>
+            <div style="margin-top:5px;">📄 <strong>${escapeHtml(w.title || "Worksheet")}</strong></div>
+            <div class="muted" style="font-size:0.8rem; margin-top:3px;">Reprint the same sheet to finish it, or generate a fresh one on this skill.</div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:0.4rem; white-space:nowrap;">
+            <button class="btn btn-secondary" data-plan-reprint data-worksheet-id="${w.id}">🖨 Reprint same</button>
+            <button class="btn btn-ghost" data-plan-generate data-subject="${w.subject}" data-template="${w.templateId || ""}">Fresh one →</button>
+          </div>
+        </div>
+      `).join("")}
+    </div>` : "";
 
   const recs = SUBJECTS.map(subject => {
     const s = snap[subject];
@@ -3185,15 +3321,26 @@ function renderDailyPlan(kid) {
     `;
   }).join("");
 
+  // Nudge: sheets generated today for this kid that haven't been marked yet.
+  const pendingToday = worksheetsOnDate(todayKey(), kid.id).filter(w => worksheetStatus(w).state === "pending");
+  const nudge = pendingToday.length ? `
+    <div class="card" style="margin-bottom:1.2rem; display:flex; align-items:center; justify-content:space-between; gap:0.8rem; background:#fbf6e8; border-left:3px solid #e0b341;">
+      <div>📸 <strong>${pendingToday.length} sheet${pendingToday.length === 1 ? "" : "s"} from today</strong> waiting to be marked. Upload photos in Grading to update the plan.</div>
+      <button class="btn btn-secondary" data-goto-tab="grading" style="white-space:nowrap;">Go to Grading →</button>
+    </div>` : "";
+
   return `
     <div class="content-header">
       <div>
         <h2>Daily Plan — ${kid.name}</h2>
-        <div class="subtitle">${formatDate(Date.now())} • Suggested from ${kid.name}'s latest progress</div>
+        <div class="subtitle">${formatDate(Date.now())} • Built from ${kid.name}'s completed work + latest marks</div>
       </div>
     </div>
 
-    <div class="card-title" style="margin-bottom:0.6rem;">🎯 Today's worksheets — tap to generate</div>
+    ${nudge}
+    ${carryHTML}
+
+    <div class="card-title" style="margin-bottom:0.6rem;">🎯 What's next — tap to generate</div>
     <div class="grid grid-2" style="margin-bottom:1.4rem;">${recs}</div>
 
     <div class="card-title" style="margin-bottom:0.6rem;">📊 Current standing</div>
@@ -3205,14 +3352,27 @@ function attachPlanListeners(kid) {
   document.querySelectorAll("[data-plan-generate]").forEach(btn => {
     btn.addEventListener("click", () => goGenerateFromPlan(btn.dataset.subject, btn.dataset.template));
   });
+  document.querySelectorAll("[data-plan-reprint]").forEach(btn => {
+    btn.addEventListener("click", () => { const w = findWorksheet(btn.dataset.worksheetId); if (w) printWorksheet(w, { includeAnswers: false }); });
+  });
   document.querySelectorAll("[data-goto-subject]").forEach(btn => {
     btn.addEventListener("click", () => setCurrentTab(btn.dataset.gotoSubject));
+  });
+  document.querySelectorAll("[data-goto-tab]").forEach(btn => {
+    btn.addEventListener("click", () => setCurrentTab(btn.dataset.gotoTab));
   });
 }
 
 // Jump to the subject tab with the recommended template preselected, then generate it.
 function goGenerateFromPlan(subject, templateId) {
-  uiTemplate[subject] = templateId;
+  // Carry-forward "fresh one" may have no templateId (was an AI sheet) — fall back
+  // to the best-fit template for this subject so the button always produces a sheet.
+  if (!templateId) {
+    const kid = state.kids[state.currentKidId];
+    const rec = recommendTemplateForSubject(kid, subject, buildProgressSnapshot(kid)[subject]);
+    templateId = rec ? rec.id : null;
+  }
+  if (templateId) uiTemplate[subject] = templateId;
   setCurrentTab(subject); // re-renders the subject tab with the template chosen
   const kid = state.kids[state.currentKidId];
   generateWorksheet(kid, subject);
@@ -3562,6 +3722,69 @@ function findGradingById(id) {
     if (g) return { grading: g, kidId };
   }
   return null;
+}
+
+/* ============================================================
+   COMPLETION / CARRY-FORWARD MODEL  (powers Grading tab + Daily Plan)
+============================================================ */
+// Local-timezone YYYY-MM-DD key (NOT UTC) so a sheet made tonight lands on today.
+function dateKeyOf(ts) {
+  const d = new Date(ts);
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+function todayKey() { return dateKeyOf(Date.now()); }
+
+// Friendly label for a YYYY-MM-DD key, with Today/Yesterday shortcuts.
+function dateKeyLabel(key) {
+  if (key === todayKey()) return "Today";
+  const [y, m, d] = key.split("-").map(Number);
+  const that = new Date(y, m - 1, d);
+  const yest = new Date(); yest.setDate(yest.getDate() - 1);
+  if (dateKeyOf(yest) === key) return "Yesterday";
+  return that.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+// All worksheets generated on a given day, optionally filtered to one kid, newest first.
+function worksheetsOnDate(key, kidId) {
+  let list = [];
+  if (kidId && kidId !== "all") list = (state.worksheets[kidId] || []).slice();
+  else for (const id of Object.keys(state.worksheets)) list = list.concat(state.worksheets[id] || []);
+  return list.filter(w => dateKeyOf(w.generatedAt) === key).sort((a, b) => b.generatedAt - a.generatedAt);
+}
+
+// graded → marked; incomplete → flagged not-done; pending → no action yet.
+function worksheetStatus(ws) {
+  const g = findGrading(ws.id);
+  if (g) return { state: "graded", grading: g };
+  if (ws.markedIncomplete) return { state: "incomplete" };
+  return { state: "pending" };
+}
+
+// Flag a sheet as not completed. carryForward=true surfaces it in the Daily Plan to redo.
+function markIncomplete(worksheetId, carryForward) {
+  const ws = findWorksheet(worksheetId);
+  if (!ws) return;
+  ws.markedIncomplete = true;
+  ws.carryForward = !!carryForward;
+  ws.incompleteAt = Date.now();
+  saveState();
+  renderContent();
+  toast(carryForward ? "Marked not done — it'll show in the Daily Plan to redo." : "Marked not done.", "success");
+}
+function clearIncomplete(worksheetId) {
+  const ws = findWorksheet(worksheetId);
+  if (!ws) return;
+  ws.markedIncomplete = false;
+  ws.carryForward = false;
+  saveState();
+  renderContent();
+}
+// Sheets flagged to redo for a kid (oldest first so the most overdue lead).
+function carryForwardSheets(kidId) {
+  return (state.worksheets[kidId] || [])
+    .filter(w => w.markedIncomplete && w.carryForward)
+    .sort((a, b) => a.generatedAt - b.generatedAt);
 }
 
 function fileToBase64(file) {

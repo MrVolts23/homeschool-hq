@@ -73,7 +73,15 @@ State shape (simplified):
 
 ## Tabs
 
-8 tabs, all per-kid: Dashboard → Math → Reading → Writing → Standards → Daily Plan → Reading Log → Portfolio. Router lives in `renderContent()` (~line 222 of `app.js`).
+10 tabs, all per-kid: Dashboard → Math → Reading → Writing → Geography → Standards → **Grading** → Daily Plan → Reading Log → Portfolio. Router lives in `renderContent()` (~line 262 of `app.js`).
+
+## Grading tab + completion model
+
+The **Grading** tab (`renderGrading`/`gradingRowHTML`/`attachGradingListeners`) is a day-by-day marking queue: a native date picker (with ‹/› day-shift + "Jump to today"), an All-kids/per-kid chip filter, and a row per worksheet generated that day. Each row shows a status badge — `⏳ to mark` / `score%` / `✗ not done` — and actions: **Mark** (`openGradeModal`), **Reprint** (`printWorksheet`, the exact same sheet), and **Not done** (`markIncomplete(id, carryForward=true)`).
+
+Completion lives on the worksheet object: `markedIncomplete` + `carryForward` (+ `incompleteAt`). Helpers: `dateKeyOf`/`todayKey` (local-tz YYYY-MM-DD, **not** UTC), `dateKeyLabel` (Today/Yesterday/short date), `worksheetsOnDate(key, kidId|'all')`, `worksheetStatus(ws)` → `graded|incomplete|pending`, `carryForwardSheets(kidId)`. Grading a sheet clears both flags (in `runGrading`), and `runGrading` now attributes the mark to `worksheet.kidId` (not the active profile) so you can mark any kid's sheet from the All-kids view. New fields are absent-by-default — no migration needed.
+
+The **Daily Plan** ties in: carry-forward (`✗ not done` + flagged) sheets surface in a "Finish first" section (Reprint same / generate Fresh one) above the per-subject recommendations, plus a nudge linking to Grading when today's sheets are still unmarked. Per-subject recs already key off the latest grading's `recommendation` (reteach/easier/harder/practice).
 
 ## Worksheet flow
 
