@@ -3221,6 +3221,7 @@ function gradingRowHTML(w) {
   } else {
     badge = `<span class="tag" style="background:#fbecd2; color:#875a13;">⏳ to mark</span>`;
   }
+  const viewBtn = `<button class="btn btn-ghost" data-action="view-ws" data-worksheet-id="${w.id}" title="Preview this exact sheet so you can match it to the paper in hand">👁 View</button>`;
   const markBtn = `<button class="btn btn-secondary" data-action="grade" data-worksheet-id="${w.id}" title="Upload the completed sheet & mark it">${st.state === "graded" ? "View / re-mark" : "Mark"}</button>`;
   const reprintBtn = `<button class="btn btn-ghost" data-action="reprint" data-worksheet-id="${w.id}" title="Print this exact sheet again">🖨 Reprint</button>`;
   const doneToggle = st.state === "incomplete"
@@ -3228,11 +3229,12 @@ function gradingRowHTML(w) {
     : `<button class="btn btn-ghost" data-action="mark-incomplete" data-worksheet-id="${w.id}" title="Flag as not completed — it'll show in the Daily Plan to redo">Not done</button>`;
   return `
     <div class="history-item">
-      <div class="meta">
+      <div class="meta" data-action="view-ws" data-worksheet-id="${w.id}" style="cursor:pointer;" title="Click to preview this sheet">
         <div class="meta-title">${escapeHtml(w.title || "Worksheet")}</div>
         <div class="meta-sub">${escapeHtml(kidName)} • ${capitalize(w.subject)}${w.difficulty ? " • Difficulty " + w.difficulty : ""}</div>
       </div>
       ${badge}
+      ${viewBtn}
       ${markBtn}
       ${reprintBtn}
       ${doneToggle}
@@ -3253,6 +3255,7 @@ function attachGradingListeners(kid) {
   const todayBtn = document.querySelector("[data-grading-today]");
   if (todayBtn) todayBtn.addEventListener("click", () => { uiGradingDate = todayKey(); renderContent(); });
   document.querySelectorAll("[data-grading-kid]").forEach(b => b.addEventListener("click", () => { uiGradingKid = b.dataset.gradingKid; renderContent(); }));
+  document.querySelectorAll("[data-action='view-ws']").forEach(el => el.addEventListener("click", () => openWorksheetModal(el.dataset.worksheetId)));
   document.querySelectorAll("[data-action='grade']").forEach(el => el.addEventListener("click", () => openGradeModal(el.dataset.worksheetId)));
   document.querySelectorAll("[data-action='view-grading']").forEach(el => el.addEventListener("click", ev => { ev.stopPropagation(); viewGrading(el.dataset.gradingId); }));
   document.querySelectorAll("[data-action='reprint']").forEach(el => el.addEventListener("click", () => { const w = findWorksheet(el.dataset.worksheetId); if (w) printWorksheet(w, { includeAnswers: false }); }));
