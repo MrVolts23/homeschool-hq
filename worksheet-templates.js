@@ -99,7 +99,8 @@ function pdfStampFooters(doc, kid, pageW, pageH, margin) {
     doc.setFontSize(9);
     doc.setTextColor(140);
     const gradeText = kid.gradeKey === "K" ? "Kindergarten" : "Grade " + kid.gradeKey;
-    const left = `Homeschool HQ • ${kid.name} • BC ${gradeText}`;
+    const codeSuffix = (typeof window !== "undefined" && window.__wsCode) ? `  •  ${window.__wsCode}` : "";
+    const left = `Homeschool HQ • ${kid.name} • BC ${gradeText}${codeSuffix}`;
     const right = `Page ${p} of ${total}`;
     doc.text(left, margin, pageH - 20);
     doc.text(right, pageW - margin, pageH - 20, { align: "right" });

@@ -534,6 +534,7 @@ textarea { min-height: 80px; resize: vertical; }
   vertical-align: middle;
   margin-right: 0.4rem;
 }
+.spinner-sm { width: 10px; height: 10px; border-width: 2px; margin-right: 0.3rem; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ------------------------------------------------ Letter picker chips */
