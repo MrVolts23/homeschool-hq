@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Homeschool HQ — Aubrey, Makena & Oakley</title>
-  <link rel="stylesheet" href="styles.css?v=2026-06-05h" />
+  <title>SOVRN Homeschool HQ — Aubrey, Makena & Oakley</title>
+  <link rel="stylesheet" href="styles.css?v=2026-06-05i" />
   <!-- jsPDF for printable worksheet generation (vendored locally so the app works offline) -->
   <script src="vendor/jspdf.umd.min.js"></script>
 </head>
 <body>
   <header class="app-header">
     <div class="brand">
-      <span class="brand-mark">🌲</span>
+      <img class="brand-mark" src="brand-logo.png?v=sovrn1" alt="SOVRN" />
       <div>
-        <h1>Homeschool HQ</h1>
+        <h1>SOVRN Homeschool HQ</h1>
         <p class="brand-sub">BC curriculum • powered by Claude</p>
       </div>
     </div>
@@ -115,7 +115,7 @@
           <input type="file" id="importDataInput" accept="application/json" hidden />
         </div>
         <p class="muted" id="backupsNote" style="font-size:0.8rem; margin-top:0.4rem;" hidden>
-          This app auto-saves a timestamped backup to <strong>Documents → Homeschool HQ Backups</strong> on launch and after changes. To restore one, use “Import data” and pick a backup file.
+          This app auto-saves a timestamped backup to <strong>Documents → Homeschool HQ Backups</strong> on launch and after changes (folder name kept for continuity with earlier backups). To restore one, use “Import data” and pick a backup file.
         </p>
       </div>
       <footer class="modal-footer" style="justify-content:space-between; align-items:center;">
@@ -129,10 +129,10 @@
   <div id="toast" class="toast" hidden></div>
 
   <!-- Scripts (load order matters: data first, then app) -->
-  <script src="curriculum.js?v=2026-06-05h"></script>
-  <script src="map-data.js?v=2026-06-05h"></script>
+  <script src="curriculum.js?v=2026-06-05i"></script>
+  <script src="map-data.js?v=2026-06-05i"></script>
   <script src="tracing-font.js?v=kgdots1"></script>
-  <script src="worksheet-templates.js?v=2026-06-05h"></script>
-  <script src="app.js?v=2026-06-05h"></script>
+  <script src="worksheet-templates.js?v=2026-06-05i"></script>
+  <script src="app.js?v=2026-06-05i"></script>
 </body>
 </html>

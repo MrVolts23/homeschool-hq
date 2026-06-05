@@ -1,7 +1,7 @@
 {
   "name": "homeschool-hq",
-  "version": "1.0.14",
-  "description": "Homeschool HQ — BC-curriculum worksheet generator & progress tracker (desktop app)",
+  "version": "1.1.0",
+  "description": "SOVRN Homeschool HQ — BC-curriculum worksheet generator & progress tracker (desktop app)",
   "author": "Mike Volts",
   "license": "UNLICENSED",
   "private": true,
@@ -22,7 +22,7 @@
   },
   "build": {
     "appId": "com.mike.homeschoolhq",
-    "productName": "Homeschool HQ",
+    "productName": "SOVRN Homeschool HQ",
     "files": [
       "electron/**/*",
       "index.html",
@@ -32,6 +32,7 @@
       "tracing-font.js",
       "worksheet-templates.js",
       "styles.css",
+      "brand-logo.png",
       "vendor/**/*"
     ],
     "mac": {
@@ -53,7 +54,7 @@
       ]
     },
     "dmg": {
-      "title": "Homeschool HQ",
+      "title": "SOVRN Homeschool HQ",
       "window": {
         "width": 540,
         "height": 380

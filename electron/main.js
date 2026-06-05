@@ -16,6 +16,13 @@ const APP_ROOT = path.join(__dirname, '..'); // project root (index.html lives h
 let mainWindow = null;
 let server = null;
 
+// Pin the data directory to a FIXED location, independent of the product name.
+// The app was first shipped as "Homeschool HQ" with userData at .../homeschool-hq;
+// renaming the product must NOT move (and thus orphan) the user's saved data, so we
+// lock userData here before the app is ready. All worksheets, grades, the API key,
+// and grade-image files live under this folder and stay put across renames.
+try { app.setPath('userData', path.join(app.getPath('appData'), 'homeschool-hq')); } catch (e) { /* best-effort */ }
+
 const MIME = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -70,7 +77,7 @@ function createWindow() {
     minWidth: 1080,
     minHeight: 680,
     backgroundColor: '#f6f6f4',
-    title: 'Homeschool HQ',
+    title: 'SOVRN Homeschool HQ',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -95,7 +102,7 @@ app.whenReady().then(async () => {
   } catch (e) {
     // Port busy or server failed — surface it rather than launching a blank window.
     const { dialog } = require('electron');
-    dialog.showErrorBox('Homeschool HQ — startup error', 'Could not start the local server on port ' + PORT + '.\n\n' + e.message);
+    dialog.showErrorBox('SOVRN Homeschool HQ — startup error', 'Could not start the local server on port ' + PORT + '.\n\n' + e.message);
     app.quit();
     return;
   }
@@ -173,7 +180,7 @@ function setupUpdater() {
     dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Update ready',
-      message: 'A new version of Homeschool HQ has been downloaded. Restart to apply it.',
+      message: 'A new version of SOVRN Homeschool HQ has been downloaded. Restart to apply it.',
       buttons: ['Restart now', 'Later']
     }).then(({ response }) => { if (response === 0) applyUpdateAndRestart(); });
   });
