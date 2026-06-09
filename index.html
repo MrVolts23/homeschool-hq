@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SOVRN Homeschool HQ — Aubrey, Makena & Oakley</title>
-  <link rel="stylesheet" href="styles.css?v=2026-06-05i" />
+  <link rel="stylesheet" href="styles.css?v=2026-06-05j" />
   <!-- jsPDF for printable worksheet generation (vendored locally so the app works offline) -->
   <script src="vendor/jspdf.umd.min.js"></script>
 </head>
@@ -81,6 +81,33 @@
     </div>
   </div>
 
+  <!-- Batch upload + mark modal -->
+  <div class="modal" id="batchModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card modal-card-lg">
+      <header class="modal-header">
+        <h2>Batch upload &amp; mark</h2>
+        <button class="icon-btn" data-close>✕</button>
+      </header>
+      <div class="modal-body">
+        <p class="muted">Drop in a whole stack of completed-sheet photos. The app reads each sheet's name &amp; footer code, figures out whose it is, marks them all in the background, then gives you a report to scroll through.</p>
+        <div id="batchDrop" class="drop-zone">
+          <input type="file" id="batchFileInput" accept="image/*" multiple hidden />
+          <label for="batchFileInput" class="drop-zone-label">
+            <span class="drop-icon">🗂️</span>
+            <span>Click or drop photos here</span>
+            <span class="muted">JPG, PNG, or HEIC — as many as you like</span>
+          </label>
+        </div>
+        <div id="batchList"></div>
+      </div>
+      <footer class="modal-footer">
+        <button class="btn btn-ghost" data-close>Cancel</button>
+        <button class="btn btn-primary" id="runBatchBtn" disabled>Mark all</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- Settings modal -->
   <div class="modal" id="settingsModal" hidden>
     <div class="modal-backdrop" data-close></div>
@@ -129,10 +156,10 @@
   <div id="toast" class="toast" hidden></div>
 
   <!-- Scripts (load order matters: data first, then app) -->
-  <script src="curriculum.js?v=2026-06-05i"></script>
-  <script src="map-data.js?v=2026-06-05i"></script>
+  <script src="curriculum.js?v=2026-06-05j"></script>
+  <script src="map-data.js?v=2026-06-05j"></script>
   <script src="tracing-font.js?v=kgdots1"></script>
-  <script src="worksheet-templates.js?v=2026-06-05i"></script>
-  <script src="app.js?v=2026-06-05i"></script>
+  <script src="worksheet-templates.js?v=2026-06-05j"></script>
+  <script src="app.js?v=2026-06-05j"></script>
 </body>
 </html>

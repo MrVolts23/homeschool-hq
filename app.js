@@ -66,6 +66,9 @@ const uiTemplate = { math: null, reading: null, writing: null, geography: null }
 // Non-persistent UI state for the Grading tab (date being viewed + kid filter)
 let uiGradingDate = null;       // "YYYY-MM-DD"; null means "today"
 let uiGradingKid = "all";       // "all" | kidId
+let uiGradingView = "list";     // "list" | "report" (batch report)
+let uiBatchItems = [];          // [{id,name,file,dataUrl,status,kidId,worksheetId,grading,detected,pendingParsed,error}]
+let _batchRunning = false;
 
 // Per-kid accent colors — kept in sync with the body.kid-* themes in styles.css.
 // Used to color each child's name wherever multiple kids appear together.
@@ -195,6 +198,18 @@ function attachGlobalListeners() {
   // Grade modal
   document.getElementById("gradeFileInput").addEventListener("change", onGradeFileChosen);
   document.getElementById("runGradingBtn").addEventListener("click", runGrading);
+
+  // Batch modal
+  const batchInput = document.getElementById("batchFileInput");
+  if (batchInput) batchInput.addEventListener("change", e => onBatchFilesChosen(e.target.files));
+  const runBatchBtn = document.getElementById("runBatchBtn");
+  if (runBatchBtn) runBatchBtn.addEventListener("click", runBatch);
+  const batchDrop = document.getElementById("batchDrop");
+  if (batchDrop) {
+    batchDrop.addEventListener("dragover", e => { e.preventDefault(); batchDrop.classList.add("dragover"); });
+    batchDrop.addEventListener("dragleave", () => batchDrop.classList.remove("dragover"));
+    batchDrop.addEventListener("drop", e => { e.preventDefault(); batchDrop.classList.remove("dragover"); onBatchFilesChosen(e.dataTransfer.files); });
+  }
 
   // Settings actions
   document.getElementById("saveSettingsBtn").addEventListener("click", saveSettings);
@@ -3223,6 +3238,7 @@ function recommendTemplateForSubject(kid, subject, s) {
    GRADING TAB — pick a day, mark each kid's work, or flag to redo
 ============================================================ */
 function renderGrading(kid) {
+  if (uiGradingView === "report") return renderBatchReport();
   const key = uiGradingDate || todayKey();
   const fk = uiGradingKid || "all";
   const sheets = worksheetsOnDate(key, fk);
@@ -3261,6 +3277,7 @@ function renderGrading(kid) {
         <h2>Grading</h2>
         <div class="subtitle">Pick a day, mark each kid's completed work, reprint, or flag it to redo.</div>
       </div>
+      <button class="btn btn-primary" id="openBatchBtn" title="Upload a stack of photos and mark them all at once">🗂️ Upload a batch</button>
     </div>
 
     <div class="card" style="margin-bottom:1rem;">
@@ -3355,6 +3372,280 @@ function attachGradingListeners(kid) {
   document.querySelectorAll("[data-action='reprint']").forEach(el => el.addEventListener("click", () => { const w = findWorksheet(el.dataset.worksheetId); if (w) printWorksheet(w, { includeAnswers: false }); }));
   document.querySelectorAll("[data-action='mark-incomplete']").forEach(el => el.addEventListener("click", () => markIncomplete(el.dataset.worksheetId, true)));
   document.querySelectorAll("[data-action='clear-incomplete']").forEach(el => el.addEventListener("click", () => clearIncomplete(el.dataset.worksheetId)));
+  // Batch upload entry
+  const batchBtn = document.getElementById("openBatchBtn");
+  if (batchBtn) batchBtn.addEventListener("click", openBatchModal);
+  // Report view controls
+  document.querySelectorAll("[data-batch-back]").forEach(el => el.addEventListener("click", () => { uiGradingView = "list"; renderContent(); }));
+  document.querySelectorAll("[data-batch-assign]").forEach(sel => sel.addEventListener("change", () => assignBatchItem(sel.dataset.batchAssign, sel.value)));
+  document.querySelectorAll("[data-action='view-grading']").forEach(el => el.addEventListener("click", ev => { ev.stopPropagation(); viewGrading(el.dataset.gradingId); }));
+}
+
+/* ============================================================
+   BATCH GRADING — upload a stack of photos, auto-identify whose
+   sheet is whose (footer code → worksheet → kid, fallback name),
+   mark them all in the background, then a scroll-through report.
+============================================================ */
+function normCode(s) { return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
+
+// Index every saved worksheet by its provenance code (+5-char tail) and each kid by name.
+function buildMatchIndex() {
+  const byCode = {}, byKidName = {};
+  for (const kidId of Object.keys(state.worksheets)) {
+    (state.worksheets[kidId] || []).forEach(w => {
+      const c = normCode(wsCode(w));
+      if (c) { byCode[c] = w; const tail = c.slice(-5); if (!byCode[tail]) byCode[tail] = w; }
+    });
+  }
+  Object.values(state.kids).forEach(k => { byKidName[String(k.name || "").trim().toLowerCase()] = k.id; });
+  return { byCode, byKidName };
+}
+
+function matchDetected(detected, idx) {
+  let worksheet = null, kidId = null;
+  const code = normCode(detected.code);
+  if (code) {
+    worksheet = idx.byCode[code] || idx.byCode[code.slice(-5)] || null;
+    if (worksheet) kidId = worksheet.kidId;
+  }
+  if (!kidId && detected.studentName) {
+    const nm = String(detected.studentName).trim().toLowerCase();
+    if (idx.byKidName[nm]) kidId = idx.byKidName[nm];
+    else for (const [name, id] of Object.entries(idx.byKidName)) {
+      if (name && (nm.includes(name) || name.includes(nm))) { kidId = id; break; }
+    }
+  }
+  return { worksheet, kidId };
+}
+
+function buildBatchPrompt() {
+  const names = Object.values(state.kids).map(k => k.name).join(", ");
+  return `You are grading a photo of ONE completed homeschool worksheet.
+
+The children are: ${names}.
+Each printed sheet shows the child's NAME at the top and a small reference CODE in the footer, formatted like "HQ-XXXXX".
+
+Do TWO things:
+1) IDENTIFY — read the footer code EXACTLY (e.g. "HQ-1GVZN") and the child's name printed at the top, plus the worksheet title.
+2) MARK — assess the child's work on the page.
+
+Return ONLY valid JSON (no markdown):
+{
+  "code": "<the HQ-XXXXX footer code, or \"\" if unreadable>",
+  "studentName": "<name printed at top; if unclear, best match from the list above>",
+  "worksheetTitle": "<title printed on the sheet>",
+  "score": <0-100 integer>,
+  "perQuestion": [ { "correct": <true|false>, "kidAnswer": "<what they wrote>", "feedback": "<short note>" } ],
+  "confidence": "<high|medium|low>",
+  "recommendation": "<harder|same|reteach|easier>",
+  "notes": "<1-2 sentence summary for the parent>",
+  "weakStandards": []
+}
+RECOMMENDATION RULES: score>=90 & high confidence → "harder"; 70-89 → "same"; 50-69 → "reteach"; <50 → "easier".`;
+}
+
+async function identifyAndGradePhoto(file) {
+  const dataUrl = await resizeImageToDataUrl(file, 1100, 0.6);
+  const mediaType = (dataUrl.match(/^data:(image\/[^;]+);/) || [])[1] || "image/jpeg";
+  const content = [
+    { type: "image", source: { type: "base64", media_type: mediaType, data: dataUrl.split(",")[1] } },
+    { type: "text", text: buildBatchPrompt() }
+  ];
+  const resp = await callClaudeAPI(null, { content, max_tokens: 1500 });
+  return { parsed: parseGradingJSON(resp), dataUrl };
+}
+
+// Save a grading consistently (used by batch + manual assign): persist, clear redo
+// flags, update difficulty/mastery. Caller is responsible for saveState().
+function commitGrading(worksheet, grading, kidId) {
+  if (!state.gradings[kidId]) state.gradings[kidId] = [];
+  state.gradings[kidId].push(grading);
+  if (worksheet) { worksheet.markedIncomplete = false; worksheet.carryForward = false; }
+  applyGradingFeedback(kidId, worksheet, grading);
+}
+
+async function attachPhotoToGrading(grading, dataUrl) {
+  try {
+    if (window.hsBackup && window.hsBackup.saveGradeImage) {
+      const r = await window.hsBackup.saveGradeImage(grading.id, dataUrl);
+      if (r && r.ok) { grading.imageFile = r.file; return; }
+    }
+  } catch (e) { /* fall through to base64 */ }
+  grading.image = dataUrl;
+}
+
+async function runBatch() {
+  if (_batchRunning) return;
+  if (!state.settings.apiKey) { toast("Add your Claude API key in Settings to use batch marking.", "error"); return; }
+  const items = uiBatchItems.filter(it => it.status === "queued" || it.status === "error");
+  if (!items.length) return;
+  _batchRunning = true;
+  const runBtn = document.getElementById("runBatchBtn");
+  if (runBtn) { runBtn.disabled = true; runBtn.innerHTML = '<span class="spinner"></span> Marking…'; }
+  const idx = buildMatchIndex();
+
+  const POOL = 3;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const it = items[cursor++];
+      it.status = "working"; it.error = null;
+      renderBatchList();
+      try {
+        const { parsed, dataUrl } = await identifyAndGradePhoto(it.file);
+        it.dataUrl = dataUrl;
+        it.detected = { code: parsed.code || "", name: parsed.studentName || "", title: parsed.worksheetTitle || "" };
+        const m = matchDetected({ code: parsed.code, studentName: parsed.studentName }, idx);
+        it.worksheetId = m.worksheet ? m.worksheet.id : null;
+        it.kidId = m.kidId || null;
+        if (it.kidId) {
+          const grading = assembleGrading(parsed, m.worksheet);
+          await attachPhotoToGrading(grading, dataUrl);
+          commitGrading(m.worksheet, grading, it.kidId);
+          it.grading = grading;
+          it.status = "done";
+          saveState();
+        } else {
+          it.pendingParsed = parsed;     // keep for manual assignment in the report
+          it.status = "unmatched";
+        }
+      } catch (e) {
+        console.error("[batch]", e); it.error = e.message; it.status = "error";
+      }
+      renderBatchList();
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(POOL, items.length) }, worker));
+
+  _batchRunning = false;
+  if (runBtn) { runBtn.disabled = false; runBtn.innerHTML = "Mark all"; }
+  closeAllModals();
+  uiGradingView = "report";
+  setCurrentTab("grading");
+  const done = uiBatchItems.filter(i => i.status === "done").length;
+  toast(`Batch complete — ${done} marked. Scroll the report sheet by sheet.`, "success");
+}
+
+// Assign an unmatched sheet to a kid from the report; saves the grading (no worksheet link).
+function assignBatchItem(itemId, kidId) {
+  const it = uiBatchItems.find(x => x.id === itemId);
+  if (!it || !it.pendingParsed || !kidId) return;
+  const grading = assembleGrading(it.pendingParsed, null);
+  (async () => {
+    await attachPhotoToGrading(grading, it.dataUrl);
+    commitGrading(null, grading, kidId);
+    it.kidId = kidId; it.grading = grading; it.status = "done"; it.pendingParsed = null;
+    saveState();
+    renderContent();
+    toast(`Saved to ${state.kids[kidId] ? state.kids[kidId].name : "kid"}.`, "success");
+  })();
+}
+
+/* ---- Batch modal (upload + live progress) ---- */
+function openBatchModal() {
+  uiBatchItems = [];
+  const input = document.getElementById("batchFileInput");
+  if (input) input.value = "";
+  renderBatchList();
+  const runBtn = document.getElementById("runBatchBtn");
+  if (runBtn) { runBtn.disabled = true; runBtn.innerHTML = "Mark all"; }
+  document.getElementById("batchModal").hidden = false;
+}
+
+function onBatchFilesChosen(fileList) {
+  const files = Array.from(fileList || []).filter(f => f && (f.type || "").startsWith("image/"));
+  files.forEach((f, i) => uiBatchItems.push({
+    id: "b_" + Date.now() + "_" + i + "_" + Math.random().toString(36).slice(2, 5),
+    name: f.name, file: f, status: "queued"
+  }));
+  renderBatchList();
+  const runBtn = document.getElementById("runBatchBtn");
+  if (runBtn) runBtn.disabled = uiBatchItems.filter(it => it.status === "queued").length === 0;
+}
+
+function batchStatusChip(it) {
+  const map = {
+    queued:    `<span class="tag" style="background:#eee; color:#555;">queued</span>`,
+    working:   `<span class="tag" style="background:#e7eef6; color:#2c5b8a;"><span class="spinner spinner-sm"></span>reading + marking…</span>`,
+    done:      `<span class="tag" style="background:#d9efdc; color:#2a6939;">✓ ${it.grading ? it.grading.score + "%" : "marked"}</span>`,
+    unmatched: `<span class="tag" style="background:#fbecd2; color:#875a13;">⚠ needs a name</span>`,
+    error:     `<span class="tag" style="background:#f6d8d4; color:#8a2a22;">✕ failed</span>`
+  };
+  return map[it.status] || "";
+}
+
+function renderBatchList() {
+  const wrap = document.getElementById("batchList");
+  if (!wrap) return;
+  if (!uiBatchItems.length) { wrap.innerHTML = `<p class="muted" style="margin-top:0.8rem;">No photos added yet.</p>`; return; }
+  const done = uiBatchItems.filter(i => i.status === "done").length;
+  const total = uiBatchItems.length;
+  wrap.innerHTML = `
+    <div class="muted" style="font-size:0.82rem; margin:0.6rem 0;">${total} photo${total === 1 ? "" : "s"} • ${done} marked</div>
+    <div class="history-list">
+      ${uiBatchItems.map(it => `
+        <div class="history-item" style="padding:0.5rem 0.7rem;">
+          <div class="meta"><div class="meta-title" style="font-size:0.9rem;">${escapeHtml(it.detected && it.detected.name ? it.detected.name + " — " : "")}${escapeHtml(it.name)}</div>
+          <div class="meta-sub">${it.detected && it.detected.code ? escapeHtml(it.detected.code) + " • " : ""}${it.detected && it.detected.title ? escapeHtml(it.detected.title) : "—"}</div></div>
+          ${batchStatusChip(it)}
+        </div>`).join("")}
+    </div>`;
+}
+
+/* ---- Batch report (scroll sheet by sheet) ---- */
+function renderBatchReport() {
+  const items = uiBatchItems;
+  const done = items.filter(i => i.status === "done").length;
+  const need = items.filter(i => i.status === "unmatched").length;
+  const failed = items.filter(i => i.status === "error").length;
+  const kidOpts = (selId) => `<option value="">— pick child —</option>` +
+    Object.values(state.kids).map(k => `<option value="${k.id}" ${selId === k.id ? "selected" : ""}>${escapeHtml(k.name)}</option>`).join("");
+
+  const cards = items.map(it => {
+    const g = it.grading;
+    const kidName = it.kidId && state.kids[it.kidId] ? state.kids[it.kidId].name : "";
+    const color = it.kidId ? kidColor(it.kidId) : "#888";
+    const img = it.dataUrl ? `<img src="${it.dataUrl}" alt="sheet" style="width:140px; height:180px; object-fit:cover; border:1px solid var(--border); border-radius:6px; flex:0 0 auto;">`
+                           : `<div style="width:140px; height:180px; display:flex; align-items:center; justify-content:center; background:#f3f3f1; border-radius:6px; flex:0 0 auto; color:#bbb; font-size:30px;">📄</div>`;
+    let right;
+    if (it.status === "error") {
+      right = `<div><div class="meta-title">${escapeHtml(it.name)}</div><p class="muted" style="color:#8a2a22;">Couldn't read this one: ${escapeHtml(it.error || "error")}.</p></div>`;
+    } else if (it.status === "unmatched") {
+      right = `
+        <div style="flex:1; min-width:0;">
+          <div><span class="tag" style="background:#fbecd2; color:#875a13;">⚠ couldn't tell whose this is</span></div>
+          <div style="margin-top:6px;"><strong>${escapeHtml((it.detected && it.detected.title) || it.name)}</strong> ${it.pendingParsed ? `<span class="score-badge ${it.pendingParsed.score >= 85 ? "score-high" : it.pendingParsed.score >= 65 ? "score-mid" : "score-low"}">${it.pendingParsed.score}%</span>` : ""}</div>
+          ${it.detected && it.detected.name ? `<div class="muted" style="font-size:0.8rem; margin-top:3px;">Read name as: "${escapeHtml(it.detected.name)}"</div>` : ""}
+          <div style="margin-top:8px;">Assign to: <select data-batch-assign="${it.id}" style="padding:0.3rem 0.5rem;">${kidOpts(null)}</select></div>
+        </div>`;
+    } else {
+      const sc = g ? g.score : 0;
+      const cls = sc >= 85 ? "score-high" : sc >= 65 ? "score-mid" : "score-low";
+      const pq = (g && g.perQuestion || []).filter(q => q && (q.kidAnswer || q.feedback || q.correct === true || q.correct === false));
+      right = `
+        <div style="flex:1; min-width:0;">
+          <div class="row-between">
+            <div><strong style="color:${color};">${escapeHtml(kidName)}</strong> — ${escapeHtml((it.detected && it.detected.title) || "Worksheet")}</div>
+            <span class="score-badge ${cls}" ${g ? `data-action="view-grading" data-grading-id="${g.id}" style="cursor:pointer;"` : ""}>${sc}% ${g ? difficultyArrow(g.recommendation) : ""}</span>
+          </div>
+          <div class="muted" style="font-size:0.78rem; margin-top:2px;">${it.worksheetId ? escapeHtml(wsCode({ id: it.worksheetId })) : (it.detected && it.detected.code ? escapeHtml(it.detected.code) : "no code")} ${it.worksheetId ? "" : "• not linked to a sheet"}</div>
+          ${g && g.notes ? `<p style="margin-top:6px; font-size:0.9rem;"><strong>Notes:</strong> ${escapeHtml(g.notes)}</p>` : ""}
+          ${pq.length ? `<div style="margin-top:6px; font-size:0.82rem; display:flex; flex-direction:column; gap:2px;">${pq.slice(0, 8).map((q, i) => `<div>${q.correct === false ? "✗" : q.correct === true ? "✓" : "•"} <strong>Q${i + 1}</strong>${q.kidAnswer ? " — " + escapeHtml(String(q.kidAnswer)) : ""}${q.feedback ? ` <span class="muted">(${escapeHtml(q.feedback)})</span>` : ""}</div>`).join("")}</div>` : ""}
+        </div>`;
+    }
+    return `<div class="card" style="display:flex; gap:1rem; align-items:flex-start;">${img}${right}</div>`;
+  }).join("");
+
+  return `
+    <div class="content-header">
+      <div>
+        <h2>Batch report</h2>
+        <div class="subtitle">${items.length} sheet${items.length === 1 ? "" : "s"} • ${done} marked${need ? ` • ${need} need a name` : ""}${failed ? ` • ${failed} failed` : ""}</div>
+      </div>
+      <button class="btn btn-secondary" data-batch-back>← Back to Grading</button>
+    </div>
+    <div class="grid" style="gap:1rem;">${cards || `<p class="muted">No sheets in this batch.</p>`}</div>
+  `;
 }
 
 function renderDailyPlan(kid) {
