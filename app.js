@@ -1035,6 +1035,25 @@ function resizeImageToDataUrl(file, maxDim, quality) {
   });
 }
 
+function isHeicFile(file) {
+  return /hei[cf]/i.test(file.type || "") || /\.(heic|heif)$/i.test(file.name || "");
+}
+
+// Always return a JPEG data URL the canvas + Claude API can handle. iPhone HEIC
+// photos can't be decoded by Chromium, so convert them natively via the Mac app
+// (sips). Everything else goes through the normal canvas resize.
+async function normalizeToJpegDataUrl(file) {
+  if (isHeicFile(file)) {
+    if (window.hsBackup && window.hsBackup.heicToJpeg && file.path) {
+      const r = await window.hsBackup.heicToJpeg(file.path);
+      if (r && r.ok && r.dataUrl) return r.dataUrl;
+      throw new Error("Couldn't convert this HEIC photo" + (r && r.error ? " (" + r.error + ")" : "") + ".");
+    }
+    throw new Error("HEIC photos need the Mac app to convert. Tip: iPhone Settings → Camera → Formats → ‘Most Compatible’ saves JPEGs instead.");
+  }
+  return resizeImageToDataUrl(file, 1600, 0.72);
+}
+
 function subjectLabel(s) {
   return s === "math" ? "Math" : s === "reading" ? "Reading" : s === "geography" ? "Geography" : "Writing";
 }
@@ -2805,14 +2824,15 @@ function onGradeFileChosen(e) {
   document.getElementById("runGradingBtn").disabled = false;
   const preview = document.getElementById("gradePreview");
   preview.hidden = false;
-  if (file.type.startsWith("image/")) {
+  // HEIC can't render in <img> (Chromium), so show a chip; it's converted at mark time.
+  if (file.type.startsWith("image/") && !isHeicFile(file)) {
     const reader = new FileReader();
     reader.onload = (ev) => {
       preview.innerHTML = `<img src="${ev.target.result}" style="max-width: 100%; max-height: 320px; border-radius: 6px; margin-top: 1rem;" />`;
     };
     reader.readAsDataURL(file);
   } else {
-    preview.innerHTML = `<p class="muted" style="margin-top:1rem;">📎 ${escapeHtml(file.name)} — ready to upload.</p>`;
+    preview.innerHTML = `<p class="muted" style="margin-top:1rem;">📎 ${escapeHtml(file.name)} — ready to mark${isHeicFile(file) ? " (HEIC — will convert automatically)" : ""}.</p>`;
   }
 }
 
@@ -2840,30 +2860,19 @@ function runGrading() {
   // Fire-and-forget async worker.
   (async () => {
     try {
-      const grading = await callClaudeForGrading(file, worksheet);
+      // Normalize the photo to a JPEG data URL first (handles iPhone HEIC). Used for
+      // both the API call and the saved review thumbnail.
+      const dataUrl = await normalizeToJpegDataUrl(file);
+      const grading = await callClaudeForGrading(dataUrl, worksheet);
 
-      // Save a compact copy of the completed photo so it can be reviewed later.
-      try {
-        const small = await resizeImageToDataUrl(file, 1100, 0.6);
-        if (window.hsBackup && window.hsBackup.saveGradeImage) {
-          const r = await window.hsBackup.saveGradeImage(grading.id, small);
-          if (r && r.ok) grading.imageFile = r.file;
-        } else {
-          grading.image = small;
-        }
-      } catch (imgErr) { /* image is optional — don't block grading */ }
+      // Save a copy of the completed photo so it can be reviewed later.
+      await attachPhotoToGrading(grading, dataUrl);
 
       // Persist — attribute to the worksheet's owner (the Grading tab can mark any
       // kid's sheet while a different kid is the active profile), falling back to the
       // active kid for ad-hoc uploads with no source worksheet.
       const kidId = (worksheet && worksheet.kidId) || state.currentKidId;
-      if (!state.gradings[kidId]) state.gradings[kidId] = [];
-      state.gradings[kidId].push(grading);
-
-      // A graded sheet is done — clear any "not done / redo" flag.
-      if (worksheet) { worksheet.markedIncomplete = false; worksheet.carryForward = false; }
-
-      applyGradingFeedback(kidId, worksheet, grading);
+      commitGrading(worksheet, grading, kidId);
       saveState();
 
       toast(`✅ “${label}” marked: ${grading.score}% — tap the score to see notes${grading.score < 90 ? " or make a re-teach" : ""}.`, "success");
@@ -2877,19 +2886,18 @@ function runGrading() {
   })();
 }
 
-async function callClaudeForGrading(file, worksheet) {
-  if (state.settings.apiKey && file.type.startsWith("image/")) {
-    // Real API call with vision
-    const base64 = await fileToBase64(file);
+// Takes a JPEG data URL (already HEIC-normalized + resized by the caller).
+async function callClaudeForGrading(dataUrl, worksheet) {
+  if (state.settings.apiKey && dataUrl) {
     const content = [
-      { type: "image", source: { type: "base64", media_type: file.type, data: base64.split(",")[1] } },
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: dataUrl.split(",")[1] } },
       { type: "text", text: buildGradingPrompt(worksheet) }
     ];
     const response = await callClaudeAPI(null, { content, max_tokens: 2048 });
     const parsed = parseGradingJSON(response);
     return assembleGrading(parsed, worksheet);
   }
-  // Mock grading
+  // Mock grading (no API key)
   return assembleGrading(mockGradingResponse(worksheet), worksheet);
 }
 
@@ -3445,10 +3453,9 @@ RECOMMENDATION RULES: score>=90 & high confidence → "harder"; 70-89 → "same"
 }
 
 async function identifyAndGradePhoto(file) {
-  const dataUrl = await resizeImageToDataUrl(file, 1100, 0.6);
-  const mediaType = (dataUrl.match(/^data:(image\/[^;]+);/) || [])[1] || "image/jpeg";
+  const dataUrl = await normalizeToJpegDataUrl(file);   // converts HEIC, resizes the rest
   const content = [
-    { type: "image", source: { type: "base64", media_type: mediaType, data: dataUrl.split(",")[1] } },
+    { type: "image", source: { type: "base64", media_type: "image/jpeg", data: dataUrl.split(",")[1] } },
     { type: "text", text: buildBatchPrompt() }
   ];
   const resp = await callClaudeAPI(null, { content, max_tokens: 1500 });

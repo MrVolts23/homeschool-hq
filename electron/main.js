@@ -3,7 +3,7 @@ const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 
 let downloadedUpdateFile = null; // staged update .zip from electron-updater
 
@@ -156,9 +156,29 @@ function writeGradeImage(id, dataUrl) {
   }
 }
 
+// iPhone photos are HEIC, which Chromium can't decode and the Claude vision API
+// won't accept. macOS ships `sips`, so convert HEIC→JPEG (downscaled) on the fly.
+function heicToJpeg(srcPath) {
+  return new Promise((resolve) => {
+    try {
+      if (!srcPath || !fs.existsSync(srcPath)) return resolve({ ok: false, error: 'file not found' });
+      const out = path.join(app.getPath('temp'), 'hs-heic-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '.jpg');
+      execFile('/usr/bin/sips', ['-s', 'format', 'jpeg', '-Z', '1600', srcPath, '--out', out], (err) => {
+        if (err) return resolve({ ok: false, error: err.message });
+        fs.readFile(out, (e2, data) => {
+          try { fs.unlinkSync(out); } catch (_) {}
+          if (e2) return resolve({ ok: false, error: e2.message });
+          resolve({ ok: true, dataUrl: 'data:image/jpeg;base64,' + data.toString('base64') });
+        });
+      });
+    } catch (e) { resolve({ ok: false, error: e.message }); }
+  });
+}
+
 function registerBackupHandlers() {
   // Synchronous version lookup so the renderer can show the running build at load.
   ipcMain.on('hs-app-version', (e) => { e.returnValue = app.getVersion(); });
+  ipcMain.handle('hs-heic-to-jpeg', (_e, srcPath) => heicToJpeg(srcPath));
   ipcMain.handle('hs-backup-save', (_e, json) => writeBackup(json));
   ipcMain.handle('hs-backup-open', () => {
     const d = backupsDir();

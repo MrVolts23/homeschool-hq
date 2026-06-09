@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SOVRN Homeschool HQ — Aubrey, Makena & Oakley</title>
-  <link rel="stylesheet" href="styles.css?v=2026-06-05j" />
+  <link rel="stylesheet" href="styles.css?v=2026-06-05k" />
   <!-- jsPDF for printable worksheet generation (vendored locally so the app works offline) -->
   <script src="vendor/jspdf.umd.min.js"></script>
 </head>
@@ -64,7 +64,7 @@
       <div class="modal-body">
         <p class="muted">Upload a photo or scan of the completed worksheet. Claude will mark it, identify weak spots, and decide whether to make the next one harder, the same, or easier.</p>
         <div id="gradeUploadDrop" class="drop-zone">
-          <input type="file" id="gradeFileInput" accept="image/*,application/pdf" hidden />
+          <input type="file" id="gradeFileInput" accept="image/*,.heic,.heif,application/pdf" hidden />
           <label for="gradeFileInput" class="drop-zone-label">
             <span class="drop-icon">📄</span>
             <span>Click or drop a file here</span>
@@ -92,7 +92,7 @@
       <div class="modal-body">
         <p class="muted">Drop in a whole stack of completed-sheet photos. The app reads each sheet's name &amp; footer code, figures out whose it is, marks them all in the background, then gives you a report to scroll through.</p>
         <div id="batchDrop" class="drop-zone">
-          <input type="file" id="batchFileInput" accept="image/*" multiple hidden />
+          <input type="file" id="batchFileInput" accept="image/*,.heic,.heif" multiple hidden />
           <label for="batchFileInput" class="drop-zone-label">
             <span class="drop-icon">🗂️</span>
             <span>Click or drop photos here</span>
@@ -156,10 +156,10 @@
   <div id="toast" class="toast" hidden></div>
 
   <!-- Scripts (load order matters: data first, then app) -->
-  <script src="curriculum.js?v=2026-06-05j"></script>
-  <script src="map-data.js?v=2026-06-05j"></script>
+  <script src="curriculum.js?v=2026-06-05k"></script>
+  <script src="map-data.js?v=2026-06-05k"></script>
   <script src="tracing-font.js?v=kgdots1"></script>
-  <script src="worksheet-templates.js?v=2026-06-05j"></script>
-  <script src="app.js?v=2026-06-05j"></script>
+  <script src="worksheet-templates.js?v=2026-06-05k"></script>
+  <script src="app.js?v=2026-06-05k"></script>
 </body>
 </html>
