@@ -3494,17 +3494,30 @@ function attachGradingListeners(kid) {
 ============================================================ */
 function normCode(s) { return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, ""); }
 
+// Collapse look-alike glyphs so a vision misread (O↔0, I/L↔1, S↔5, B↔8, Z↔2, G↔6)
+// can still match the right sheet. Used only for comparison, never for display.
+function canonCode(s) {
+  return normCode(s)
+    .replace(/O/g, "0").replace(/[IL]/g, "1").replace(/S/g, "5")
+    .replace(/B/g, "8").replace(/Z/g, "2").replace(/G/g, "6");
+}
+
 // Index every saved worksheet by its provenance code (+5-char tail) and each kid by name.
+// Also a "canonical" index (look-alike-collapsed) used only when an exact code misses
+// and the canonical key is unambiguous.
 function buildMatchIndex() {
-  const byCode = {}, byKidName = {};
+  const byCode = {}, byKidName = {}, byCanon = {}, canonCount = {};
+  const addCanon = (key, w) => { if (!key) return; canonCount[key] = (canonCount[key] || 0) + 1; if (!byCanon[key]) byCanon[key] = w; };
   for (const kidId of Object.keys(state.worksheets)) {
     (state.worksheets[kidId] || []).forEach(w => {
       const c = normCode(wsCode(w));
-      if (c) { byCode[c] = w; const tail = c.slice(-5); if (!byCode[tail]) byCode[tail] = w; }
+      if (!c) return;
+      byCode[c] = w; const tail = c.slice(-5); if (!byCode[tail]) byCode[tail] = w;
+      addCanon(canonCode(c), w); addCanon(canonCode(tail), w);
     });
   }
   Object.values(state.kids).forEach(k => { byKidName[String(k.name || "").trim().toLowerCase()] = k.id; });
-  return { byCode, byKidName };
+  return { byCode, byKidName, byCanon, canonCount };
 }
 
 function matchDetected(detected, idx) {
@@ -3512,6 +3525,12 @@ function matchDetected(detected, idx) {
   const code = normCode(detected.code);
   if (code) {
     worksheet = idx.byCode[code] || idx.byCode[code.slice(-5)] || null;
+    // Exact miss → try the look-alike-tolerant key, but only if it's unambiguous.
+    if (!worksheet && idx.byCanon) {
+      const cc = canonCode(code), ct = canonCode(code.slice(-5));
+      if (idx.canonCount[cc] === 1) worksheet = idx.byCanon[cc];
+      else if (idx.canonCount[ct] === 1) worksheet = idx.byCanon[ct];
+    }
     if (worksheet) kidId = worksheet.kidId;
   }
   if (!kidId && detected.studentName) {
