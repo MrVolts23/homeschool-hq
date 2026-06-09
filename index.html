@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SOVRN Homeschool HQ — Aubrey, Makena & Oakley</title>
-  <link rel="stylesheet" href="styles.css?v=2026-06-05k" />
+  <link rel="stylesheet" href="styles.css?v=2026-06-05l" />
   <!-- jsPDF for printable worksheet generation (vendored locally so the app works offline) -->
   <script src="vendor/jspdf.umd.min.js"></script>
 </head>
@@ -108,6 +108,21 @@
     </div>
   </div>
 
+  <!-- Subject standards explainer modal -->
+  <div class="modal" id="subjectModal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card modal-card-lg">
+      <header class="modal-header">
+        <h2 id="subjectModalTitle">Standards</h2>
+        <button class="icon-btn" data-close>✕</button>
+      </header>
+      <div class="modal-body" id="subjectModalBody"></div>
+      <footer class="modal-footer">
+        <button class="btn btn-primary" data-close>Got it</button>
+      </footer>
+    </div>
+  </div>
+
   <!-- Settings modal -->
   <div class="modal" id="settingsModal" hidden>
     <div class="modal-backdrop" data-close></div>
@@ -156,10 +171,10 @@
   <div id="toast" class="toast" hidden></div>
 
   <!-- Scripts (load order matters: data first, then app) -->
-  <script src="curriculum.js?v=2026-06-05k"></script>
-  <script src="map-data.js?v=2026-06-05k"></script>
+  <script src="curriculum.js?v=2026-06-05l"></script>
+  <script src="map-data.js?v=2026-06-05l"></script>
   <script src="tracing-font.js?v=kgdots1"></script>
-  <script src="worksheet-templates.js?v=2026-06-05k"></script>
-  <script src="app.js?v=2026-06-05k"></script>
+  <script src="worksheet-templates.js?v=2026-06-05l"></script>
+  <script src="app.js?v=2026-06-05l"></script>
 </body>
 </html>

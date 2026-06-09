@@ -399,9 +399,60 @@ function subjectFeedbackHTML(kid, subject, snap) {
         <span style="font-size:0.9rem;">${emoji} ${msg}${readyChip}</span>
         ${lastBadge}
       </div>
-      <button class="btn btn-ghost" data-goto-subject="${subject}" style="align-self:flex-start; font-size:0.8rem; padding:0.3rem 0.6rem;">Practice ${subject} →</button>
+      <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+        <button class="btn btn-ghost" data-subject-info="${subject}" style="font-size:0.8rem; padding:0.3rem 0.6rem;">📋 Standards &amp; targets</button>
+        <button class="btn btn-ghost" data-goto-subject="${subject}" style="font-size:0.8rem; padding:0.3rem 0.6rem;">Practice ${subject} →</button>
+      </div>
     </div>
   `;
+}
+
+// Plain-language meaning of each BC mastery state (colors match the dashboard bar).
+const MASTERY_STATE_META = {
+  not_yet:    { label: "Not started", color: "#e2e2e2", desc: "Hasn't worked on this yet." },
+  emerging:   { label: "Emerging",    color: "#f4c44d", desc: "Just beginning — needs lots of help." },
+  developing: { label: "Developing",  color: "#7fb3e0", desc: "Getting it with some support." },
+  proficient: { label: "Proficient",  color: "#6bbf6b", desc: "Can do it on their own — this is the goal." },
+  extending:  { label: "Extending",   color: "#3a8f3a", desc: "Goes beyond — applies it in new ways." }
+};
+const MASTERY_ORDER = ["not_yet", "emerging", "developing", "proficient", "extending"];
+
+// Pop-up that explains a subject's BC standards at the kid's level + their progress.
+function openSubjectStandards(subject) {
+  const kid = state.kids[state.currentKidId];
+  const standards = getSubjectStandards(kid, subject);
+  const level = (kid.levels && kid.levels[subject]) || kid.gradeKey;
+  const mastered = standards.filter(s => { const m = kid.mastery[s.id]; return m === "proficient" || m === "extending"; }).length;
+
+  const legend = MASTERY_ORDER.map(k => {
+    const m = MASTERY_STATE_META[k];
+    return `<span title="${escapeAttr(m.desc)}" style="display:inline-flex; align-items:center; gap:5px; font-size:0.76rem; margin:2px 12px 2px 0;"><span style="width:11px;height:11px;border-radius:50%;background:${m.color};display:inline-block;"></span>${m.label}</span>`;
+  }).join("");
+
+  const rows = standards.map(s => {
+    const st = kid.mastery[s.id] || "not_yet";
+    const m = MASTERY_STATE_META[st];
+    const labelColor = st === "not_yet" ? "#888" : m.color;
+    return `<div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--border);">
+      <span title="${escapeAttr(m.label + " — " + m.desc)}" style="width:13px;height:13px;border-radius:50%;background:${m.color};flex:0 0 auto;margin-top:3px;"></span>
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:0.92rem;">${escapeHtml(s.text)}</div>
+        <div class="muted" style="font-size:0.74rem;">${s.topic ? escapeHtml(s.topic) + " • " : ""}${escapeHtml(s.id)} • <strong style="color:${labelColor};">${m.label}</strong></div>
+      </div>
+    </div>`;
+  }).join("");
+
+  document.getElementById("subjectModalTitle").textContent = `${SUBJECT_META[subject]} — ${gradeName(level)} targets`;
+  document.getElementById("subjectModalBody").innerHTML = `
+    <p style="margin-top:0;">These are the BC <strong>${gradeName(level)} ${escapeHtml(subject)}</strong> skills for <strong>${escapeHtml(kid.name)}</strong>. The goal is to move each one to <strong style="color:#2a6939;">Proficient</strong> (can do it independently) or beyond.</p>
+    <div style="background:var(--surface-2); border-radius:8px; padding:10px 12px; margin:0.6rem 0;">
+      <strong style="font-size:0.9rem;">${mastered} of ${standards.length} at Proficient or better</strong>
+      <div style="margin-top:6px;">${legend}</div>
+    </div>
+    <p class="muted" style="font-size:0.8rem;">How it's tracked: every worksheet practices specific skills below. When ${escapeHtml(kid.name)} scores well on a <em>marked</em> sheet, those skills move forward automatically — <strong>90%+ marks a skill Proficient</strong> (then Extending on a repeat), 75–89% nudges it up one step. Get most skills to Proficient with difficulty high and you'll see a “ready to level up” prompt.</p>
+    <div style="margin-top:0.4rem;">${rows || '<p class="muted">No standards listed for this level yet.</p>'}</div>
+  `;
+  document.getElementById("subjectModal").hidden = false;
 }
 
 function renderDashboard(kid) {
@@ -500,6 +551,9 @@ function attachDashboardListeners(kid) {
   });
   document.querySelectorAll("[data-goto-subject]").forEach(btn => {
     btn.addEventListener("click", () => setCurrentTab(btn.dataset.gotoSubject));
+  });
+  document.querySelectorAll("[data-subject-info]").forEach(btn => {
+    btn.addEventListener("click", () => openSubjectStandards(btn.dataset.subjectInfo));
   });
   document.querySelectorAll("[data-promote]").forEach(btn => {
     btn.addEventListener("click", () => promoteSubject(state.currentKidId, btn.dataset.promote));
@@ -1146,6 +1200,47 @@ function readModifiersFromForm(template) {
   return mods;
 }
 
+// Map a template to the BC curriculum standard IDs it practices, at THIS kid's level.
+// This is what lets grading advance the per-standard mastery bars — without it,
+// worksheets carry no standards and mastery never moves (100% but "0 proficient").
+const TEMPLATE_STANDARD_RULES = {
+  vertical_arithmetic:     /add|subtract|operation/i,
+  add_subtract_10:         /add|subtract|operation/i,
+  multiplication_facts:    /multipl|divis|times|equal group/i,
+  fractions_visual:        /fraction/i,
+  time_telling:            /time|clock|measurement/i,
+  place_value_expanded:    /place value|number concept|tens|hundred|expanded/i,
+  number_order:            /number concept|order|compare/i,
+  ab_patterns:             /pattern/i,
+  balance_equations:       /equalit|equal|balance/i,
+  ways_to_make:            /ways to make|decompos|make|number concept/i,
+  count_to_10:             /number concept|count/i,
+  math_word_problems:      /add|subtract|operation/i,
+  spelling_with_sentences: /spell|word|vocab|convention/i,
+  tracing_words:           /print|handwrit|letter|convention|word/i,
+  tracing_letters_numbers: /print|handwrit|letter|number/i,
+  tracing_shapes:          /shape|geometr|print/i,
+  story_starters:          /writ|story|sentence|compos|idea/i,
+  story_middle_end:        /writ|story|sentence|compos|idea/i,
+  capitalize_questions:    /capital|punctuat|convention|sentence/i,
+  combine_sentences:       /sentence|writ|convention/i,
+  describing_words_fill:   /describ|adject|word|vocab/i,
+  describing_words_choose: /describ|adject|word|vocab/i,
+  sight_words_practice:    /phonic|sight|word|decod|read/i,
+  reading_passage_gr3:     /comprehension|text|read|story|main idea|strateg|element/i,
+  geography_worksheet:     /geograph|map|region|place|location|landform|continent/i,
+  map_label:               /geograph|map|region|place|location|continent/i
+};
+function standardsForTemplate(kid, subject, templateId) {
+  const all = getSubjectStandards(kid, subject);
+  if (!all.length) return [];
+  const re = TEMPLATE_STANDARD_RULES[templateId];
+  let matched = re ? all.filter(s => re.test(s.text || "") || re.test(s.topic || "")) : [];
+  // Geography curriculum is small/varied — if nothing matched, credit the whole set.
+  if (!matched.length && subject === "geography") matched = all;
+  return matched.slice(0, 3).map(s => s.id);
+}
+
 function generateFromTemplate(kid, subject, templateId) {
   const template = window.TEMPLATES[templateId];
   const mods = readModifiersFromForm(template);
@@ -1158,7 +1253,7 @@ function generateFromTemplate(kid, subject, templateId) {
     modifiers: mods,
     content,
     title: titleFromTemplate(template, mods, kid),
-    standards: [], // could enrich via template.topicHint mapping later
+    standards: standardsForTemplate(kid, subject, template.id), // tag so mastery can advance
     questions: contentToQuestions(content, template), // for legacy display + grading
     answerKey: contentToAnswers(content, template),
     difficulty: kid.difficulty[subject],
@@ -1210,7 +1305,8 @@ async function generateFromAITemplate(kid, subject, template) {
     modifiers: mods,
     content,
     title,
-    standards: content.standards || [],
+    // Prefer curriculum-mapped standards (so mastery advances); fall back to AI-supplied.
+    standards: (standardsForTemplate(kid, subject, template.id).length ? standardsForTemplate(kid, subject, template.id) : (content.standards || [])),
     questions: content.questions || [],
     answerKey: (content.questions || []).map(q => q.answer || ""),
     difficulty: kid.difficulty[subject],
@@ -2993,11 +3089,13 @@ function applyGradingFeedback(kidId, worksheet, grading) {
               : 0;
   kid.difficulty[subject] = Math.max(1, Math.min(10, kid.difficulty[subject] + delta));
 
-  // Update mastery for touched standards
+  // Update mastery for touched standards.
+  // 90%+ on a practiced skill = independent → mark Proficient (then Extending on repeat);
+  // 75–89% nudges up one step; 50–74% holds (at least Emerging); below 50% resets to Emerging.
   (worksheet.standards || []).forEach(stdId => {
     const current = kid.mastery[stdId] || "not_yet";
     let next = current;
-    if (grading.score >= 90) next = upgradeState(current, 2);
+    if (grading.score >= 90) next = (current === "proficient" || current === "extending") ? "extending" : "proficient";
     else if (grading.score >= 75) next = upgradeState(current, 1);
     else if (grading.score >= 50) next = current === "not_yet" ? "emerging" : current;
     else next = "emerging";
