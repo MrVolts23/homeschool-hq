@@ -2642,16 +2642,21 @@ function renderSightWordRow(doc, word, x, y, w, h, isReadOnly, showAnswers) {
   doc.setLineDashPattern([], 0);
   doc.line(x, baseline, x + w, baseline);
 
-  // Section 1: bold word
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(28);
+  // Use the kid-friendly tracing font (single-story a/g, etc.) for BOTH the model
+  // word and the trace copy, so what the child reads, traces, and writes all match.
+  const useT = ensureTracingFontRegistered(doc);
+  const tFont = useT ? window.TRACING_FONT_NAME : "helvetica";
+
+  // Section 1: model word (read this) — tracing font, solid dark
+  doc.setFont(tFont, "normal");
+  doc.setFontSize(30);
   doc.setTextColor(20, 20, 20);
   doc.text(word, x + 10, baseline);
 
-  // Section 2: light ghost word (to trace)
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(28);
-  doc.setTextColor(190, 190, 190);
+  // Section 2: light ghost word (to trace) — same tracing font, grey
+  doc.setFont(tFont, "normal");
+  doc.setFontSize(30);
+  doc.setTextColor(185, 185, 185);
   doc.text(word, x + sectionW + 10, baseline);
 
   // Section 3: blank space for kid to write
@@ -3980,8 +3985,10 @@ function drawTracingWordRow(doc, word, y, pageW, margin, fontSize, m, opts) {
     doc.setLineDashPattern([], 0);
   }
 
-  // Demo word — solid, bold (the model to copy)
-  doc.setFont("helvetica", "bold");
+  // Demo word — the model to copy. Use the tracing font so its letterforms (the
+  // single-story 'a', 'g', etc.) match the ghost copies the child traces.
+  const useDemoTrace = ensureTracingFontRegistered(doc);
+  doc.setFont(useDemoTrace ? window.TRACING_FONT_NAME : "helvetica", useDemoTrace ? "normal" : "bold");
   doc.setFontSize(fontSize);
   doc.setTextColor(30, 30, 30);
   doc.text(word, margin + 14, baseline);
