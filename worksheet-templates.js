@@ -1169,27 +1169,54 @@ function pdfTraceText(doc, text, x, baseline, fontSize, gray) {
   doc.setTextColor(0, 0, 0);
 }
 
-// Hand-drawn single-line "9" (loop + straight descender) — KG's 9 is single-story/q-like.
-// leftX = left edge (like doc.text). dashed → the trace line; else the solid model.
-function pdfDraw9(doc, leftX, baseline, fontSize, dashed, hex) {
+// Digits 0–9 are DRAWN as single-line paths (not font glyphs) — the dashed font's
+// numerals are malformed/unreliable in the PDF engine (the 9 looked like a q, the 4
+// rendered as a box). Vector paths render identically everywhere. Commands are in a
+// unit box: x 0(left)→1(right), y 0(top)→1(baseline).
+const TRACE_DIGITS = {
+  "0": [["E",0.5,0.5,0.44,0.49]],
+  "1": [["M",0.22,0.22],["L",0.52,0.02],["L",0.52,1.0],["M",0.2,1.0],["L",0.85,1.0]],
+  "2": [["M",0.08,0.30],["C",0.12,0.0,0.95,-0.02,0.93,0.34],["C",0.91,0.58,0.5,0.66,0.10,0.99],["L",0.95,0.99]],
+  "3": [["M",0.08,0.16],["C",0.35,-0.05,0.95,0.04,0.9,0.30],["C",0.86,0.5,0.5,0.52,0.42,0.52],["M",0.42,0.52],["C",0.62,0.5,0.95,0.56,0.9,0.80],["C",0.85,1.05,0.22,1.04,0.08,0.84]],
+  "4": [["M",0.74,0.0],["L",0.06,0.66],["L",0.97,0.66],["M",0.74,0.0],["L",0.74,1.0]],
+  "5": [["M",0.9,0.03],["L",0.18,0.03],["L",0.15,0.45],["C",0.42,0.33,0.92,0.4,0.88,0.68],["C",0.85,0.98,0.35,1.04,0.08,0.85]],
+  "6": [["M",0.84,0.08],["C",0.45,-0.05,0.12,0.25,0.13,0.62],["E",0.5,0.74,0.37,0.26]],
+  "7": [["M",0.06,0.05],["L",0.95,0.05],["L",0.4,1.0]],
+  "8": [["E",0.5,0.26,0.33,0.25],["E",0.5,0.74,0.42,0.25]],
+  "9": [["E",0.5,0.27,0.4,0.26],["M",0.9,0.27],["L",0.9,1.0]]
+};
+function isTraceDigit(ch) { return /^[0-9]$/.test(ch); }
+function digitWidth(fontSize) { return fontSize * 0.46; }
+function pdfDrawDigit(doc, ch, leftX, baseline, fontSize, dashed, hex) {
+  const segs = TRACE_DIGITS[ch];
+  if (!segs) return digitWidth(fontSize);
   const ctx = doc.context2d;
-  const capH = fontSize * 0.70;          // match KG digit height
-  const r = capH * 0.30;
-  const cx = leftX + r;                  // loop centre
-  const cy = baseline - capH + r;        // loop in the upper band
-  const stemX = cx + r;                  // descender on the loop's right edge
+  const h = fontSize * 0.70, w = fontSize * 0.46, top = baseline - h;
+  const X = nx => leftX + nx * w, Y = ny => top + ny * h;
   ctx.save();
   ctx.strokeStyle = hex;
   ctx.lineWidth = dashed ? fontSize * 0.045 : fontSize * 0.075;
-  ctx.lineCap = "round";
-  ctx.setLineDash(dashed ? [fontSize * 0.065, fontSize * 0.060] : []);
-  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(stemX, cy - r * 0.1); ctx.lineTo(stemX, baseline); ctx.stroke();
+  ctx.lineCap = "round"; ctx.lineJoin = "round";
+  ctx.setLineDash(dashed ? [fontSize * 0.07, fontSize * 0.06] : []);
+  segs.forEach(seg => {
+    const t = seg[0];
+    if (t === "M") { ctx.beginPath(); ctx.moveTo(X(seg[1]), Y(seg[2])); }
+    else if (t === "L") { ctx.lineTo(X(seg[1]), Y(seg[2])); ctx.stroke(); }
+    else if (t === "C") { ctx.bezierCurveTo(X(seg[1]),Y(seg[2]),X(seg[3]),Y(seg[4]),X(seg[5]),Y(seg[6])); ctx.stroke(); }
+    else if (t === "E") {
+      const cx=X(seg[1]),cy=Y(seg[2]),rx=seg[3]*w,ry=seg[4]*h,k=0.5523;
+      ctx.beginPath(); ctx.moveTo(cx+rx,cy);
+      ctx.bezierCurveTo(cx+rx,cy+ry*k,cx+rx*k,cy+ry,cx,cy+ry);
+      ctx.bezierCurveTo(cx-rx*k,cy+ry,cx-rx,cy+ry*k,cx-rx,cy);
+      ctx.bezierCurveTo(cx-rx,cy-ry*k,cx-rx*k,cy-ry,cx,cy-ry);
+      ctx.bezierCurveTo(cx+rx*k,cy-ry,cx+rx,cy-ry*k,cx+rx,cy);
+      ctx.stroke();
+    }
+  });
   ctx.restore();
   doc.setLineDashPattern([], 0);
-  return 2 * r;                          // visual width
+  return w;
 }
-function nineWidth(fontSize) { return fontSize * 0.70 * 0.30 * 2; }
 
 function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, opts) {
   const usableW = pageW - margin * 2;
@@ -1213,11 +1240,11 @@ function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, o
   }
 
   ensureTracingFontRegistered(doc);
-  const isNine = character === "9";   // KG's 9 is malformed → draw it ourselves
+  const isDigit = isTraceDigit(character);   // digits are hand-drawn, letters use the font
 
-  // Demo: solid dark model (KG Penmanship), or the hand-drawn solid 9.
-  if (isNine) {
-    pdfDraw9(doc, margin + 14, baseline, fontSize, false, "#1a1a1a");
+  // Demo: solid dark model — hand-drawn digit, or KG Penmanship letter.
+  if (isDigit) {
+    pdfDrawDigit(doc, character, margin + 14, baseline, fontSize, false, "#1a1a1a");
   } else {
     doc.setFont(traceModelFont(), "normal");
     doc.setFontSize(fontSize);
@@ -1238,17 +1265,17 @@ function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, o
   doc.line(margin + demoW - 8, topLine - 4, margin + demoW - 8, baseline + 4);
   doc.setLineDashPattern([], 0);
 
-  // Trace copies — the single-line DASHED glyph, centred in each slot.
-  // KG Dots renders smaller than the KG Penmanship model, so scale the trace up to match.
+  // Trace copies — single-line DASHED glyph, centred in each slot. KG Dots (letters)
+  // renders smaller than the KG Penmanship model, so scale letter traces up to match.
   const tracingW = usableW - demoW;
   const slotW = tracingW / copies;
   const traceSize = fontSize * 1.22;
-  doc.setFont(traceDotsFont(), "normal");
-  doc.setFontSize(traceSize);
-  const cw = isNine ? nineWidth(fontSize) : doc.getTextWidth(character);
+  let cw;
+  if (isDigit) { cw = digitWidth(fontSize); }
+  else { doc.setFont(traceDotsFont(), "normal"); doc.setFontSize(traceSize); cw = doc.getTextWidth(character); }
   for (let c = 0; c < copies; c++) {
     const leftX = margin + demoW + c * slotW + (slotW - cw) / 2;
-    if (isNine) pdfDraw9(doc, leftX, baseline, fontSize, true, "#6e6e6e");
+    if (isDigit) pdfDrawDigit(doc, character, leftX, baseline, fontSize, true, "#6e6e6e");
     else pdfTraceText(doc, character, leftX, baseline, traceSize, 110);
   }
 
@@ -1256,7 +1283,7 @@ function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, o
   if (opts.showAnswers) {
     for (let c = 0; c < copies; c++) {
       const leftX = margin + demoW + c * slotW + (slotW - cw) / 2;
-      if (isNine) { pdfDraw9(doc, leftX, baseline, fontSize, false, "#1e1e1e"); }
+      if (isDigit) { pdfDrawDigit(doc, character, leftX, baseline, fontSize, false, "#1e1e1e"); }
       else { doc.setFont(traceModelFont(), "normal"); doc.setFontSize(fontSize); doc.setTextColor(30, 30, 30); doc.text(character, leftX, baseline); }
     }
   }
