@@ -4924,7 +4924,7 @@ const GRADE_SEQ = ["K", "1", "2", "3", "4", "5", "6"];
 function gSeqRank(g) { const i = GRADE_SEQ.indexOf(g); return i < 0 ? 0 : i; }
 const TEMPLATE_MAX_GRADE = {
   count_to_10: "1", ways_to_make: "2",
-  tracing_shapes: "1", tracing_letters_numbers: "2", tracing_words: "3",
+  tracing_shapes: "1", tracing_letters_numbers: "3", tracing_words: "3",
   sight_words_practice: "2",
   capitalize_questions: "3", story_middle_end: "3", combine_sentences: "3",
   describing_words_fill: "3", describing_words_choose: "3"
