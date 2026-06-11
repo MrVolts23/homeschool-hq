@@ -1159,7 +1159,9 @@ function traceModelFont() { return (window.TRACING_MODEL_NAME) || (window.TRACIN
 // FILL (no stroke tricks, so no double outline). Digits route through pdfDrawDigit so
 // the malformed "9" is replaced with a correct hand-drawn one.
 function pdfTraceText(doc, text, x, baseline, fontSize, gray) {
-  const g = gray == null ? 150 : gray;
+  // Keep the trace clearly visible (mid-grey) — light enough to trace over, dark
+  // enough to read. (A too-light grey looked faint/garbage on screen.)
+  const g = Math.min(gray == null ? 110 : gray, 120);
   doc.setFont(traceDotsFont(), "normal");
   doc.setFontSize(fontSize);
   doc.setTextColor(g, g, g);
@@ -1171,23 +1173,23 @@ function pdfTraceText(doc, text, x, baseline, fontSize, gray) {
 // leftX = left edge (like doc.text). dashed → the trace line; else the solid model.
 function pdfDraw9(doc, leftX, baseline, fontSize, dashed, hex) {
   const ctx = doc.context2d;
-  const capH = fontSize * 0.66;
+  const capH = fontSize * 0.70;          // match KG digit height
   const r = capH * 0.30;
-  const cx = leftX + r;                 // loop centre
-  const cy = baseline - capH + r;       // loop in the upper band
-  const stemX = cx + r;                 // descender on the loop's right edge
+  const cx = leftX + r;                  // loop centre
+  const cy = baseline - capH + r;        // loop in the upper band
+  const stemX = cx + r;                  // descender on the loop's right edge
   ctx.save();
   ctx.strokeStyle = hex;
-  ctx.lineWidth = dashed ? fontSize * 0.030 : fontSize * 0.055;
+  ctx.lineWidth = dashed ? fontSize * 0.045 : fontSize * 0.075;
   ctx.lineCap = "round";
-  ctx.setLineDash(dashed ? [fontSize * 0.060, fontSize * 0.060] : []);
+  ctx.setLineDash(dashed ? [fontSize * 0.065, fontSize * 0.060] : []);
   ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
   ctx.beginPath(); ctx.moveTo(stemX, cy - r * 0.1); ctx.lineTo(stemX, baseline); ctx.stroke();
   ctx.restore();
   doc.setLineDashPattern([], 0);
   return 2 * r;                          // visual width
 }
-function nineWidth(fontSize) { return fontSize * 0.66 * 0.30 * 2; }
+function nineWidth(fontSize) { return fontSize * 0.70 * 0.30 * 2; }
 
 function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, opts) {
   const usableW = pageW - margin * 2;
@@ -1237,15 +1239,17 @@ function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, o
   doc.setLineDashPattern([], 0);
 
   // Trace copies — the single-line DASHED glyph, centred in each slot.
+  // KG Dots renders smaller than the KG Penmanship model, so scale the trace up to match.
   const tracingW = usableW - demoW;
   const slotW = tracingW / copies;
+  const traceSize = fontSize * 1.22;
   doc.setFont(traceDotsFont(), "normal");
-  doc.setFontSize(fontSize);
+  doc.setFontSize(traceSize);
   const cw = isNine ? nineWidth(fontSize) : doc.getTextWidth(character);
   for (let c = 0; c < copies; c++) {
     const leftX = margin + demoW + c * slotW + (slotW - cw) / 2;
-    if (isNine) pdfDraw9(doc, leftX, baseline, fontSize, true, "#969696");
-    else pdfTraceText(doc, character, leftX, baseline, fontSize, 150);
+    if (isNine) pdfDraw9(doc, leftX, baseline, fontSize, true, "#6e6e6e");
+    else pdfTraceText(doc, character, leftX, baseline, traceSize, 110);
   }
 
   // Answer-key mode: solid completed glyphs over the dashes.
