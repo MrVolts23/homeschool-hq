@@ -1114,14 +1114,14 @@ function drawTracingNameRow(doc, name, y, pageW, margin, fontSize, m, opts) {
     doc.setLineDashPattern([], 0);
   }
 
-  // Demo name in dark (filled)
-  const tFont = ensureTracingFontRegistered(doc) ? window.TRACING_FONT_NAME : "helvetica";
-  doc.setFont(tFont, "normal");
+  // Demo name — solid dark model
+  ensureTracingFontRegistered(doc);
+  doc.setFont(traceModelFont(), "normal");
   doc.setFontSize(fontSize);
   doc.setTextColor(25, 25, 25);
   doc.text(name, margin + 14, baseline);
 
-  // Ghost name copies as light dashed outlines (same font as the model)
+  // Ghost name copies as light single-line dashed letters
   const nameW = doc.getTextWidth(name);
   const demoW = nameW + 40;
   const remainingW = usableW - demoW;
@@ -1129,44 +1129,65 @@ function drawTracingNameRow(doc, name, y, pageW, margin, fontSize, m, opts) {
   for (let i = 0; i < ghostCopies; i++) {
     const xPos = margin + demoW + 20 + i * (nameW + 30);
     if (xPos + nameW <= pageW - margin) {
-      pdfTraceText(doc, name, xPos, baseline, tFont, fontSize, 155);
+      pdfTraceText(doc, name, xPos, baseline, fontSize, 155);
     }
   }
   doc.setTextColor(0, 0, 0);
 }
 
+// Register BOTH tracing faces: the dashed single-line font (the line the child
+// traces) and the solid model font (the dark letter to copy). They're a matched pair.
 function ensureTracingFontRegistered(doc) {
-  if (!window.TRACING_FONT_BASE64) return false;
-  if (doc._tracingFontRegistered) return true;
+  if (doc._tracingFontRegistered) return !!window.TRACING_FONT_BASE64;
   try {
-    doc.addFileToVFS("TracingFont.ttf", window.TRACING_FONT_BASE64);
-    doc.addFont("TracingFont.ttf", window.TRACING_FONT_NAME, "normal");
+    if (window.TRACING_FONT_BASE64) {
+      doc.addFileToVFS("TraceDots.ttf", window.TRACING_FONT_BASE64);
+      doc.addFont("TraceDots.ttf", window.TRACING_FONT_NAME, "normal");
+    }
+    if (window.TRACING_MODEL_BASE64) {
+      doc.addFileToVFS("TraceModel.ttf", window.TRACING_MODEL_BASE64);
+      doc.addFont("TraceModel.ttf", window.TRACING_MODEL_NAME, "normal");
+    }
     doc._tracingFontRegistered = true;
-    return true;
-  } catch (e) {
-    console.warn("Could not register tracing font:", e);
-    return false;
-  }
+  } catch (e) { console.warn("Could not register tracing fonts:", e); }
+  return !!window.TRACING_FONT_BASE64;
 }
+function traceDotsFont() { return (window.TRACING_FONT_NAME) || "helvetica"; }
+function traceModelFont() { return (window.TRACING_MODEL_NAME) || (window.TRACING_FONT_NAME) || "helvetica"; }
 
-// Draw the light DASHED OUTLINE of a glyph/word — the line a child traces. It's the
-// SAME font as the solid model, just stroked + dashed, so the model and the trace
-// always match exactly (and the numerals are correct). Falls back to a light fill if
-// stroked text isn't supported.
-function pdfTraceText(doc, text, x, baseline, fontName, fontSize, gray) {
+// The dashed single-line font's glyphs ARE the dashed strokes — render them as a light
+// FILL (no stroke tricks, so no double outline). Digits route through pdfDrawDigit so
+// the malformed "9" is replaced with a correct hand-drawn one.
+function pdfTraceText(doc, text, x, baseline, fontSize, gray) {
   const g = gray == null ? 150 : gray;
-  doc.setFont(fontName, "normal");
+  doc.setFont(traceDotsFont(), "normal");
   doc.setFontSize(fontSize);
   doc.setTextColor(g, g, g);
-  doc.setDrawColor(g, g, g);
-  doc.setLineWidth(Math.max(0.7, fontSize * 0.025));
-  const dash = Math.max(1.6, fontSize * 0.058);
-  doc.setLineDashPattern([dash, dash], 0);
-  try { doc.text(text, x, baseline, { renderingMode: "stroke" }); }
-  catch (e) { doc.setTextColor(200, 200, 200); doc.text(text, x, baseline); }
-  doc.setLineDashPattern([], 0);
-  doc.setLineWidth(0.4);
+  doc.text(String(text), x, baseline);
+  doc.setTextColor(0, 0, 0);
 }
+
+// Hand-drawn single-line "9" (loop + straight descender) — KG's 9 is single-story/q-like.
+// leftX = left edge (like doc.text). dashed → the trace line; else the solid model.
+function pdfDraw9(doc, leftX, baseline, fontSize, dashed, hex) {
+  const ctx = doc.context2d;
+  const capH = fontSize * 0.66;
+  const r = capH * 0.30;
+  const cx = leftX + r;                 // loop centre
+  const cy = baseline - capH + r;       // loop in the upper band
+  const stemX = cx + r;                 // descender on the loop's right edge
+  ctx.save();
+  ctx.strokeStyle = hex;
+  ctx.lineWidth = dashed ? fontSize * 0.030 : fontSize * 0.055;
+  ctx.lineCap = "round";
+  ctx.setLineDash(dashed ? [fontSize * 0.060, fontSize * 0.060] : []);
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(stemX, cy - r * 0.1); ctx.lineTo(stemX, baseline); ctx.stroke();
+  ctx.restore();
+  doc.setLineDashPattern([], 0);
+  return 2 * r;                          // visual width
+}
+function nineWidth(fontSize) { return fontSize * 0.66 * 0.30 * 2; }
 
 function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, opts) {
   const usableW = pageW - margin * 2;
@@ -1189,16 +1210,18 @@ function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, o
     doc.setLineDashPattern([], 0);
   }
 
-  // Register KG Primary Dots font — each glyph is ALREADY a dashed line, so we render with fill
-  const useTracingFont = ensureTracingFontRegistered(doc);
-  const traceFontName = useTracingFont ? window.TRACING_FONT_NAME : "helvetica";
+  ensureTracingFontRegistered(doc);
+  const isNine = character === "9";   // KG's 9 is malformed → draw it ourselves
 
-  // Demo letter/number: solid model in the tracing font (single-story a/g, correct
-  // numerals — same font as the dashed trace, so they match).
-  doc.setFont(traceFontName, "normal");
-  doc.setFontSize(fontSize);
-  doc.setTextColor(25, 25, 25);
-  doc.text(character, margin + 14, baseline);
+  // Demo: solid dark model (KG Penmanship), or the hand-drawn solid 9.
+  if (isNine) {
+    pdfDraw9(doc, margin + 14, baseline, fontSize, false, "#1a1a1a");
+  } else {
+    doc.setFont(traceModelFont(), "normal");
+    doc.setFontSize(fontSize);
+    doc.setTextColor(25, 25, 25);
+    doc.text(character, margin + 14, baseline);
+  }
 
   // Optional starting dot on demo
   if (m.showStartDot) {
@@ -1213,23 +1236,24 @@ function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, o
   doc.line(margin + demoW - 8, topLine - 4, margin + demoW - 8, baseline + 4);
   doc.setLineDashPattern([], 0);
 
-  // Trace copies — light DASHED OUTLINE of the same glyph, centred in each slot.
+  // Trace copies — the single-line DASHED glyph, centred in each slot.
   const tracingW = usableW - demoW;
   const slotW = tracingW / copies;
-  doc.setFont(traceFontName, "normal");
+  doc.setFont(traceDotsFont(), "normal");
   doc.setFontSize(fontSize);
-  const cw = doc.getTextWidth(character);
+  const cw = isNine ? nineWidth(fontSize) : doc.getTextWidth(character);
   for (let c = 0; c < copies; c++) {
-    pdfTraceText(doc, character, margin + demoW + c * slotW + (slotW - cw) / 2, baseline, traceFontName, fontSize, 150);
+    const leftX = margin + demoW + c * slotW + (slotW - cw) / 2;
+    if (isNine) pdfDraw9(doc, leftX, baseline, fontSize, true, "#969696");
+    else pdfTraceText(doc, character, leftX, baseline, fontSize, 150);
   }
 
-  // Answer-key mode: draw the solid completed glyphs over the dashes.
+  // Answer-key mode: solid completed glyphs over the dashes.
   if (opts.showAnswers) {
-    doc.setFont(traceFontName, "normal");
-    doc.setFontSize(fontSize);
-    doc.setTextColor(30, 30, 30);
     for (let c = 0; c < copies; c++) {
-      doc.text(character, margin + demoW + c * slotW + (slotW - cw) / 2, baseline);
+      const leftX = margin + demoW + c * slotW + (slotW - cw) / 2;
+      if (isNine) { pdfDraw9(doc, leftX, baseline, fontSize, false, "#1e1e1e"); }
+      else { doc.setFont(traceModelFont(), "normal"); doc.setFontSize(fontSize); doc.setTextColor(30, 30, 30); doc.text(character, leftX, baseline); }
     }
   }
 
@@ -2662,19 +2686,16 @@ function renderSightWordRow(doc, word, x, y, w, h, isReadOnly, showAnswers) {
   doc.setLineDashPattern([], 0);
   doc.line(x, baseline, x + w, baseline);
 
-  // Use the kid-friendly tracing font (single-story a/g, etc.) for BOTH the model
-  // word and the trace copy, so what the child reads, traces, and writes all match.
-  const useT = ensureTracingFontRegistered(doc);
-  const tFont = useT ? window.TRACING_FONT_NAME : "helvetica";
+  ensureTracingFontRegistered(doc);
 
-  // Section 1: model word (read this) — tracing font, solid dark
-  doc.setFont(tFont, "normal");
+  // Section 1: model word (read this) — solid dark
+  doc.setFont(traceModelFont(), "normal");
   doc.setFontSize(30);
   doc.setTextColor(20, 20, 20);
   doc.text(word, x + 10, baseline);
 
-  // Section 2: dashed-outline word to trace — same font as the model
-  pdfTraceText(doc, word, x + sectionW + 10, baseline, tFont, 30, 150);
+  // Section 2: single-line dashed word to trace
+  pdfTraceText(doc, word, x + sectionW + 10, baseline, 30, 150);
 
   // Section 3: blank space for kid to write
   if (showAnswers) {
@@ -4002,10 +4023,9 @@ function drawTracingWordRow(doc, word, y, pageW, margin, fontSize, m, opts) {
     doc.setLineDashPattern([], 0);
   }
 
-  // Demo word — the solid model in the tracing font (single-story a/g; same font as
-  // the dashed trace copies so they match exactly).
-  const traceFontName = ensureTracingFontRegistered(doc) ? window.TRACING_FONT_NAME : "helvetica";
-  doc.setFont(traceFontName, "normal");
+  // Demo word — solid dark model.
+  ensureTracingFontRegistered(doc);
+  doc.setFont(traceModelFont(), "normal");
   doc.setFontSize(fontSize);
   doc.setTextColor(25, 25, 25);
   doc.text(word, margin + 14, baseline);
@@ -4023,26 +4043,26 @@ function drawTracingWordRow(doc, word, y, pageW, margin, fontSize, m, opts) {
   doc.line(margin + demoW - 10, topLine - 4, margin + demoW - 10, baseline + 4);
   doc.setLineDashPattern([], 0);
 
-  // Ghost copies — light DASHED OUTLINES of the same word, repeated across the line.
-  doc.setFont(traceFontName, "normal");
+  // Ghost copies — single-line dashed letters of the same word, repeated across the line.
+  doc.setFont(traceDotsFont(), "normal");
   doc.setFontSize(fontSize);
   const ghostW = doc.getTextWidth(word);
   const gap = fontSize * 0.7;
   let x = margin + demoW + 14;
   let drawn = 0;
   while (x + ghostW <= pageW - margin) {
-    pdfTraceText(doc, word, x, baseline, traceFontName, fontSize, 150);
+    pdfTraceText(doc, word, x, baseline, fontSize, 150);
     x += ghostW + gap;
     drawn++;
   }
   // Guarantee at least one ghost copy even for a long word
   if (drawn === 0 && margin + demoW + 14 + ghostW <= pageW - margin + ghostW) {
-    pdfTraceText(doc, word, margin + demoW + 14, baseline, traceFontName, fontSize, 150);
+    pdfTraceText(doc, word, margin + demoW + 14, baseline, fontSize, 150);
   }
 
   // Answer-key mode: overlay solid completed copies
   if (opts.showAnswers) {
-    doc.setFont(traceFontName, "normal");
+    doc.setFont(traceModelFont(), "normal");
     doc.setFontSize(fontSize);
     doc.setTextColor(30, 30, 30);
     let ax = margin + demoW + 14;
