@@ -1115,21 +1115,21 @@ function drawTracingNameRow(doc, name, y, pageW, margin, fontSize, m, opts) {
   }
 
   // Demo name in dark (filled)
-  doc.setFont("helvetica", "normal");
+  const tFont = ensureTracingFontRegistered(doc) ? window.TRACING_FONT_NAME : "helvetica";
+  doc.setFont(tFont, "normal");
   doc.setFontSize(fontSize);
-  doc.setTextColor(30, 30, 30);
+  doc.setTextColor(25, 25, 25);
   doc.text(name, margin + 14, baseline);
 
-  // Ghost name copies as light silhouette
+  // Ghost name copies as light dashed outlines (same font as the model)
   const nameW = doc.getTextWidth(name);
   const demoW = nameW + 40;
   const remainingW = usableW - demoW;
   const ghostCopies = Math.max(1, Math.floor(remainingW / (nameW + 30)));
-  doc.setTextColor(195, 195, 195);
   for (let i = 0; i < ghostCopies; i++) {
     const xPos = margin + demoW + 20 + i * (nameW + 30);
     if (xPos + nameW <= pageW - margin) {
-      doc.text(name, xPos, baseline);
+      pdfTraceText(doc, name, xPos, baseline, tFont, fontSize, 155);
     }
   }
   doc.setTextColor(0, 0, 0);
@@ -1139,14 +1139,33 @@ function ensureTracingFontRegistered(doc) {
   if (!window.TRACING_FONT_BASE64) return false;
   if (doc._tracingFontRegistered) return true;
   try {
-    doc.addFileToVFS("TracingNarrow.ttf", window.TRACING_FONT_BASE64);
-    doc.addFont("TracingNarrow.ttf", window.TRACING_FONT_NAME, "normal");
+    doc.addFileToVFS("TracingFont.ttf", window.TRACING_FONT_BASE64);
+    doc.addFont("TracingFont.ttf", window.TRACING_FONT_NAME, "normal");
     doc._tracingFontRegistered = true;
     return true;
   } catch (e) {
     console.warn("Could not register tracing font:", e);
     return false;
   }
+}
+
+// Draw the light DASHED OUTLINE of a glyph/word — the line a child traces. It's the
+// SAME font as the solid model, just stroked + dashed, so the model and the trace
+// always match exactly (and the numerals are correct). Falls back to a light fill if
+// stroked text isn't supported.
+function pdfTraceText(doc, text, x, baseline, fontName, fontSize, gray) {
+  const g = gray == null ? 150 : gray;
+  doc.setFont(fontName, "normal");
+  doc.setFontSize(fontSize);
+  doc.setTextColor(g, g, g);
+  doc.setDrawColor(g, g, g);
+  doc.setLineWidth(Math.max(0.7, fontSize * 0.025));
+  const dash = Math.max(1.6, fontSize * 0.058);
+  doc.setLineDashPattern([dash, dash], 0);
+  try { doc.text(text, x, baseline, { renderingMode: "stroke" }); }
+  catch (e) { doc.setTextColor(200, 200, 200); doc.text(text, x, baseline); }
+  doc.setLineDashPattern([], 0);
+  doc.setLineWidth(0.4);
 }
 
 function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, opts) {
@@ -1174,10 +1193,11 @@ function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, o
   const useTracingFont = ensureTracingFontRegistered(doc);
   const traceFontName = useTracingFont ? window.TRACING_FONT_NAME : "helvetica";
 
-  // Demo letter: use Helvetica BOLD (solid dark, easy to see what to trace)
-  doc.setFont("helvetica", "bold");
+  // Demo letter/number: solid model in the tracing font (single-story a/g, correct
+  // numerals — same font as the dashed trace, so they match).
+  doc.setFont(traceFontName, "normal");
   doc.setFontSize(fontSize);
-  doc.setTextColor(30, 30, 30);
+  doc.setTextColor(25, 25, 25);
   doc.text(character, margin + 14, baseline);
 
   // Optional starting dot on demo
@@ -1193,34 +1213,23 @@ function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, o
   doc.line(margin + demoW - 8, topLine - 4, margin + demoW - 8, baseline + 4);
   doc.setLineDashPattern([], 0);
 
-  // Ghost copies. LETTERS use the dotted tracing font (kid-friendly single-story
-  // a/g). NUMBERS do NOT — the tracing font's numerals are malformed (its "9" looks
-  // like a "g"), which teaches bad form. Digits trace over a clean light-grey
-  // Helvetica numeral that matches the demo and is consistent across 0–9.
+  // Trace copies — light DASHED OUTLINE of the same glyph, centred in each slot.
   const tracingW = usableW - demoW;
   const slotW = tracingW / copies;
-  const isDigit = /^[0-9]$/.test(character);
+  doc.setFont(traceFontName, "normal");
+  doc.setFontSize(fontSize);
+  const cw = doc.getTextWidth(character);
   for (let c = 0; c < copies; c++) {
-    if (isDigit) {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(fontSize);
-      doc.setTextColor(198, 198, 198);
-      const cw = doc.getTextWidth(character);
-      doc.text(character, margin + demoW + c * slotW + (slotW - cw) / 2, baseline);
-    } else {
-      doc.setFont(traceFontName, "normal");
-      doc.setFontSize(fontSize * 1.05); // slight bump — KG glyphs are a touch smaller
-      doc.setTextColor(80, 80, 80);
-      doc.text(character, margin + demoW + c * slotW + slotW / 2 - fontSize * 0.28, baseline);
-    }
+    pdfTraceText(doc, character, margin + demoW + c * slotW + (slotW - cw) / 2, baseline, traceFontName, fontSize, 150);
   }
 
-  // Answer-key mode: also draw the filled (completed) versions on top
+  // Answer-key mode: draw the solid completed glyphs over the dashes.
   if (opts.showAnswers) {
+    doc.setFont(traceFontName, "normal");
+    doc.setFontSize(fontSize);
     doc.setTextColor(30, 30, 30);
     for (let c = 0; c < copies; c++) {
-      const cx = margin + demoW + c * slotW + slotW / 2 - fontSize * 0.28;
-      doc.text(character, cx, baseline);
+      doc.text(character, margin + demoW + c * slotW + (slotW - cw) / 2, baseline);
     }
   }
 
@@ -2664,11 +2673,8 @@ function renderSightWordRow(doc, word, x, y, w, h, isReadOnly, showAnswers) {
   doc.setTextColor(20, 20, 20);
   doc.text(word, x + 10, baseline);
 
-  // Section 2: light ghost word (to trace) — same tracing font, grey
-  doc.setFont(tFont, "normal");
-  doc.setFontSize(30);
-  doc.setTextColor(185, 185, 185);
-  doc.text(word, x + sectionW + 10, baseline);
+  // Section 2: dashed-outline word to trace — same font as the model
+  pdfTraceText(doc, word, x + sectionW + 10, baseline, tFont, 30, 150);
 
   // Section 3: blank space for kid to write
   if (showAnswers) {
@@ -3996,12 +4002,12 @@ function drawTracingWordRow(doc, word, y, pageW, margin, fontSize, m, opts) {
     doc.setLineDashPattern([], 0);
   }
 
-  // Demo word — the model to copy. Use the tracing font so its letterforms (the
-  // single-story 'a', 'g', etc.) match the ghost copies the child traces.
-  const useDemoTrace = ensureTracingFontRegistered(doc);
-  doc.setFont(useDemoTrace ? window.TRACING_FONT_NAME : "helvetica", useDemoTrace ? "normal" : "bold");
+  // Demo word — the solid model in the tracing font (single-story a/g; same font as
+  // the dashed trace copies so they match exactly).
+  const traceFontName = ensureTracingFontRegistered(doc) ? window.TRACING_FONT_NAME : "helvetica";
+  doc.setFont(traceFontName, "normal");
   doc.setFontSize(fontSize);
-  doc.setTextColor(30, 30, 30);
+  doc.setTextColor(25, 25, 25);
   doc.text(word, margin + 14, baseline);
   const demoW = doc.getTextWidth(word) + 36;
 
@@ -4017,29 +4023,26 @@ function drawTracingWordRow(doc, word, y, pageW, margin, fontSize, m, opts) {
   doc.line(margin + demoW - 10, topLine - 4, margin + demoW - 10, baseline + 4);
   doc.setLineDashPattern([], 0);
 
-  // Ghost copies in the dotted tracing font, repeated across the line
-  const useTracingFont = ensureTracingFontRegistered(doc);
-  const traceFontName = useTracingFont ? window.TRACING_FONT_NAME : "helvetica";
+  // Ghost copies — light DASHED OUTLINES of the same word, repeated across the line.
   doc.setFont(traceFontName, "normal");
-  doc.setFontSize(fontSize * 1.05);
-  doc.setTextColor(90, 90, 90);
+  doc.setFontSize(fontSize);
   const ghostW = doc.getTextWidth(word);
   const gap = fontSize * 0.7;
   let x = margin + demoW + 14;
   let drawn = 0;
   while (x + ghostW <= pageW - margin) {
-    doc.text(word, x, baseline);
+    pdfTraceText(doc, word, x, baseline, traceFontName, fontSize, 150);
     x += ghostW + gap;
     drawn++;
   }
   // Guarantee at least one ghost copy even for a long word
   if (drawn === 0 && margin + demoW + 14 + ghostW <= pageW - margin + ghostW) {
-    doc.text(word, margin + demoW + 14, baseline);
+    pdfTraceText(doc, word, margin + demoW + 14, baseline, traceFontName, fontSize, 150);
   }
 
   // Answer-key mode: overlay solid completed copies
   if (opts.showAnswers) {
-    doc.setFont("helvetica", "bold");
+    doc.setFont(traceFontName, "normal");
     doc.setFontSize(fontSize);
     doc.setTextColor(30, 30, 30);
     let ax = margin + demoW + 14;

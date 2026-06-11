@@ -40,7 +40,7 @@ All state lives in browser `localStorage` under the key `homeschoolHQ_v1`.
 | `app.js` | The whole app. State, tabs, rendering, Claude calls, PDF assembly |
 | `curriculum.js` | BC curriculum data — Math + ELA, K through Gr 3, each standard has a stable ID for mastery tracking |
 | `worksheet-templates.js` | Scholastic-style printable worksheet generators (jsPDF). Each template has `generate(mods)` + `renderPDF(doc, content, mods, kid)` |
-| `tracing-font.js` | Base64-embedded TTF for handwriting/tracing worksheets — big file (~157KB) because the font is inlined |
+| `tracing-font.js` | Base64-embedded ABeeZee (OFL) — solid model + dashed-outline trace come from this one font so they always match; correct numerals + single-story a/g |
 | `map-data.js` | `window.MAP_DATA` — simplified, projected outline polygons for Canada (13 provinces/territories) and the USA (lower-48 states), used by the `map_label` template. Built from public GeoJSON, decimated + normalized to 0–1 coords (~98KB) |
 | `styles.css` | Visual design, per-kid color themes, modals |
 
