@@ -1193,15 +1193,26 @@ function drawTracingRow(doc, character, y, pageW, margin, copies, fontSize, m, o
   doc.line(margin + demoW - 8, topLine - 4, margin + demoW - 8, baseline + 4);
   doc.setLineDashPattern([], 0);
 
-  // Ghost letters — use KG Primary Dots (glyph is itself a dashed line). Just fill.
+  // Ghost copies. LETTERS use the dotted tracing font (kid-friendly single-story
+  // a/g). NUMBERS do NOT — the tracing font's numerals are malformed (its "9" looks
+  // like a "g"), which teaches bad form. Digits trace over a clean light-grey
+  // Helvetica numeral that matches the demo and is consistent across 0–9.
   const tracingW = usableW - demoW;
   const slotW = tracingW / copies;
-  doc.setFont(traceFontName, "normal");
-  doc.setFontSize(fontSize * 1.05); // slight bump — KG glyphs are a touch smaller
-  doc.setTextColor(80, 80, 80);
+  const isDigit = /^[0-9]$/.test(character);
   for (let c = 0; c < copies; c++) {
-    const cx = margin + demoW + c * slotW + slotW / 2 - fontSize * 0.28;
-    doc.text(character, cx, baseline);
+    if (isDigit) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(fontSize);
+      doc.setTextColor(198, 198, 198);
+      const cw = doc.getTextWidth(character);
+      doc.text(character, margin + demoW + c * slotW + (slotW - cw) / 2, baseline);
+    } else {
+      doc.setFont(traceFontName, "normal");
+      doc.setFontSize(fontSize * 1.05); // slight bump — KG glyphs are a touch smaller
+      doc.setTextColor(80, 80, 80);
+      doc.text(character, margin + demoW + c * slotW + slotW / 2 - fontSize * 0.28, baseline);
+    }
   }
 
   // Answer-key mode: also draw the filled (completed) versions on top
