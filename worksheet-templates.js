@@ -4978,6 +4978,290 @@ RETURN VALID JSON ONLY (no markdown fences):
 };
 
 /* ============================================================
+   TEMPLATE — PATTERN RECOGNITION & REASONING  (K–Gr3, math)
+   ------------------------------------------------------------
+   A "thinking gym" worksheet, not procedural drill. Four reasoning
+   modes, each of which asks the child to FIND and (where they can)
+   STATE the underlying rule — not just fill a blank:
+     • sequence   — number sequences (skip-count / grow / shrink / double)
+     • oddOneOut   — which one doesn't belong, AND why (articulate the rule)
+     • analogy     — A is to B as C is to ? (relational reasoning)
+     • visual      — repeating/growing shape sequences (draw what's next)
+   Deterministic (no API). Difficulty scales the number range, sequence
+   length, and step complexity. Maps loosely to BC Patterning (M*.x).
+============================================================ */
+window.TEMPLATES.pattern_recognition = {
+  id: "pattern_recognition",
+  label: "Pattern recognition & reasoning",
+  subject: "math",
+  grades: ["K", "1", "2", "3"],
+  topicHint: "Patterns & reasoning",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "sequence",  label: "Number sequences (find the rule)" },
+        { value: "oddOneOut", label: "Odd one out (which & why)" },
+        { value: "analogy",   label: "Analogies (A→B as C→?)" },
+        { value: "visual",    label: "Visual sequences (draw what's next)" },
+        { value: "mixed",     label: "Mixed (a bit of each)" }
+      ], default: "sequence" },
+    { id: "level", type: "select", label: "Challenge level",
+      options: [
+        { value: "gentle",  label: "Gentle (small numbers, simple steps)" },
+        { value: "core",    label: "Core (grade-typical)" },
+        { value: "stretch", label: "Stretch (bigger numbers, trickier rules)" }
+      ], default: "core" },
+    { id: "count", type: "number", label: "# of problems", default: 8, min: 4, max: 16 },
+    { id: "writeRule", type: "boolean", label: "Ask the child to write the rule in words", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const level = m.level || "core";
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["sequence", "oddOneOut", "analogy", "visual"]
+      : [m.mode];
+    const problems = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      problems.push(prGenOne(mode, level, i));
+    }
+    return { problems, modifiers: m, writeRule: m.writeRule !== false, workedExample: m.workedExample !== false };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Pattern Detective";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Be a pattern detective. Look closely, find the hidden rule, then finish each one. There is always a reason — your job is to find it.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(11); doc.setTextColor(30, 30, 30);
+        doc.text("2, 4, 6, 8, ___    Rule: \"add 2 each time\"    Next: 10", x, by + 22);
+      }, y, pageW, margin, 46);
+    }
+
+    const rowH = 64;
+    content.problems.forEach((p, idx) => {
+      if (pdfNeedNewPage(doc, y, rowH, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      prRenderRow(doc, p, idx + 1, margin, y, pageW - margin * 2, content.writeRule, opts.showAnswers);
+      y += rowH;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- pattern_recognition generators ---- */
+function prRand(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+function prPick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+function prGenOne(mode, level, seed) {
+  if (mode === "sequence")  return prGenSequence(level);
+  if (mode === "oddOneOut") return prGenOddOneOut(level);
+  if (mode === "analogy")   return prGenAnalogy(level);
+  return prGenVisual(level);
+}
+
+function prGenSequence(level) {
+  // step kinds scale with level
+  const ranges = { gentle: { start: [1, 10], step: [1, 3] },
+                   core:   { start: [2, 30], step: [2, 5] },
+                   stretch:{ start: [5, 60], step: [3, 9] } }[level];
+  const kinds = level === "gentle"
+    ? ["add", "subtract"]
+    : ["add", "subtract", "double"];
+  const kind = prPick(kinds);
+  let start = prRand(ranges.start[0], ranges.start[1]);
+  const step = prRand(ranges.step[0], ranges.step[1]);
+  const seq = [];
+  let v = start;
+  let ruleText, ruleAnswer;
+  if (kind === "double") {
+    start = prRand(1, level === "stretch" ? 8 : 4);
+    v = start;
+    for (let i = 0; i < 5; i++) { seq.push(v); v = v * 2; }
+    ruleText = "double each time"; ruleAnswer = "× 2";
+  } else if (kind === "subtract") {
+    start = prRand(step * 5 + 1, ranges.start[1] + step * 5);
+    v = start;
+    for (let i = 0; i < 5; i++) { seq.push(v); v = v - step; }
+    ruleText = "subtract " + step + " each time"; ruleAnswer = "− " + step;
+  } else {
+    for (let i = 0; i < 5; i++) { seq.push(v); v = v + step; }
+    ruleText = "add " + step + " each time"; ruleAnswer = "+ " + step;
+  }
+  const blanks = 2; // last two are blank
+  const shown = seq.slice(0, seq.length - blanks);
+  const expected = seq.slice(seq.length - blanks);
+  return { mode: "sequence", shown, expected, ruleText, ruleAnswer };
+}
+
+function prGenOddOneOut(level) {
+  // Build a group sharing a property, plus one that breaks it. The child
+  // must mark it AND say why — this is the rule-articulation skill.
+  const sets = [
+    { rule: "all even numbers", make: () => {
+        const base = [2, 4, 6, 8, 10, 12, 14].sort(() => Math.random() - 0.5).slice(0, 3);
+        const odd = prPick([3, 5, 7, 9, 11]);
+        return { items: shuffleWithOdd(base, odd), odd: String(odd), why: "It is odd; the others are even." };
+      } },
+    { rule: "all odd numbers", make: () => {
+        const base = [3, 5, 7, 9, 11, 13].sort(() => Math.random() - 0.5).slice(0, 3);
+        const even = prPick([2, 4, 6, 8, 10]);
+        return { items: shuffleWithOdd(base, even), odd: String(even), why: "It is even; the others are odd." };
+      } },
+    { rule: "all count by 5", make: () => {
+        const base = [5, 10, 15, 20, 25].sort(() => Math.random() - 0.5).slice(0, 3);
+        const off = prPick([7, 12, 18, 23]);
+        return { items: shuffleWithOdd(base, off), odd: String(off), why: "It is not a count-by-5 number." };
+      } },
+    { rule: "all shapes with 4 sides", make: () => {
+        const base = ["square", "rectangle", "diamond"];
+        const odd = prPick(["triangle", "circle"]);
+        return { items: shuffleWithOdd(base.slice(0, 3), odd), odd, why: "It does not have 4 sides.", isWord: true };
+      } }
+  ];
+  const pool = level === "gentle" ? sets.slice(0, 2) : sets;
+  const chosen = prPick(pool).make();
+  return { mode: "oddOneOut", items: chosen.items, odd: chosen.odd, why: chosen.why, isWord: chosen.isWord };
+}
+
+function shuffleWithOdd(base, odd) {
+  const arr = base.map(String).concat([String(odd)]);
+  return arr.sort(() => Math.random() - 0.5);
+}
+
+function prGenAnalogy(level) {
+  const banks = [
+    { a: "2", b: "4", c: "3", d: "6", rule: "doubling" },
+    { a: "5", b: "10", c: "7", d: "14", rule: "doubling" },
+    { a: "10", b: "9", c: "6", d: "5", rule: "one less" },
+    { a: "3", b: "6", c: "4", d: "8", rule: "doubling" },
+    { a: "1", b: "3", c: "5", d: "7", rule: "add 2" },
+    { a: "big", b: "small", c: "up", d: "down", rule: "opposites", isWord: true },
+    { a: "hot", b: "cold", c: "day", d: "night", rule: "opposites", isWord: true },
+    { a: "circle", b: "round", c: "square", d: "corners", rule: "a property of the shape", isWord: true }
+  ];
+  const pool = level === "gentle" ? banks.filter(x => x.isWord || x.rule === "doubling" || x.rule === "one less") : banks;
+  const q = prPick(pool);
+  return { mode: "analogy", a: q.a, b: q.b, c: q.c, answer: q.d, ruleText: q.rule };
+}
+
+function prGenVisual(level) {
+  // Repeating or growing shape patterns the child draws.
+  const shapes = ["circle", "square", "triangle", "diamond"];
+  const growing = level !== "gentle" && Math.random() < 0.4;
+  if (growing) {
+    // growing run: 1,2,3,... of one shape
+    const sh = prPick(shapes);
+    const shown = [[sh], [sh, sh], [sh, sh, sh]];
+    return { mode: "visual", growing: true, shape: sh, shown, expected: [sh, sh, sh, sh], ruleText: "one more " + sh + " each group" };
+  }
+  // repeating unit (AB / ABC / ABB)
+  const unit = prPick(["AB", "ABC", "ABB", "AAB"]);
+  const distinct = new Set(unit.split("")).size;
+  const toks = shapes.sort(() => Math.random() - 0.5).slice(0, distinct);
+  const seq = [];
+  for (let j = 0; j < unit.length * 3 + 2; j++) {
+    seq.push(toks[unit.charCodeAt(j % unit.length) - 65]);
+  }
+  const shown = seq.slice(0, seq.length - 2);
+  const expected = seq.slice(seq.length - 2);
+  return { mode: "visual", growing: false, shown, expected, ruleText: unit + " repeating" };
+}
+
+/* ---- pattern_recognition row renderer ---- */
+function prRenderRow(doc, p, num, x, y, w, writeRule, showAnswers) {
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  const bx = x + 20;
+  doc.setTextColor(20, 20, 20);
+
+  if (p.mode === "sequence") {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(13);
+    const parts = p.shown.map(String).concat(p.expected.map(() => "____"));
+    doc.text(parts.join("   ,   "), bx, y + 6);
+    if (showAnswers) {
+      doc.setTextColor(180, 30, 30); doc.setFontSize(11);
+      doc.text("→ " + p.expected.join(", ") + "   (" + p.ruleText + ")", bx, y + 24);
+      doc.setTextColor(20, 20, 20);
+    } else if (writeRule) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(110, 110, 110);
+      doc.text("Rule: _______________________________", bx, y + 24);
+      doc.setTextColor(20, 20, 20);
+    }
+  } else if (p.mode === "oddOneOut") {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(12);
+    doc.text("Circle the one that does NOT belong:", bx, y + 4);
+    doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+    doc.text(p.items.join("        "), bx, y + 24);
+    doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(110, 110, 110);
+    if (showAnswers) {
+      doc.setTextColor(180, 30, 30);
+      doc.text("→ " + p.odd + " — " + p.why, bx, y + 42);
+    } else {
+      doc.text("Why? ______________________________", bx, y + 42);
+    }
+    doc.setTextColor(20, 20, 20);
+  } else if (p.mode === "analogy") {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(13);
+    doc.text(p.a + "  →  " + p.b + "      as      " + p.c + "  →  ______", bx, y + 8);
+    if (showAnswers) {
+      doc.setTextColor(180, 30, 30); doc.setFontSize(11);
+      doc.text("→ " + p.answer + "   (rule: " + p.ruleText + ")", bx, y + 28);
+      doc.setTextColor(20, 20, 20);
+    }
+  } else if (p.mode === "visual") {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(11);
+    doc.text("Draw what comes next:", bx, y + 2);
+    // draw shown shapes
+    let cx = bx;
+    const cy = y + 26, sz = 16;
+    const drawTok = (tok, faded) => {
+      const sh = window.SHAPES[tok];
+      if (sh) {
+        doc.setDrawColor(faded ? 180 : 30, faded ? 30 : 30, faded ? 30 : 30);
+        doc.setLineWidth(1.4);
+        sh.drawPDF(doc, { cx: cx + sz / 2, cy, size: sz, mode: "solid" });
+        doc.setDrawColor(30, 30, 30);
+      }
+      cx += sz + 8;
+    };
+    p.shown.forEach(t => drawTok(t, false));
+    // blanks
+    p.expected.forEach(t => {
+      doc.setDrawColor(150); doc.setLineWidth(0.6); doc.setLineDashPattern([2, 2], 0);
+      doc.rect(cx, cy - sz / 2, sz, sz, "S"); doc.setLineDashPattern([], 0);
+      if (showAnswers) drawTok(t, true); else cx += sz + 8;
+      doc.setDrawColor(30, 30, 30);
+    });
+    if (showAnswers) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(180, 30, 30);
+      doc.text("(" + p.ruleText + ")", bx, y + 46);
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
