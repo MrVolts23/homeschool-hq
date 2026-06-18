@@ -5262,6 +5262,267 @@ function prRenderRow(doc, p, num, x, y, w, writeRule, showAnswers) {
 }
 
 /* ============================================================
+   spot_the_persuasion — media & manipulation literacy
+   Deterministic, never calls AI. Teaches kids to notice when
+   words are trying to STEER them: ad tricks, fact vs opinion,
+   pressure tactics, and "who is saying this and what do they
+   want?" Voice stays curious & sovereign — never "obey", always
+   "ask why" and "decide for yourself."
+============================================================ */
+window.TEMPLATES.spot_the_persuasion = {
+  id: "spot_the_persuasion",
+  label: "Spot the persuasion (media literacy)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Critical thinking & media literacy",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "adTrick",   label: "Spot the ad trick (what is this selling?)" },
+        { value: "factOpinion", label: "Fact or opinion? (can we check it?)" },
+        { value: "pressure",  label: "Pressure tactics (hurry / everyone's doing it)" },
+        { value: "whoWants",  label: "Who's saying it & what do they want?" },
+        { value: "mixed",     label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["adTrick", "factOpinion", "pressure", "whoWants"]
+      : [m.mode];
+    // Draw without repeats where possible by shuffling each bank.
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode]) pools[mode] = spShuffle(SP_BANKS[mode].slice());
+      if (pools[mode].length === 0) pools[mode] = spShuffle(SP_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Spot the Persuasion";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Words can carry true things — and they can also try to STEER you. Your job is not to obey and not to argue. Your job is to NOTICE. For each one, ask: what is this really trying to get me to do or believe, and do I actually agree once I look closely? There are no wrong feelings here — only sharper eyes.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"BEST cereal EVER! Buy it NOW!\"  ->  This is an AD. It wants me to buy cereal. \"Best ever\" is an opinion, not a proof. \"NOW\" is rushing me. I can decide later, on my own.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 70);
+    }
+
+    const lineH = 14;
+    content.items.forEach((it, idx) => {
+      const needed = spRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = spRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- spot_the_persuasion content banks ---- */
+function spShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+// text   = the snippet the child reads
+// ask    = the question prompt (mode-specific)
+// answer = short model answer (shown only in answer key)
+// why    = the reasoning, in plain kid language, sovereign voice
+const SP_BANKS = {
+  adTrick: [
+    { text: "\"Every cool kid has the Glow Sneakers. Don't be the only one without them!\"",
+      ask: "What is this trying to sell, and what trick is it using?",
+      answer: "Selling sneakers. Trick: making you scared of being left out.",
+      why: "It never says the shoes are good — it just makes you afraid of being 'the only one.' That feeling is the product. You can want the shoes OR not; the fear is not a reason." },
+    { text: "\"9 out of 10 dogs love Chompy treats!\"",
+      ask: "What is being sold? What does this number really tell you?",
+      answer: "Dog treats. The number sounds like proof but tells us almost nothing.",
+      why: "Who counted? Which dogs? Hungry dogs love almost anything. A number can dress up an opinion to look like a fact." },
+    { text: "\"Drink FizzPop and you'll be happy and have lots of friends!\"",
+      ask: "What is being sold, and what is it promising that a drink can't really do?",
+      answer: "A drink. It promises happiness and friends — things a drink can't give.",
+      why: "A drink is just a drink. Ads glue a good feeling onto a product so you buy the feeling. Friends come from how you treat people, not from a can." },
+    { text: "\"As seen on TV! The amazing SpaceMop — order in the next 10 minutes!\"",
+      ask: "What is being sold, and which two tricks do you spot?",
+      answer: "A mop. Tricks: 'as seen on TV' (sounds important) and a rushing timer.",
+      why: "Being on TV doesn't make something good — anyone can pay to be on TV. And a 10-minute timer exists to stop you from thinking. Real good deals are still good tomorrow." },
+    { text: "\"Famous hero Captain Blaze ONLY eats Sugar Crunch cereal!\"",
+      ask: "What is being sold, and why did they use a hero?",
+      answer: "Cereal. They borrowed a hero you like so you'll like the cereal.",
+      why: "The hero is paid (or made up). Liking a character is not a reason a food is good for you. Ask: would this still sound great with no hero on the box?" }
+  ],
+  factOpinion: [
+    { text: "\"This backpack is blue.\"",
+      ask: "Fact or opinion? How could you check?",
+      answer: "Fact. You can look at it.",
+      why: "A fact is something you can check with your own eyes, a ruler, or a count. Anyone checking would agree." },
+    { text: "\"This is the BEST backpack in the whole world.\"",
+      ask: "Fact or opinion? Can you check it?",
+      answer: "Opinion. 'Best' can't be measured the same for everyone.",
+      why: "'Best' depends on who's asking and what they like. There's no ruler for 'best.' Opinions aren't lies — but they aren't proof either." },
+    { text: "\"It rained here yesterday.\"",
+      ask: "Fact or opinion? How would you find out?",
+      answer: "Fact. You could check a weather record or ask someone who was there.",
+      why: "It either happened or it didn't. Facts can be checked even when you weren't there." },
+    { text: "\"Rainy days are the worst kind of day.\"",
+      ask: "Fact or opinion? Does everyone have to agree?",
+      answer: "Opinion. Some people love rainy days.",
+      why: "Feelings about rain are personal. No one is wrong for liking or disliking it — it's not a thing you can measure." },
+    { text: "\"Spiders have eight legs.\"",
+      ask: "Fact or opinion? How could you check?",
+      answer: "Fact. You can count the legs.",
+      why: "You can verify it by looking at a spider or a trusted book. A fact stays true no matter who says it." },
+    { text: "\"Spiders are scary.\"",
+      ask: "Fact or opinion? Does the spider know it's scary?",
+      answer: "Opinion. Scary is a feeling, not a fact about the spider.",
+      why: "The spider is just a spider. 'Scary' lives in the person, not the animal. Two people can feel totally different about the same spider." }
+  ],
+  pressure: [
+    { text: "\"Hurry! Only 3 left! If you don't decide RIGHT NOW you'll miss out forever!\"",
+      ask: "What feeling is this trying to make you feel? Do you have to decide right now?",
+      answer: "It wants you to feel rushed/panicked. No — you can slow down.",
+      why: "Rushing is a tactic. It tries to switch off your thinking so you can't ask questions. A calm 'let me think about it' is a superpower." },
+    { text: "\"Everybody is doing it. You don't want to be the weird one, do you?\"",
+      ask: "What is this using to push you? Is 'everybody' a good reason?",
+      answer: "Peer pressure / fear of being 'weird.' No, 'everybody' isn't a reason.",
+      why: "Even if everybody really were doing it, that still doesn't make it right FOR YOU. You get to decide based on what you think, not on the crowd." },
+    { text: "\"If you were really my friend, you would give me your snack.\"",
+      ask: "What is this person doing with the word 'friend'? Is it fair?",
+      answer: "Using 'friend' as a lever to guilt you. Not fair.",
+      why: "Real friends don't make you 'prove' it on demand. When someone uses your good feelings to push you, that's a flag — you can say no and still be kind." },
+    { text: "\"Smart kids buy this. You ARE smart, aren't you?\"",
+      ask: "What is the trap in this sentence?",
+      answer: "It ties your buying to being 'smart' so saying no feels like admitting you're not.",
+      why: "Being smart has nothing to do with buying a thing. The sentence is built to corner you. Notice the trap and you walk right out of it." },
+    { text: "\"Last chance EVER! This deal disappears at midnight!\"",
+      ask: "Why a midnight deadline? Is it really the last chance ever?",
+      answer: "The deadline is there to rush you. It's almost never the 'last chance ever.'",
+      why: "Sellers run the same 'last chance' over and over. A real value doesn't vanish at midnight. Deadlines are tools to stop you from thinking it through." }
+  ],
+  whoWants: [
+    { text: "A sign in a candy store says: \"Candy makes kids happy and healthy!\"",
+      ask: "Who made this sign, and what do they want? Should you trust it the same as a doctor?",
+      answer: "The candy store made it; they want to sell candy. Trust it less than a doctor.",
+      why: "Always ask who's talking and what they get if you believe them. A store earns money from candy, so of course its sign praises candy. That doesn't make it true." },
+    { text: "A toy company says: \"Studies show our toy is the most fun!\" (The company paid for the study.)",
+      ask: "Who paid for the 'study'? Does that change how much you trust it?",
+      answer: "The toy company paid for it. Yes — that's a big reason to doubt it.",
+      why: "When the people selling a thing also pay for the 'proof,' the proof is bent in their favor. Ask: who would say the opposite, and why don't we hear from them?" },
+    { text: "A video says \"Buy this game!\" — and at the end says the game company paid the creator.",
+      ask: "Why does it matter that the creator was paid? What should you do with that info?",
+      answer: "Being paid can bend what they say. Take the praise with caution.",
+      why: "It doesn't automatically mean the game is bad — but you now know the praise was bought. Look for someone with nothing to gain before you believe a glowing review." },
+    { text: "A cereal mascot on the box says: \"Part of a complete breakfast!\"",
+      ask: "Who put those words there? What sneaky thing does 'part of' hide?",
+      answer: "The cereal company. 'Part of' hides that the cereal alone isn't the healthy part.",
+      why: "The 'complete breakfast' is the fruit, eggs, and milk next to it — not the sugary cereal. The maker chose words that sound healthy without claiming the cereal is. Read the small words." },
+    { text: "Your friend who collects stickers tells you: \"Trading me 5 stickers for 1 is a GREAT deal for you!\"",
+      ask: "Who benefits from this trade? Is it really great for YOU?",
+      answer: "The friend benefits most. 5 for 1 is a better deal for them.",
+      why: "When someone tells you their offer is great for YOU, check who actually comes out ahead. Counting it yourself beats taking their word for it." }
+  ]
+};
+
+/* ---- spot_the_persuasion layout ---- */
+function spRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16; // number + spacing
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22; // a writing line
+    if (explain) h += 22; // a second "because..." line
+  }
+  return h + 8;
+}
+
+function spRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    adTrick: "AD TRICK", factOpinion: "FACT OR OPINION?",
+    pressure: "PRESSURE", whoWants: "WHO WANTS WHAT?"
+  }[it.mode] || "";
+
+  // Number + little mode tag
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The snippet
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
