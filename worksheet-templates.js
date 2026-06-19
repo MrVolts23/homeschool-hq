@@ -5523,6 +5523,259 @@ function spRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   FIRST-PRINCIPLES THINKING  (reading / critical thinking)
+   A "why" gym: trace causes to effects, dig past the surface
+   "because that's how it is" to the real reason, imagine it
+   different, and break a thing down to what it actually needs.
+   Deterministic, no AI. Sovereign voice: the goal is to OWN
+   your reasons, not to memorize answers.
+============================================================ */
+window.TEMPLATES.first_principles = {
+  id: "first_principles",
+  label: "First-principles thinking (the \"why\" gym)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Critical thinking & reasoning",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "causeEffect", label: "Cause & effect (what happens, and why?)" },
+        { value: "whyRoot",     label: "Dig for the real why (past 'just because')" },
+        { value: "whatIf",      label: "What if it were different? (imagine + reason)" },
+        { value: "breakItDown", label: "Break it down (what does it really need?)" },
+        { value: "mixed",       label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["causeEffect", "whyRoot", "whatIf", "breakItDown"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = fpShuffle(FP_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "First-Principles Thinking";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Lots of things are the way they are for a REASON — and lots of reasons are worth digging up. For each one, don't rush to the 'right' answer. Slow down and ask WHY until you hit something solid you actually understand. A reason you can explain in your own words is yours. \"Because that's just how it is\" belongs to someone else.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"Why does ice float on water?\"  ->  Most things sink in their own liquid. Ice floats because frozen water spreads out and gets LIGHTER for its size than liquid water. So the real why isn't 'cold stuff floats' — it's that water is weird and puffs up when it freezes.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 78);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = fpRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = fpRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- first_principles content banks ---- */
+function fpShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the situation / question the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const FP_BANKS = {
+  causeEffect: [
+    { text: "You leave a snowman out in the sun on a warm afternoon.",
+      ask: "What will happen, and what is the cause?",
+      answer: "It melts. Cause: the sun's heat turns the ice back into water.",
+      why: "Heat is the cause; melting is the effect. The snowman didn't 'decide' to go — the warmth did it. Trace the chain: sun -> heat -> ice warms up -> water." },
+    { text: "Every morning you forget to water a little plant on the windowsill.",
+      ask: "What is likely to happen over a week, and why?",
+      answer: "The plant wilts / dries out. Cause: no water to drink.",
+      why: "Plants pull up water through their roots. No water in means no water to keep the leaves stiff, so they droop. The effect points straight back to the missing cause." },
+    { text: "You roll a ball across a flat floor and it slowly stops on its own.",
+      ask: "Why does it stop? What is the cause?",
+      answer: "Rubbing against the floor (friction) slows it until it stops.",
+      why: "Nothing stops for no reason. The ball and floor rub together, and that rubbing steals the ball's motion. On smooth ice it would roll much farther — because there's less rubbing." },
+    { text: "Two friends both touched wet paint, but only one left a handprint on the wall.",
+      ask: "What probably caused the difference?",
+      answer: "The one who left a print pressed their painty hand on the wall.",
+      why: "An effect (the print) needs a cause (a painty hand on the wall). The friend with no print either had a dry hand or didn't touch the wall. Match the clue to the cause." },
+    { text: "A glass of cold lemonade gets little water drops on the outside on a hot day.",
+      ask: "Where do the drops come from? What's the cause?",
+      answer: "Water in the warm air cools on the cold glass and turns into drops.",
+      why: "The water didn't leak through the glass! Warm air is full of invisible water. The cold glass cools that air right next to it, and the water shows up as drops. Cause: cold surface + wet air." }
+  ],
+  whyRoot: [
+    { text: "\"We sleep at night.\" Most people sleep when it's dark out.",
+      ask: "Dig past 'because it's dark.' WHY do bodies want sleep when it's dark?",
+      answer: "Our bodies run on a daily clock tuned to light; dark tells it to rest & repair.",
+      why: "'It's dark' is the surface. Dig down: long ago there was little to do and it was hard to see in the dark, so resting then was safest. Our bodies built an inside clock around the light. The root reason is the clock, not the dark itself." },
+    { text: "\"Bread has holes in it.\" Look at a slice of bread — it's full of little holes.",
+      ask: "Don't stop at 'it just does.' WHY are the holes there?",
+      answer: "Tiny living yeast made gas bubbles in the dough before it baked.",
+      why: "The holes are old bubbles. Yeast (a tiny living thing) eats sugar in the dough and burps out gas. The gas makes bubbles, the bread bakes around them, and the bubbles leave holes. The real why is alive." },
+    { text: "\"Coins are round.\" Almost all coins are circles, not squares.",
+      ask: "Push past 'they always have been.' WHY round and not square?",
+      answer: "Round coins have no sharp corners to wear down and roll/stack easily.",
+      why: "'Tradition' isn't the deepest reason. Round coins don't catch in pockets, don't get chipped corners, and feel the same turned any way — so machines and hands handle them easily. The shape solves a real problem." },
+    { text: "\"Soap helps clean your hands.\" Water alone doesn't get greasy hands clean, but soap does.",
+      ask: "Go deeper than 'soap is for cleaning.' WHY does soap actually work?",
+      answer: "Soap grabs onto grease AND water, so it lets water wash the grease away.",
+      why: "Grease and water normally refuse to mix. Soap is a go-between: one end holds grease, the other holds water. So it drags the grease into the water and down the drain. That's the mechanism, not magic." },
+    { text: "\"We have to give plants light.\" A plant in a dark closet dies even if you water it.",
+      ask: "Why isn't water enough? Dig to the real reason plants need light.",
+      answer: "Plants use light to MAKE their own food; no light means no food.",
+      why: "Water and dirt aren't food for a plant. A plant builds its own food out of light, air, and water — light is the energy that runs the kitchen. No light, no cooking, and the plant starves even while wet." }
+  ],
+  whatIf: [
+    { text: "Imagine wheels had never been invented.",
+      ask: "Name two things that would be much harder, and explain WHY.",
+      answer: "Moving heavy loads, traveling far — wheels let things roll instead of drag.",
+      why: "Wheels turn dragging (hard) into rolling (easy). Without them, carts, bikes, cars, and even chairs change completely. Reasoning from 'what does a wheel do?' lets you predict what breaks without it." },
+    { text: "What if every person could read minds?",
+      ask: "Name one good thing and one tricky thing, and say WHY each happens.",
+      answer: "Good: no lying / quick understanding. Tricky: no privacy / no surprises.",
+      why: "Start from what reading minds DOES: it removes secrets. From that one change you can reason outward — honesty gets easy, but so does losing every private thought. Good answers trace back to that root change." },
+    { text: "What if water flowed UP instead of down?",
+      ask: "Name one thing that would stop working, and explain WHY.",
+      answer: "Rivers, drains, drinking from a cup — they all rely on water falling down.",
+      why: "So much we built assumes water goes down: roofs shed rain, sinks drain, we tip a cup to our mouth. Change the one rule and you can reason out everything that quietly depended on it." },
+    { text: "Imagine the school week were 3 days instead of 5.",
+      ask: "Name one thing that would change for your family, and WHY.",
+      answer: "More free days, but maybe longer days or less covered — fewer days to fit things in.",
+      why: "Change one number (days) and reason forward: the same learning has fewer days to land in, so either days get longer or some things get dropped. Spotting the trade-off is the real skill, not the 'right' answer." },
+    { text: "What if you couldn't feel pain at all?",
+      ask: "Is that all good? Name a danger, and explain WHY pain is useful.",
+      answer: "Dangerous: you wouldn't notice a burn or cut and could get badly hurt.",
+      why: "Pain feels bad but DOES a job: it's an alarm that says 'stop, this is hurting you.' Remove the alarm and you'd keep your hand on a hot stove. Reasoning from 'what is pain for?' flips it from enemy to helper." }
+  ],
+  breakItDown: [
+    { text: "Think about what a sandwich REALLY needs to be a sandwich.",
+      ask: "List the must-haves. What could you change and still call it a sandwich?",
+      answer: "Must: filling held by bread (or two outsides). Can change: the filling, the bread type.",
+      why: "Strip away the extras and ask what can't be removed. A sandwich is really 'filling held between two outsides.' Once you see the core, you can swap parts freely and still know it counts." },
+    { text: "Break down what you actually need to start a small fire (with a grown-up).",
+      ask: "What are the three basic things? Why does taking one away stop the fire?",
+      answer: "Fuel, heat, and air. Remove any one and the fire can't keep going.",
+      why: "A fire isn't one thing — it's three working together: something to burn, enough heat to start, and air. That's why blowing out a candle (cutting air for a second) or wetting wood (cooling it) stops it. Know the parts, control the whole." },
+    { text: "What does a game REALLY need to be a game you can play with a friend?",
+      ask: "Name the core parts. What's just decoration you could drop?",
+      answer: "Core: a goal, rules everyone agrees on, and a way to play/take turns. Decoration: the theme, fancy pieces.",
+      why: "Tag, chess, and a card game look nothing alike, but all share: a goal + agreed rules + taking part. The dinosaurs or the colors are dress-up. Find the bones and you understand every game at once." },
+    { text: "Break down what a plant needs to grow. Someone says 'it just needs dirt.'",
+      ask: "Is dirt enough? List what's really needed and why.",
+      answer: "Light, water, air, and nutrients (dirt holds some). Dirt alone isn't enough.",
+      why: "'Just dirt' is too simple. Take the claim apart: a plant needs light for food, water and air to run, and nutrients the dirt only sometimes provides. Breaking the claim down shows what's missing." },
+    { text: "What does a message REALLY need to actually tell someone something?",
+      ask: "Name the core parts of any message. What's optional?",
+      answer: "Core: a sender, a receiver, and a shared code (words/signs both understand). Optional: paper, phone, language used.",
+      why: "A wave, a note, and a text all carry messages. Underneath, each needs someone sending, someone getting it, and a code BOTH sides understand. If the code isn't shared, the message fails — that's the part that really matters." }
+  ]
+};
+
+/* ---- first_principles layout ---- */
+function fpRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function fpRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    causeEffect: "CAUSE & EFFECT", whyRoot: "DIG FOR THE WHY",
+    whatIf: "WHAT IF?", breakItDown: "BREAK IT DOWN"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation / prompt
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
