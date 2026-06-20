@@ -5776,6 +5776,313 @@ function fpRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — MONEY SENSE (real-world value reasoning)
+   A deterministic, no-API life-skills math template. Mixes hard
+   numeracy (making amounts, making change) with sovereign-thinking
+   value reasoning (which is the better buy, and is it even worth it).
+   Canadian currency: the 1¢ penny is gone, so cash totals round to
+   the nearest 5¢ — that rounding is itself a real-world fact kids meet.
+============================================================ */
+window.TEMPLATES.money_sense = {
+  id: "money_sense",
+  label: "Money sense (real-world value reasoning)",
+  subject: "math",
+  grades: ["1", "2", "3"],
+  topicHint: "Money & financial literacy",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Money skill",
+      options: [
+        { value: "makeAmount", label: "Build the amount (which coins make it?)" },
+        { value: "makeChange", label: "Make change (you pay, what's left over?)" },
+        { value: "goodDeal",   label: "Better buy? (compare, and say WHY)" },
+        { value: "worthIt",    label: "Is it worth it? (wants, needs & trade-offs)" },
+        { value: "mixed",      label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "maxAmount", type: "select", label: "Money range",
+      options: [
+        { value: "100",  label: "Up to $1.00 (coins)" },
+        { value: "500",  label: "Up to $5.00" },
+        { value: "2000", label: "Up to $20.00" }
+      ], default: "500" },
+    { id: "count", type: "number", label: "# of problems", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const maxAmount = parseInt(m.maxAmount, 10) || 500; // in cents
+    const modes = m.mode === "mixed"
+      ? ["makeAmount", "makeChange", "goodDeal", "worthIt"]
+      : [m.mode];
+    const items = [];
+    let worthItIdx = 0;
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (mode === "worthIt") {
+        // Value-reasoning prompts: deterministic bank, cycled (not random)
+        items.push(Object.assign({ mode }, MONEY_WORTH_IT[worthItIdx % MONEY_WORTH_IT.length]));
+        worthItIdx++;
+      } else if (mode === "makeAmount") {
+        items.push(moneyGenMakeAmount(maxAmount));
+      } else if (mode === "makeChange") {
+        items.push(moneyGenMakeChange(maxAmount));
+      } else { // goodDeal
+        items.push(moneyGenGoodDeal());
+      }
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Money Sense";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Money is just a tool for trading — a number people agreed on. Work out each one carefully, but also keep asking the bigger question: is this a GOOD trade? The math tells you the price. YOU decide if it's worth it.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "You buy a snack for 65\u00a2 and hand over a $1 coin (100\u00a2). Change = 100 \u2212 65 = 35\u00a2. " +
+          "But the bigger question: was that snack worth 65\u00a2 of YOUR money? A price is just a number someone picked \u2014 you still get to decide if the trade is good.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 78);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = moneyRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = moneyRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- money_sense helpers ---- */
+function moneyFmt(cents) {
+  // Format cents -> "65\u00a2" under a dollar, "$3.25" at/above a dollar.
+  if (cents < 100) return cents + "\u00a2";
+  return "$" + (cents / 100).toFixed(2);
+}
+
+// Canadian coins/bills in cents (penny abolished in 2013).
+const MONEY_DENOMS = [2000, 1000, 500, 200, 100, 25, 10, 5];
+
+function moneyRoundNickel(cents) { return Math.round(cents / 5) * 5; }
+
+// Greedy breakdown into Canadian denominations (always works for nickel multiples).
+function moneyBreakdown(cents) {
+  const parts = [];
+  let rem = cents;
+  for (const d of MONEY_DENOMS) {
+    const n = Math.floor(rem / d);
+    if (n > 0) { parts.push({ d, n }); rem -= n * d; }
+  }
+  return parts;
+}
+function moneyBreakdownText(cents) {
+  const parts = moneyBreakdown(cents);
+  if (!parts.length) return "nothing";
+  return parts.map(p => p.n + " \u00d7 " + moneyFmt(p.d)).join(", ");
+}
+
+function moneyGenMakeAmount(maxAmount) {
+  // Pick a tidy nickel-multiple target within range (skew toward coin range).
+  const cap = Math.min(maxAmount, 200); // makes "build with coins" reasonable
+  let target = moneyRoundNickel(20 + Math.floor(Math.random() * (cap - 20)));
+  if (target < 15) target = 15;
+  return {
+    mode: "makeAmount",
+    text: "You need to make exactly " + moneyFmt(target) + " using coins.",
+    ask: "What coins could you use? (There is more than one good answer.)",
+    answer: "One way: " + moneyBreakdownText(target) + ".",
+    why: "There's no single 'right' set of coins \u2014 several combinations make " + moneyFmt(target) +
+         ". Using the biggest coins first means fewer coins, but any combo that adds up is correct. The total is what matters, not the path."
+  };
+}
+
+function moneyGenMakeChange(maxAmount) {
+  // price < paid; paid is a clean denomination >= price (rounded to nickel).
+  const payOptions = maxAmount >= 2000 ? [500, 1000, 2000]
+                   : maxAmount >= 500  ? [200, 500, 1000]
+                   : [100, 200];
+  const paid = payOptions[Math.floor(Math.random() * payOptions.length)];
+  // price between ~30% and ~95% of paid, rounded to a nickel.
+  let price = moneyRoundNickel(Math.floor(paid * (0.3 + Math.random() * 0.6)));
+  if (price >= paid) price = moneyRoundNickel(paid - 25);
+  if (price < 5) price = 5;
+  const change = paid - price;
+  return {
+    mode: "makeChange",
+    text: "Something costs " + moneyFmt(price) + ". You pay with " + moneyFmt(paid) + ".",
+    ask: "How much change should you get back?",
+    answer: moneyFmt(paid) + " \u2212 " + moneyFmt(price) + " = " + moneyFmt(change) +
+            " (e.g. " + moneyBreakdownText(change) + ").",
+    why: "Change is just what's left after the trade: subtract the price from what you handed over. " +
+         "Counting it back yourself \u2014 instead of trusting the till \u2014 is how you catch a mistake in your own favour or theirs."
+  };
+}
+
+function moneyGenGoodDeal() {
+  // Two options of the same item at different size/price -> compare unit value.
+  const items = [
+    { name: "juice boxes", unit: "box" },
+    { name: "granola bars", unit: "bar" },
+    { name: "apples", unit: "apple" },
+    { name: "stickers", unit: "sticker" },
+    { name: "markers", unit: "marker" },
+    { name: "cookies", unit: "cookie" }
+  ];
+  const it = items[Math.floor(Math.random() * items.length)];
+  // Build two packs where one is clearly better per-unit. Keep numbers tidy.
+  const perA = [3, 4, 5, 6][Math.floor(Math.random() * 4)];  // cents per unit, pack A
+  const qtyA = [4, 5, 6][Math.floor(Math.random() * 3)];
+  const qtyB = [8, 10, 12][Math.floor(Math.random() * 3)];
+  // Make B cheaper per unit by a clean margin.
+  const perB = perA - [1, 1, 2][Math.floor(Math.random() * 3)];
+  const unitA = perA * 5;  // scale to nickels-ish, multiply to dollars
+  const unitB = Math.max(5, perB * 5);
+  const priceA = moneyRoundNickel(unitA * qtyA);
+  const priceB = moneyRoundNickel(unitB * qtyB);
+  const perUnitA = (priceA / qtyA);
+  const perUnitB = (priceB / qtyB);
+  const betterIsB = perUnitB < perUnitA;
+  const better = betterIsB ? "B" : "A";
+  return {
+    mode: "goodDeal",
+    text: "Pack A: " + qtyA + " " + it.name + " for " + moneyFmt(priceA) + ".   " +
+          "Pack B: " + qtyB + " " + it.name + " for " + moneyFmt(priceB) + ".",
+    ask: "Which is the better buy per " + it.unit + " \u2014 and WHY?",
+    answer: "Pack " + better + ". A \u2248 " + (perUnitA / 100).toFixed(2) + " each, B \u2248 " +
+            (perUnitB / 100).toFixed(2) + " each.",
+    why: "The bigger price isn't the worse deal \u2014 you have to compare the cost of ONE " + it.unit +
+         ". Divide each price by how many you get, then compare. The sticker shouting 'BIGGER!' isn't the one deciding for you. " +
+         "(And remember: the cheaper-per-unit pack is only better if you'll actually use all of them.)"
+  };
+}
+
+// Value / trade-off reasoning bank (sovereign frame: you decide worth, prices are agreements).
+const MONEY_WORTH_IT = [
+  { mode: "worthIt",
+    text: "A toy you already have a version of is on sale: '50% OFF! TODAY ONLY!'",
+    ask: "Is a discount a good reason to buy it? What questions would you ask first?",
+    answer: "Not by itself. Ask: do I need/want it, will I use it, is the 'old price' even real?",
+    why: "'On sale' tells you the price dropped \u2014 it does NOT tell you the thing is worth buying. A trick stores use is a fake high 'before' price to make the deal feel bigger. The real question is never 'is it cheaper?' but 'do I actually want this enough to trade my money for it?'" },
+  { mode: "worthIt",
+    text: "You have $10. You could buy a snack now, or save it toward something bigger you want.",
+    ask: "What's the trade-off? How would you decide?",
+    answer: "Spending now means giving up the bigger thing later (and the other way around).",
+    why: "Every choice to spend is also a choice NOT to do something else with that money \u2014 that's the trade-off. Neither answer is 'wrong'; the skill is seeing what you give up, then choosing on purpose instead of by accident." },
+  { mode: "worthIt",
+    text: "Two snacks: one costs more because the package has a cartoon you like on it.",
+    ask: "Are you paying for the snack, or the picture? Is that worth it to you?",
+    answer: "Often you're paying extra for the package/brand, not more or better food.",
+    why: "A lot of a price can be for the LOOK, not the thing itself \u2014 same cookie, fancier box, higher price. That's allowed; just know what you're trading for. Sometimes the picture IS worth it to you, and that's your call to make on purpose." },
+  { mode: "worthIt",
+    text: "A friend says 'everybody has this, you HAVE to get it.'",
+    ask: "Is 'everybody has it' a good reason to spend your money? Why or why not?",
+    answer: "No \u2014 what others own doesn't tell you if it's worth YOUR money.",
+    why: "'Everybody has it' is pressure, not a reason. It says nothing about whether the thing is useful to you or worth the price. Your money, your choice \u2014 wanting it yourself is a real reason; not wanting to be left out is just the pressure talking." },
+  { mode: "worthIt",
+    text: "Think about a 'want' (something fun) and a 'need' (something you must have).",
+    ask: "Name one of each from your life. If money were tight, which comes first, and why?",
+    answer: "Needs (food, warmth, safety) come before wants. Wants are fine \u2014 after needs.",
+    why: "Needs keep you going; wants make life nicer. Both matter, but when there isn't enough for everything, sorting need-first protects you. Knowing the difference is what stops a clever ad from turning a 'want' into a fake 'need' in your head." },
+  { mode: "worthIt",
+    text: "A game is 'free' to play, but keeps asking you to spend real money to go faster.",
+    ask: "Is it really free? Why would they give it away and then ask for money?",
+    answer: "Not really \u2014 'free' gets you in; the goal is to get you to spend later.",
+    why: "When something is free, ask how it actually makes money \u2014 because it does, somehow. 'Free to start' is often a door, and the spending is on the other side of it. Seeing the plan means YOU decide whether to walk through, instead of being walked." }
+];
+
+/* ---- money_sense layout (mirrors first_principles row layout) ---- */
+function moneyRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function moneyRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    makeAmount: "BUILD THE AMOUNT", makeChange: "MAKE CHANGE",
+    goodDeal: "BETTER BUY?", worthIt: "IS IT WORTH IT?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation / prompt
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking / math question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
