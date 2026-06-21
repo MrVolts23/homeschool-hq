@@ -6083,6 +6083,262 @@ function moneyRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — LOGIC & DEDUCTION (think it through)
+   A deterministic, no-API reasoning template. Trains the core
+   sovereign skill: taking a few given facts and reasoning to a
+   conclusion you can DEFEND — and refusing one the facts don't
+   support. Modes: deduce (clues -> who/what), whoOwns (mini logic
+   matching), contradiction (which claim can't be true), and
+   validInvalid (does the conclusion really follow? catch the
+   sneaky jump). Mirrors the first_principles / money_sense row
+   layout exactly so it inherits the same look and answer key.
+============================================================ */
+window.TEMPLATES.logic_deduction = {
+  id: "logic_deduction",
+  label: "Logic & deduction (think it through)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Logic & reasoning",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "deduce",       label: "Use the clues (who / what must it be?)" },
+        { value: "whoOwns",      label: "Match it up (sort out who's who from clues)" },
+        { value: "contradiction", label: "Spot the impossible (which claim can't be true?)" },
+        { value: "validInvalid", label: "Does it really follow? (catch the sneaky jump)" },
+        { value: "mixed",        label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["deduce", "whoOwns", "contradiction", "validInvalid"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = logicShuffle(LOGIC_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Logic & Deduction";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Logic is just following the clues to the ONE answer they actually point at \u2014 nothing more, nothing less. Don't guess what feels right; check what the clues let you say for sure. A good thinker says 'I can prove it' or 'I can't tell yet from this' \u2014 both are honest. The trap is believing more than the clues actually show.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "Clues: The pet is NOT a fish. It has fur. It does NOT bark.  ->  Cat. Walk the clues: 'has fur' rules out the fish; 'doesn't bark' rules out the dog. A cat is the only one left that fits ALL the clues \u2014 so it's a sure answer, not a guess.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 82);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = logicRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = logicRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- logic_deduction content banks ---- */
+function logicShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the clues / situation the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const LOGIC_BANKS = {
+  deduce: [
+    { text: "An animal is NOT a bird. It does NOT live in water. It hops and has long ears.",
+      ask: "Which animal is it? Show how each clue helps.",
+      answer: "A rabbit. 'Not a bird' + 'not in water' + 'hops, long ears' all point to it.",
+      why: "Take the clues one at a time and cross things off. Not a bird, not a fish, hops with long ears \u2014 only the rabbit survives every clue. That's deduction: the answer is whatever's left when nothing's ruled out." },
+    { text: "A number is bigger than 5 but smaller than 8. It is NOT 6.",
+      ask: "What number is it? How do you know for sure?",
+      answer: "7. Between 5 and 8 leaves 6 or 7; 'not 6' leaves only 7.",
+      why: "First the range (6 or 7), then the last clue cuts out 6. When the clues squeeze down to one answer, you don't have to guess \u2014 you can prove it." },
+    { text: "Three cups are upside-down. The toy is NOT under the red cup. It is NOT under the blue cup. The cups are red, blue, and green.",
+      ask: "Which cup hides the toy? Why are you sure?",
+      answer: "The green cup \u2014 it's the only one not ruled out.",
+      why: "You never had to see under a cup. Two 'NOT's knock out red and blue, and only green is left. Logic can find the answer even when you can't peek." },
+    { text: "Someone left footprints in the snow. The prints are small and made by boots, not paws. A cat and a small child were outside.",
+      ask: "Who most likely made the prints? What clue decides it?",
+      answer: "The child \u2014 'boots, not paws' rules out the cat.",
+      why: "Both could leave small prints, so size alone won't decide. The deciding clue is 'boots, not paws.' Find the clue that separates the suspects \u2014 that's the one that does the work." },
+    { text: "A fruit is round, grows on a tree, and is usually red or green. It is NOT a grape and NOT a banana.",
+      ask: "Name a fruit it could be. Which clue rules out the banana?",
+      answer: "An apple. 'Round' and 'red or green' rule out the banana.",
+      why: "'Round' alone already knocks out the banana (it's long and yellow). Stack the rest \u2014 grows on a tree, red or green \u2014 and an apple fits them all. One strong clue can do a lot of the ruling-out." }
+  ],
+  whoOwns: [
+    { text: "Mia, Sam, and Bo each have ONE pet: a dog, a cat, or a fish. Mia's pet has fur but doesn't bark. Sam's pet lives in water.",
+      ask: "Who owns which pet? Work it out from the clues.",
+      answer: "Mia=cat, Sam=fish, Bo=dog.",
+      why: "Start with the surest clue: 'fur but no bark' = cat, so Mia has the cat. 'Lives in water' = fish, so Sam. That leaves only the dog for Bo. Lock in what you KNOW first, and the rest falls into place." },
+    { text: "Three kids picked one color each \u2014 red, blue, green. Ana didn't pick red or green. Leo didn't pick blue.",
+      ask: "Which color did each pick?",
+      answer: "Ana=blue, Leo=red, the third kid=green.",
+      why: "Ana's two 'didn'ts' leave only blue \u2014 done. Now Leo can't be blue (taken) or blue again, and the clue says not blue... red or green left, and someone must get green, so Leo=red. Cross off as you go and the last spot is forced." },
+    { text: "Two friends ordered lunch: one got soup, one got a sandwich. Kai does not like soup. Whatever Kai didn't order, Jo did.",
+      ask: "What did each friend order?",
+      answer: "Kai=sandwich, Jo=soup.",
+      why: "'Kai doesn't like soup' means Kai got the sandwich. There's one meal left \u2014 the soup \u2014 so Jo gets it. When there are only two choices, ruling one out for someone settles BOTH of them." },
+    { text: "Three boxes are sizes small, medium, large. The big box is NOT the toy box. The toy box is NOT the smallest. Boxes: toys, books, hats.",
+      ask: "What size is the toy box?",
+      answer: "Medium \u2014 it's not the big one and not the smallest, so the middle is left.",
+      why: "You don't even need to know the other boxes. 'Not big' and 'not smallest' leave only medium for the toys. Sometimes the clues about ONE thing are enough to pin it down." },
+    { text: "Pip, Roo, and Tess sit in a row of 3 chairs. Tess is NOT on either end. Pip is to the LEFT of Roo.",
+      ask: "What order are they sitting in, left to right?",
+      answer: "Pip, Tess, Roo.",
+      why: "'Tess not on an end' forces Tess into the middle. That leaves the two ends for Pip and Roo, and 'Pip left of Roo' decides which end each takes. Pin the most-restricted person first \u2014 Tess had only one spot." }
+  ],
+  contradiction: [
+    { text: "A kid says: \"I have never been awake past 8pm... and last night I watched fireworks at 10pm.\"",
+      ask: "Both can't be true. Which part shows it's impossible, and why?",
+      answer: "Watching fireworks at 10pm means being awake past 8pm \u2014 so 'never' is false.",
+      why: "A contradiction is when two claims can't BOTH be true at once. 'Never past 8pm' and 'awake at 10pm' crash into each other. Spotting that is how you catch a story that doesn't add up \u2014 even a confident one." },
+    { text: "Someone tells you: \"This box is completely empty, but be careful \u2014 there's a ball inside it.\"",
+      ask: "Why can't both parts be true?",
+      answer: "'Completely empty' means nothing inside; a ball inside means not empty.",
+      why: "'Empty' and 'has a ball in it' are opposites \u2014 they can't share the same box at the same time. When two things cancel each other out, at least one is wrong, no matter how sure the speaker sounds." },
+    { text: "An ad says: \"Our cookies are the ONLY ones with no sugar at all \u2014 and they're the sweetest cookies you'll ever taste!\"",
+      ask: "What's the catch here? Why is it hard to believe both?",
+      answer: "Sweetness usually comes from sugar; 'no sugar at all' fighting 'sweetest ever' is a red flag.",
+      why: "Not a hard 'impossible,' but a clash worth questioning: sweet normally means sugar of some kind. When an ad's two big claims pull against each other, slow down \u2014 that tension is exactly where they hope you won't look." },
+    { text: "A note reads: \"All the lights in the house are off, and the kitchen light is on.\"",
+      ask: "Can both be true? Explain.",
+      answer: "No \u2014 if ALL lights are off, the kitchen light can't be on.",
+      why: "The word 'all' is strong: it includes the kitchen. So 'all off' and 'kitchen on' contradict. Watch for big words like all, never, always, none \u2014 one exception is enough to break them." },
+    { text: "A kid claims: \"I'm the tallest in my class, and three kids in my class are taller than me.\"",
+      ask: "Which two parts fight each other, and why?",
+      answer: "Being tallest means NO one is taller; 'three are taller' makes that false.",
+      why: "'Tallest' means at the very top \u2014 nobody above. 'Three taller than me' puts three people above. Both can't stand. Checking a claim against its own details is how you test it without anyone telling you the answer." }
+  ],
+  validInvalid: [
+    { text: "\"All dogs have four legs. My table has four legs. So my table is a dog.\"",
+      ask: "Does that conclusion really follow? Why or why not?",
+      answer: "No \u2014 having four legs doesn't make something a dog. Other things have four legs too.",
+      why: "The jump is sneaky: dogs have four legs, but lots of things do. 'Four legs' going IN doesn't mean 'dog' comes OUT. A reason has to actually force the answer \u2014 this one doesn't, so the conclusion is unearned." },
+    { text: "\"It rained, and the grass is wet. So rain is the ONLY thing that can make grass wet.\"",
+      ask: "Is that conclusion safe? What else could wet the grass?",
+      answer: "No \u2014 a sprinkler, dew, or a spilled bucket could too. Rain isn't the only cause.",
+      why: "One cause worked this time, but 'only' is a big word to earn. List other ways grass gets wet and the 'only' falls apart. Beware conclusions that quietly slam the door on every other possibility." },
+    { text: "\"Some birds can't fly, like penguins. A penguin is a bird. So NO birds can fly.\"",
+      ask: "Does 'no birds can fly' follow from those facts? Why not?",
+      answer: "No \u2014 'some can't' is not 'none can.' Most birds DO fly.",
+      why: "Watch the swap from 'some' to 'none' \u2014 that's the trick. 'Some birds can't fly' is true, but it says nothing about the many that can. A true start can still lead to a false finish if the logic jumps too far." },
+    { text: "\"My friend got a prize after eating cereal. So eating that cereal makes you win prizes.\"",
+      ask: "Does winning really follow from the cereal? Explain.",
+      answer: "No \u2014 the cereal and the prize happened near each other, but one didn't cause the other.",
+      why: "Two things happening close together doesn't mean one caused the other. The prize came from a draw or luck, not the cereal. Ads LOVE this jump \u2014 'people who use this are happy' \u2014 spotting it keeps you in charge." },
+    { text: "\"Everyone in the room is wearing socks. So the next person who walks in will be wearing socks too.\"",
+      ask: "Is that a sure thing or just a guess? Why?",
+      answer: "Just a guess \u2014 a NEW person isn't covered by 'everyone in the room' yet.",
+      why: "The fact only covers people already in the room. Someone new hasn't been counted, so you can expect socks but you can't PROVE it. Knowing the difference between 'likely' and 'certain' is honest thinking." }
+  ]
+};
+
+/* ---- logic_deduction layout (mirrors first_principles row layout) ---- */
+function logicRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function logicRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    deduce: "USE THE CLUES", whoOwns: "MATCH IT UP",
+    contradiction: "SPOT THE IMPOSSIBLE", validInvalid: "DOES IT FOLLOW?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The clues / situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
