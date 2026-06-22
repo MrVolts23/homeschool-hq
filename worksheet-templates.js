@@ -6339,6 +6339,261 @@ function logicRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   whats_missing — "What's missing? (see past the spin)"
+   Deeper media/manipulation literacy: a claim can be 100% TRUE
+   and still steer you, by what it leaves out, the words it picks,
+   the number it shows (and the one it hides), or what it points
+   your eyes at. Trains: ask "compared to what?", notice loaded
+   words, demand the missing denominator, see the frame.
+   Deterministic, never calls AI. Sovereign voice: the facts can
+   all be true and you can still be played — your job is to notice.
+============================================================ */
+window.TEMPLATES.whats_missing = {
+  id: "whats_missing",
+  label: "What's missing? (see past the spin)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Critical thinking & media literacy",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "missingContext", label: "What aren't they telling you? (compared to what?)" },
+        { value: "loadedWords",    label: "Same fact, two spins (the words steer you)" },
+        { value: "cherryNumber",   label: "The lonely number (where's the rest of it?)" },
+        { value: "framing",        label: "What's it pointing your eyes at? (and away from)" },
+        { value: "mixed",          label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["missingContext", "loadedWords", "cherryNumber", "framing"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = wmShuffle(WM_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "What's Missing?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Here's the tricky part: everything below can be TRUE and still try to steer you. The trick isn't lying \u2014 it's what gets left out, the words that are chosen, or the one number they show you. Your job isn't to call it a lie. It's to ask the missing question: 'Compared to what?' 'Out of how many?' 'What aren't they showing me?' Find the gap, and you stay in charge of what you believe.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"Now with 50% MORE crunch!\"  ->  True, maybe \u2014 but 50% more than WHAT? More than the old box? Than nothing? The missing word is 'than ___.' A number with no 'compared to what' is just a shiny blank. I'd ask before I believe.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 82);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = wmRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = wmRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- whats_missing content banks ---- */
+function wmShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the true-but-steering claim the child reads
+//   ask    = the missing-question prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const WM_BANKS = {
+  missingContext: [
+    { text: "A sign: \"Our slushies have REAL fruit juice!\"",
+      ask: "It might be true \u2014 but what aren't they telling you?",
+      answer: "How MUCH juice. 'Real fruit juice' can mean one drop in a cup of sugar water.",
+      why: "'Real' is true and useless at the same time \u2014 it says nothing about how much. The missing word is 'how much?' One drop counts as 'real.' Ask the amount, not just the label." },
+    { text: "\"Kids who use BrainBlocks toys did better on a test!\"",
+      ask: "What would you need to know before you believe the toy did it?",
+      answer: "What those kids were like already, and how kids WITHOUT the toy did.",
+      why: "Maybe those kids already studied a lot, or had help at home. With no 'compared to who?', you can't tell if the toy did anything. The missing group is the other kids \u2014 the ones they didn't show you." },
+    { text: "\"This phone has the BIGGEST screen!\"",
+      ask: "Biggest compared to what? What's the missing question?",
+      answer: "Biggest of WHICH phones? Maybe just their own old one, or a tiny list.",
+      why: "'Biggest' needs a 'biggest of what.' Of every phone ever? Of three they picked? Without the group it's just a big-sounding word. 'Compared to what?' is the question that pops the bubble." },
+    { text: "\"Our candy is FAT-FREE!\"",
+      ask: "That can be true \u2014 so what are they hoping you forget to ask?",
+      answer: "Whether it's full of sugar. Fat-free candy can still be almost all sugar.",
+      why: "They wave one true flag ('no fat!') so you don't look at the part they'd rather hide (lots of sugar). A true label can be a curtain. Peek behind it: what did they NOT put in big letters?" },
+    { text: "\"Most dentists pick CleanBrite paste!\"",
+      ask: "What's left out that would change how you feel about 'most'?",
+      answer: "How many dentists were asked, and what 'most' means \u2014 most of 5? Most of a paid group?",
+      why: "'Most' sounds like a crowd, but most of WHAT? If they asked four friends, 'most' is three people. The missing number is the size of the group. Tiny groups make 'most' nearly meaningless." }
+  ],
+  loadedWords: [
+    { text: "Two reports, same dog: A) \"The dog GOBBLED its food.\"  B) \"The dog ATE its food.\"",
+      ask: "Same event. Which words push a feeling, and which just report?",
+      answer: "B just reports. A ('gobbled') paints the dog as greedy \u2014 the fact is the same.",
+      why: "The dog did the exact same thing. 'Gobbled' adds a judgment for free. When the facts match but the feeling changes, the word picked the feeling for you \u2014 notice it, then decide for yourself." },
+    { text: "A) \"He REFUSED to share.\"  B) \"He kept his own toy.\"  (same boy, same toy)",
+      ask: "Which version makes him sound worse, and is that from facts or words?",
+      answer: "A sounds worse. 'Refused' makes it sound mean; the fact (kept his toy) is neutral.",
+      why: "Both are true descriptions of one moment. 'Refused' sneaks in 'bad guy'; 'kept his own' is just what happened. The author chose your villain with a word. You get to un-choose it." },
+    { text: "A) \"The crowd was a HUGE mob.\"  B) \"A group of people gathered.\"",
+      ask: "Same people. Which word makes you nervous on purpose?",
+      answer: "A. 'Mob' sounds scary; 'group' is calm \u2014 the crowd is identical.",
+      why: "'Mob' and 'group' can be the very same people. One word makes your heart speed up. If the picture in your head changes but the facts don't, the words did it \u2014 not reality." },
+    { text: "A) \"She ONLY scored 8 out of 10.\"  B) \"She scored 8 out of 10.\"",
+      ask: "What is the little word 'only' quietly telling you to feel?",
+      answer: "'Only' makes 8/10 sound like a letdown, even though it's a strong score.",
+      why: "Eight out of ten is good either way. 'Only' is a tiny word that says 'be disappointed.' One small word can flip a win into a loss in your head. Catch the word, keep the win." },
+    { text: "A) \"They SPLURGED on a new ball.\"  B) \"They bought a new ball.\"",
+      ask: "Same purchase. What does 'splurged' want you to think of them?",
+      answer: "That they were wasteful or showing off. 'Bought' says none of that.",
+      why: "Buying a ball is just buying a ball. 'Splurged' paints them as careless with money. The action didn't change \u2014 the storyteller added a frown. You can take it back off." }
+  ],
+  cherryNumber: [
+    { text: "\"3,000 people loved our movie!\"",
+      ask: "3,000 sounds big \u2014 but what number is hiding next to it?",
+      answer: "How many TOTAL watched. 3,000 out of 3,000 is amazing; out of a million, not so much.",
+      why: "A number alone is a lonely number. '3,000 loved it' needs 'out of how many?' The missing piece is the bottom number. Big top, huge bottom \u2014 suddenly it's small. Always ask 'out of how many?'" },
+    { text: "\"Our team WON 5 games this year!\"",
+      ask: "Five wins \u2014 what's the question that decides if that's good?",
+      answer: "How many games did they PLAY (and lose)? 5 wins out of 6 is great; 5 out of 40 isn't.",
+      why: "Wins with no losses next to them is half a story. They show the shiny half. 5 out of 6 and 5 out of 40 are both '5 wins.' The hidden number (the losses) is where the truth lives." },
+    { text: "\"Prices DROPPED by $50!\"",
+      ask: "Fifty dollars off \u2014 what do you need to know to tell if that's a deal?",
+      answer: "The old price and the new price. $50 off $1,000 is small; off $60 it's huge.",
+      why: "'$50 off' means nothing until you know 'off of what?' Fifty off a thousand is barely a nibble. The missing number is the starting price. A big-sounding cut can be a tiny one." },
+    { text: "\"Twice as many kids chose our snack!\"",
+      ask: "Twice as many \u2014 twice as many as WHAT? Why does it matter?",
+      answer: "Twice as many as the OTHER snack \u2014 but maybe only 2 vs 1 kid total.",
+      why: "'Twice as many' can be 100 vs 50, or just 2 vs 1. Without the real counts, 'twice' is a magic trick. The missing numbers are the actual amounts. 'Twice a tiny thing' is still tiny." },
+    { text: "\"9 out of 10 chose VitaJuice!\"",
+      ask: "Nine out of ten of WHOM? What's missing that would change it?",
+      answer: "Who those 10 were, and how they were picked. 10 friends of the maker isn't proof.",
+      why: "Ten people is a small crowd, and we don't know who they are. If the maker picked them, of course they chose it. The missing piece is 'who, and how chosen?' Small, hand-picked groups prove almost nothing." }
+  ],
+  framing: [
+    { text: "A photo shows a clean, smiling family using a cleaner spray. The label print is too small to read.",
+      ask: "What is the picture pointing your eyes AT \u2014 and what away from?",
+      answer: "At happy faces; away from the tiny ingredient list. The smile isn't proof it cleans.",
+      why: "The big, happy picture grabs your eyes so the small, true facts stay quiet. Smiles don't clean floors. When something points you at a feeling, look for what it's hoping you'll skip." },
+    { text: "A cereal box shows a giant strawberry on the front. The fruit listed inside: zero real strawberries.",
+      ask: "What is the front of the box steering you to expect?",
+      answer: "That it has strawberries. The big picture frames it as fruity when it isn't.",
+      why: "A picture isn't a promise \u2014 it's a frame. The strawberry says 'fruity!' while the ingredients say 'nope.' Trust the small true list over the big pretty picture. Check the back, not the front." },
+    { text: "A headline: \"DANGER in your kitchen!\" \u2014 the story inside is about a knife that's sharp if you grab the blade.",
+      ask: "What does the BIG headline want you to feel before you read?",
+      answer: "Scared. The huge word 'DANGER' frames a normal thing as an emergency.",
+      why: "Headlines are bait shaped to a feeling \u2014 here, fear. A sharp knife isn't news. They frame the boring truth as a scare so you click. Read past the headline before you let it set your mood." },
+    { text: "A toy ad shows kids zooming the car on a cool track. In tiny words at the bottom: \"Track sold separately.\"",
+      ask: "What is the ad framing as included that actually isn't?",
+      answer: "The track. The fun scene frames it as part of the toy, but it costs extra.",
+      why: "They build the picture out of stuff you have to buy separately, then whisper the truth in tiny print. The frame shows the dream; the fine print shows the deal. Read the small words \u2014 that's where the honesty hides." },
+    { text: "A drink ad shows a famous athlete winning a race while holding the drink.",
+      ask: "What is this scene trying to make you connect that isn't really linked?",
+      answer: "That the drink made the athlete fast. Winning came from training, not the can.",
+      why: "Putting two things in one picture tricks your brain into linking them. The athlete trained for years \u2014 the drink just got photographed next to the medal. The frame glues 'fast' onto a can. Pull them apart." }
+  ]
+};
+
+/* ---- whats_missing layout (mirrors logic_deduction row layout) ---- */
+function wmRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function wmRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    missingContext: "WHAT'S LEFT OUT?", loadedWords: "WORDS THAT STEER",
+    cherryNumber: "THE LONELY NUMBER", framing: "WHAT'S IT POINTING AT?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The claim / situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("the missing question is...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("the missing question is... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
