@@ -6594,6 +6594,262 @@ function wmRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   nature_detective — "Nature Detective (observe, then reason)"
+   Real-world observation + evidence reasoning. The natural world
+   doesn't hand you labels — you read the CLUES and work it out
+   yourself: tracks in the mud, a sky before rain, why leaves turn,
+   what a shadow tells you about the sun. Trains: notice details,
+   reason from evidence (not from what you were told), ask "how could
+   I find out?", and form your OWN conclusion. Sovereign voice: you
+   don't need permission to figure out the world — you just need to
+   look closely and think honestly. Deterministic, never calls AI.
+============================================================ */
+window.TEMPLATES.nature_detective = {
+  id: "nature_detective",
+  label: "Nature detective (observe, then reason)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Nature observation & evidence reasoning",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Detective skill",
+      options: [
+        { value: "readClues",   label: "Read the clues (what does the evidence say?)" },
+        { value: "predict",     label: "What happens next? (predict from signs)" },
+        { value: "howFindOut",  label: "How could you find out? (design a test)" },
+        { value: "noticeMore",  label: "Look closer (notice what others miss)" },
+        { value: "mixed",       label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["readClues", "predict", "howFindOut", "noticeMore"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = ndShuffle(ND_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Nature Detective";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "The natural world never wears a name tag \u2014 it leaves CLUES, and a detective reads them. For each one, don't just remember an answer someone gave you. Look at the evidence and ask: what does this actually show? What does it NOT show yet? A good detective says \"here's my best guess, and here's how I'd check it.\" You don't need permission to figure out the world \u2014 you just need to look closely and think honestly.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "Clue: The grass is wet this morning, but it didn't rain.  ->  Where did the water come from? Best guess: dew \u2014 air cools overnight and water settles on the grass. How to check? Look early vs. midday: dew dries as the sun warms things up. The evidence pointed me there \u2014 I didn't just take someone's word.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 86);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ndRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = ndRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- nature_detective content banks ---- */
+function ndShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the observation / scene the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const ND_BANKS = {
+  readClues: [
+    { text: "In the soft mud by a pond you find small prints with webbed toes leading to the water.",
+      ask: "What animal most likely made them? Which clue tells you?",
+      answer: "A duck (or another water bird). Webbed toes + heading into water point to a swimmer.",
+      why: "You never saw the animal \u2014 the prints did the talking. Webbed feet are built for paddling, and the trail goes to the water. Read what the tracks are FOR, and they tell you who walked there." },
+    { text: "Under a tree the ground is covered in cracked-open shells and chewed nut bits.",
+      ask: "Who has been eating here, and how can you tell?",
+      answer: "A squirrel (or other nut-eater). Cracked shells + a tree = a feeding spot.",
+      why: "The mess is a record of a meal. Something with strong teeth opened hard nuts right where they fall. The leftovers are evidence \u2014 a scene can tell you what happened even after everyone's gone." },
+    { text: "A spider web is strung between two branches, and tiny drops of water sit along every thread.",
+      ask: "What does the water on the web tell you about last night or this morning?",
+      answer: "It was damp \u2014 likely dew or fog settled overnight; the web caught it.",
+      why: "The web is a tiny weather report. Water didn't fall as rain (it would tear a web) \u2014 it settled out of damp air. Notice that the same clue rules things IN and OUT at once." },
+    { text: "Half the leaves on one side of a tree are turning yellow, while the other side stays green.",
+      ask: "What might be different about the two sides? Give your best guess.",
+      answer: "Likely sunlight \u2014 the green side may get more sun; or that side has less water/more cold wind.",
+      why: "When one part changes and another doesn't, look for what's DIFFERENT between them. Leaves need light to stay green and feed the tree. The split is a clue that the two sides aren't living the same life." },
+    { text: "After a windy night, the ground under a big tree is scattered with small broken twigs and a few green leaves.",
+      ask: "What does the litter on the ground tell you happened?",
+      answer: "The wind was strong enough to snap weak twigs and tear some leaves off.",
+      why: "You can measure last night's wind without being there \u2014 by what it left behind. Green leaves don't usually fall on their own; something pulled them. The ground keeps a record of the sky." }
+  ],
+  predict: [
+    { text: "The sky in the afternoon fills with tall, dark, piled-up clouds and the air feels heavy and still.",
+      ask: "What do you predict will happen soon? Why?",
+      answer: "Likely a rainstorm (maybe thunder). Tall dark clouds + heavy air often come before rain.",
+      why: "Clouds are a forecast you can read yourself. Dark, towering clouds hold a lot of water; the heavy, still air often comes first. You're not certain \u2014 you're reading signs and saying what's LIKELY." },
+    { text: "You plant two identical seeds. One pot you put on a sunny windowsill; the other you leave in a dark closet.",
+      ask: "Predict what each seed will do over two weeks. Why the difference?",
+      answer: "The sunny one grows strong/green; the dark one sprouts pale and weak (or not at all).",
+      why: "Same seed, one difference: light. Plants use light to make food, so the dark seed runs out of steam. Change ONE thing and watch \u2014 that's how you learn what really matters." },
+    { text: "In autumn you notice the squirrels are very busy burying nuts all over the yard.",
+      ask: "What does this busy burying predict about what's coming?",
+      answer: "Cold weather / winter \u2014 they're storing food for when it's scarce.",
+      why: "Animals act on what's coming before we feel it. Burying food now means food will be hard to find later. Their behavior is a clue about the season ahead \u2014 read the animals, not just the calendar." },
+    { text: "A puddle is sitting in the schoolyard. The sun is out and it's a warm, breezy day.",
+      ask: "Predict what the puddle will look like by this afternoon. Why?",
+      answer: "Smaller or gone \u2014 the sun and wind dry it up (the water evaporates into the air).",
+      why: "Water doesn't vanish \u2014 it leaves quietly as invisible vapor, faster when it's warm and windy. Predicting means picturing the chain forward: sun + wind -> water leaves -> puddle shrinks." },
+    { text: "You leave an apple slice and a cracker out on a plate for three days.",
+      ask: "Predict which changes more, and what change you'll see. Why?",
+      answer: "The apple changes more \u2014 it browns, softens, maybe grows mold; the cracker mostly stays dry.",
+      why: "The apple is full of water and sugar, so the air and tiny molds get to work on it. The dry cracker has little for them to feed on. Predicting from what something is MADE of beats just guessing." }
+  ],
+  howFindOut: [
+    { text: "Your friend says snails always move toward the shadiest, dampest spot.",
+      ask: "How could you find out if that's true \u2014 without just believing it?",
+      answer: "Put a snail between a dry/sunny side and a damp/shady side and watch where it goes; try it a few times.",
+      why: "Don't take a claim on trust \u2014 set up a fair test. Give the snail a real choice and repeat it so one wander doesn't fool you. 'I tested it myself' beats 'someone told me' every time." },
+    { text: "Someone claims a paper towel can soak up more water than a regular tissue.",
+      ask: "Design a simple test. What would you keep the SAME to make it fair?",
+      answer: "Dip each in the same amount of water and compare; keep size, water, and time the same.",
+      why: "A fair test changes only the thing you're asking about. Same water, same size, same dunk \u2014 then any difference is from the towel vs. tissue, not from cheating. Controlling the 'same' is the whole trick." },
+    { text: "You wonder if seeds sprout faster in warm water than in cold water.",
+      ask: "How would you set this up so the answer is trustworthy?",
+      answer: "Same seeds, same cups, same amount of water \u2014 one warm, one cold \u2014 and check daily.",
+      why: "Two cups that match in every way except temperature. If the warm one wins again and again, the heat is doing it. Run it more than once \u2014 one result could just be luck." },
+    { text: "A label brags that its plant food makes plants grow 'twice as fast.'",
+      ask: "How could YOU check the 'twice as fast' claim at home?",
+      answer: "Grow two same plants \u2014 one with the food, one without \u2014 and measure both over time.",
+      why: "Big claims deserve a check, not a nod. Without a plain plant to compare against, 'twice as fast' is just words. The plant with NO food is the most important one \u2014 it's your measuring stick." },
+    { text: "You think the ice cube in your warm drink melts faster than one in cold water.",
+      ask: "What test would settle it, and what makes it fair?",
+      answer: "Drop same-size cubes into warm and cold water at once and time them; same cup, same cube.",
+      why: "Same cube, same amount of liquid, started together \u2014 so only the temperature differs. Timing both at once removes excuses. A clean test gives an answer you can actually trust." }
+  ],
+  noticeMore: [
+    { text: "Two leaves look 'the same' at a glance \u2014 both green, both from the yard.",
+      ask: "Name three things you'd look closer at to tell them apart.",
+      answer: "Things like: edge shape (smooth vs. jagged), the vein pattern, size, smell, how the underside feels.",
+      why: "'The same' is usually just 'I didn't look long enough.' Slow down and the differences appear \u2014 edges, veins, feel. Noticing more is a skill, and it's how you stop being fooled by a quick glance." },
+    { text: "You watch an ant carry a crumb that's bigger than the ant itself, all the way back to a crack in the path.",
+      ask: "What's at least one surprising thing worth noticing here?",
+      answer: "Its strength for its size, that it had a destination, or that it followed a path/trail.",
+      why: "The everyday is full of weird once you actually watch it. An ant hauling something huge, heading somewhere on purpose \u2014 that's data. People walk past it; a detective stops and asks 'how?'" },
+    { text: "On a sunny morning your shadow is long and points one way; by noon it's short and points another.",
+      ask: "What is your shadow quietly telling you about the sun?",
+      answer: "Where the sun is and how high \u2014 low sun = long shadow; high sun (noon) = short shadow.",
+      why: "Your shadow is a free sun-clock. It changes because the SUN moved across the sky, not you. A thing you see every day can teach you something real once you ask what it's tracking." },
+    { text: "You hold a feather and a flat stone, then drop them both at the same time.",
+      ask: "What do you notice about HOW each one falls, not just which lands first?",
+      answer: "The stone drops straight and fast; the feather drifts, floats, and wobbles slowly down.",
+      why: "Most people only watch what wins. Watch HOW: the feather catches the air and dances; the stone ignores it. The 'how' is where the real reason hides \u2014 air pushes on the wide light thing more." },
+    { text: "A flower is open wide in the morning sun, but in the evening you find it has closed up.",
+      ask: "What did you notice, and what question does it make you want to ask?",
+      answer: "It opens and closes with the day; a good question: does light, warmth, or time of day cause it?",
+      why: "Noticing leads to a question, and a question leads to a test. You spotted a pattern (open by day, shut by night) \u2014 now you get to wonder WHY and could even check it. That's the whole loop of figuring things out." }
+  ]
+};
+
+/* ---- nature_detective layout (mirrors logic_deduction row layout) ---- */
+function ndRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "how I'd check it" line
+  }
+  return h + 8;
+}
+
+function ndRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    readClues: "READ THE CLUES", predict: "WHAT HAPPENS NEXT?",
+    howFindOut: "HOW COULD YOU FIND OUT?", noticeMore: "LOOK CLOSER"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The observation / scene
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("how I'd check it...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("how I'd check it... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
