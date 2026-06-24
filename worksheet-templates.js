@@ -6850,6 +6850,228 @@ function ndRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — ANALOGIES (think in relationships)
+   "A is to B as C is to ___" — the purest relational-reasoning
+   drill. The kid can't pattern-match a fact; they have to NAME
+   the relationship (job, part-of, opposite, cause->effect,
+   bigger/smaller, lives-in) and carry it to a new pair. This is
+   first-principles thinking with training wheels off: the answer
+   only comes from understanding WHY the first pair belongs
+   together. Sovereign voice: figure out the rule yourself, then
+   prove it — don't wait to be told the connection.
+
+   Modes map to relationship families so Mike can target one kind
+   of thinking or mix. K-friendly: "easy" picks from the simplest
+   bank (job/part/opposite with everyday words). Mirrors the
+   logic_deduction / nature_detective row layout + answer key.
+============================================================ */
+window.TEMPLATES.analogies = {
+  id: "analogies",
+  label: "Analogies (think in relationships)",
+  subject: "reading",
+  grades: ["K", "1", "2", "3"],
+  topicHint: "Relational reasoning & analogies",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Relationship type",
+      options: [
+        { value: "easy",      label: "Easy starters (K\u20131: jobs, parts, opposites)" },
+        { value: "opposite",  label: "Opposites (hot : cold)" },
+        { value: "function",  label: "What's it FOR? (pencil : write)" },
+        { value: "partWhole", label: "Part to whole (finger : hand)" },
+        { value: "category",  label: "Kind of thing (dog : animal)" },
+        { value: "causeEffect", label: "Cause \u2192 effect (rain : wet)" },
+        { value: "home",      label: "Who lives where (fish : water)" },
+        { value: "mixed",     label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "nameRule", type: "boolean", label: "Ask the child to name the relationship rule", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    let modes;
+    if (m.mode === "easy") {
+      modes = ["function", "partWhole", "opposite"]; // simplest families, easy bank only
+    } else if (m.mode === "mixed") {
+      modes = ["opposite", "function", "partWhole", "category", "causeEffect", "home"];
+    } else {
+      modes = [m.mode];
+    }
+    const easyOnly = m.mode === "easy";
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) {
+        let bank = ANALOGY_BANKS[mode].slice();
+        if (easyOnly) bank = bank.filter(x => x.easy);
+        if (bank.length === 0) bank = ANALOGY_BANKS[mode].slice();
+        pools[mode] = anaShuffle(bank);
+      }
+      const it = pools[mode].pop();
+      items.push(Object.assign({ mode }, it));
+    }
+    return { items, nameRule: m.nameRule !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Analogies";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "An analogy is a tiny puzzle about HOW two things go together. \"A is to B as C is to ___\" \u2014 first figure out the RULE between the first pair (what's the connection?), then carry that same rule across to finish the second pair. Nobody can hand you the answer; you have to spot the relationship yourself and prove it fits. That's the whole skill: see the why, then use it.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "bird is to fly as fish is to ______.   Rule: the first word is a creature, the second is HOW it moves. A bird flies, so a fish ______ (swims). I didn't guess \u2014 I found the rule (\"how it moves\") and carried it across.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 78);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = anaRowHeight(doc, it, pageW - margin * 2, content.nameRule, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = anaRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.nameRule, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- analogies content banks ---- */
+function anaShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { a, b, c, answer, rule, easy? }
+//   reads as: a is to b  as  c is to ____(answer)
+//   rule   = plain-language name of the relationship (answer key + "name the rule" line)
+//   easy   = true if simple enough for K (used by the "easy" mode)
+const ANALOGY_BANKS = {
+  opposite: [
+    { a: "hot", b: "cold", c: "big", answer: "small", rule: "opposites", easy: true },
+    { a: "up", b: "down", c: "fast", answer: "slow", rule: "opposites", easy: true },
+    { a: "day", b: "night", c: "open", answer: "closed (shut)", rule: "opposites", easy: true },
+    { a: "happy", b: "sad", c: "loud", answer: "quiet", rule: "opposites" },
+    { a: "wet", b: "dry", c: "full", answer: "empty", rule: "opposites" },
+    { a: "start", b: "stop", c: "push", answer: "pull", rule: "opposites" }
+  ],
+  function: [
+    { a: "pencil", b: "write", c: "scissors", answer: "cut", rule: "the thing and its job (what it's FOR)", easy: true },
+    { a: "broom", b: "sweep", c: "cup", answer: "drink (hold a drink)", rule: "the thing and its job", easy: true },
+    { a: "key", b: "unlock", c: "knife", answer: "cut", rule: "the thing and its job", easy: true },
+    { a: "ears", b: "hear", c: "eyes", answer: "see", rule: "body part and what it does" },
+    { a: "boat", b: "float", c: "plane", answer: "fly", rule: "the thing and how it travels" },
+    { a: "clock", b: "time", c: "ruler", answer: "length (how long)", rule: "the tool and what it measures" }
+  ],
+  partWhole: [
+    { a: "finger", b: "hand", c: "toe", answer: "foot", rule: "a part and the whole it belongs to", easy: true },
+    { a: "page", b: "book", c: "leaf", answer: "tree", rule: "a part and its whole", easy: true },
+    { a: "wheel", b: "car", c: "wing", answer: "bird (or plane)", rule: "a part and its whole", easy: true },
+    { a: "petal", b: "flower", c: "branch", answer: "tree", rule: "a part and its whole" },
+    { a: "room", b: "house", c: "word", answer: "sentence", rule: "a part and the bigger thing it builds" },
+    { a: "second", b: "minute", c: "day", answer: "week (or month/year)", rule: "a small unit inside a bigger one" }
+  ],
+  category: [
+    { a: "dog", b: "animal", c: "rose", answer: "flower (plant)", rule: "a thing and the GROUP it belongs to", easy: true },
+    { a: "apple", b: "fruit", c: "carrot", answer: "vegetable", rule: "a thing and its group", easy: true },
+    { a: "red", b: "color", c: "three", answer: "number", rule: "a thing and its group" },
+    { a: "robin", b: "bird", c: "shark", answer: "fish", rule: "a thing and its group" },
+    { a: "hammer", b: "tool", c: "couch", answer: "furniture", rule: "a thing and its group" },
+    { a: "oak", b: "tree", c: "salmon", answer: "fish", rule: "a thing and its group" }
+  ],
+  causeEffect: [
+    { a: "rain", b: "wet", c: "sun", answer: "warm (hot / dry)", rule: "a cause and what it makes happen", easy: true },
+    { a: "fire", b: "hot", c: "ice", answer: "cold", rule: "a cause and its effect", easy: true },
+    { a: "tired", b: "sleep", c: "hungry", answer: "eat", rule: "a feeling and what fixes it" },
+    { a: "seed", b: "plant", c: "egg", answer: "chick (bird)", rule: "a start and what it grows into" },
+    { a: "push", b: "move", c: "tickle", answer: "laugh", rule: "an action and what it causes" },
+    { a: "cut", b: "bleed", c: "trip", answer: "fall", rule: "an action and what it causes" }
+  ],
+  home: [
+    { a: "fish", b: "water", c: "bird", answer: "nest (sky / tree)", rule: "an animal and where it lives", easy: true },
+    { a: "bee", b: "hive", c: "spider", answer: "web", rule: "an animal and its home", easy: true },
+    { a: "dog", b: "kennel", c: "horse", answer: "stable (barn)", rule: "an animal and its home" },
+    { a: "bear", b: "cave (den)", c: "rabbit", answer: "burrow", rule: "an animal and its home" },
+    { a: "cow", b: "barn", c: "car", answer: "garage", rule: "a thing and where it's kept" },
+    { a: "king", b: "castle", c: "captain", answer: "ship", rule: "a person and where they belong" }
+  ]
+};
+
+/* ---- analogies layout (mirrors nature_detective row layout) ---- */
+function anaRowHeight(doc, it, w, nameRule, showAnswers) {
+  doc.setFontSize(12);
+  const prompt = it.a + " is to " + it.b + "  as  " + it.c + " is to ______________";
+  const pLines = doc.splitTextToSize(prompt, w - 24);
+  let h = 16;
+  h += pLines.length * 15 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "   (rule: " + it.rule + ")", w - 24);
+    h += ansLines.length * 12 + 6;
+  } else if (nameRule) {
+    h += 20; // "the rule is..." line
+  }
+  return h + 8;
+}
+
+function anaRenderRow(doc, it, num, x, y, w, nameRule, showAnswers) {
+  const modeTag = {
+    opposite: "OPPOSITES", function: "WHAT'S IT FOR?", partWhole: "PART \u2192 WHOLE",
+    category: "KIND OF THING", causeEffect: "CAUSE \u2192 EFFECT", home: "WHO LIVES WHERE"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 20;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The analogy prompt
+  doc.setFont("helvetica", "normal"); doc.setFontSize(12); doc.setTextColor(20, 20, 20);
+  const prompt = it.a + " is to " + it.b + "  as  " + it.c + " is to ______________";
+  const pLines = doc.splitTextToSize(prompt, bw);
+  doc.text(pLines, bx, cy);
+  cy += pLines.length * 15 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "   (rule: " + it.rule + ")", bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else if (nameRule) {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+    doc.text("the rule is...", bx, cy);
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx + doc.getTextWidth("the rule is... ") + 4, cy, x + w, cy);
+    cy += 14;
+    doc.setTextColor(20, 20, 20);
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
