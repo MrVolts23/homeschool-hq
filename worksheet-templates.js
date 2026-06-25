@@ -7072,6 +7072,264 @@ function anaRenderRow(doc, it, num, x, y, w, nameRule, showAnswers) {
 }
 
 /* ============================================================
+   cause_effect_chains — "Cause & Effect (and then what?)"
+   Consequence reasoning, not just pairing. Trains four moves:
+     forward   = given a cause, predict what follows (and then what?)
+     backward  = given an effect, reason back to a likely cause
+     chain     = order a short chain of events (first -> then -> so)
+     coincidence = did A really CAUSE B, or did they just happen near
+                   each other? (the "after it = because of it" trap)
+   First-principles + manipulation-literacy crossover: ads and rumors
+   lean hard on "this happened, then that, so this caused that."
+   Knowing causes have to actually DO the work keeps a kid in charge.
+   Deterministic, never calls AI. Sovereign voice: trace it yourself.
+============================================================ */
+window.TEMPLATES.cause_effect_chains = {
+  id: "cause_effect_chains",
+  label: "Cause & effect (and then what?)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Cause, effect & consequence reasoning",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "forward",     label: "And then what? (cause -> predict the effect)" },
+        { value: "backward",    label: "What caused this? (effect -> reason back)" },
+        { value: "chain",       label: "Put it in order (first -> then -> so)" },
+        { value: "coincidence", label: "Did it REALLY cause it? (catch the trap)" },
+        { value: "mixed",       label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["forward", "backward", "chain", "coincidence"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = ceShuffle(CE_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Cause & Effect";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Everything that happens has a cause \u2014 something that made it happen \u2014 and an effect \u2014 what happens next. Good thinkers run the movie both ways: \"if this, then what comes next?\" and \"this happened, so what caused it?\" The big trap: just because B happened after A does NOT prove A caused B. A real cause has to actually DO the work. Trace the connection yourself \u2014 don't take it on faith.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"I wore my lucky socks and my team won. So the socks made us win!\"  ->  Nope. The win came after the socks, but socks can't kick a ball. Things that happen near each other aren't always cause-and-effect. Ask: could this thing ACTUALLY do the work? If not, it's just a coincidence wearing a costume.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 88);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ceRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = ceRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- cause_effect_chains content banks ---- */
+function ceShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the situation the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const CE_BANKS = {
+  forward: [
+    { text: "You leave a cup of water in the freezer overnight.",
+      ask: "And then what? What will the water be like in the morning \u2014 and WHY?",
+      answer: "It freezes into ice. Cold pulls the heat out until the water turns solid.",
+      why: "The cause (freezing cold) does real work on the water \u2014 it pulls out heat until the water hardens. You don't have to be told the answer; you can run the movie forward from what cold does to water." },
+    { text: "Nobody waters a little plant on the windowsill for two weeks.",
+      ask: "And then what happens to the plant? Why does it follow?",
+      answer: "It dries out, wilts, and may die. Plants need water to stay alive.",
+      why: "No water in means no water for the plant to use \u2014 so it droops and dries. The effect follows straight from the cause. Knowing what something NEEDS lets you predict what happens when it's missing." },
+    { text: "You blow up a balloon bigger and bigger and keep going.",
+      ask: "And then what? Predict the next thing \u2014 and explain.",
+      answer: "It pops. The stretchy skin can only stretch so far before it tears.",
+      why: "More air pushes harder on the skin; the skin can only take so much. The cause (too much air) builds until the effect (pop) has to happen. Real causes pile up to a tipping point \u2014 you can see it coming." },
+    { text: "You roll a ball off the edge of a table.",
+      ask: "And then what? What does the ball do, and why?",
+      answer: "It falls down to the floor. Gravity pulls things toward the ground.",
+      why: "Nothing holds it up once it leaves the table, and gravity is always pulling down. Same cause, same effect, every single time \u2014 that's how you can predict it before it happens." },
+    { text: "A kid keeps spending all their allowance the day they get it, every week.",
+      ask: "And then what happens by the end of the week? Why?",
+      answer: "They run out of money and can't buy anything until next allowance.",
+      why: "Money out with nothing saved means an empty pocket later. The effect is baked into the choice. Thinking ahead to 'and then what?' is how you spot a trap before you're in it." }
+  ],
+  backward: [
+    { text: "You come downstairs and the kitchen floor is covered in water near the sink.",
+      ask: "What could have CAUSED this? Name a likely cause and how you'd check.",
+      answer: "A leaking or overflowing sink/pipe. Check if the tap was left on or a pipe is dripping.",
+      why: "You didn't see it happen, but you can reason backward from the puddle to what makes puddles. A good thinker lists likely causes, then checks \u2014 instead of just guessing the first idea." },
+    { text: "Your bike was working fine yesterday. Today the back wheel won't turn.",
+      ask: "What might have caused it? Give a cause you could test.",
+      answer: "Something is jammed in the wheel, the brake is stuck, or the chain slipped.",
+      why: "Work back from the effect: a wheel that won't turn is usually being held by something. List the things that could grab a wheel, then look. Reasoning backward turns a mystery into a checklist." },
+    { text: "A plant on a sunny shelf has leaves that all lean toward the window.",
+      ask: "What caused the leaves to lean that way? Why does that make sense?",
+      answer: "The light from the window. Plants grow toward the light they need.",
+      why: "The effect (leaning one way) points at its cause (light from one side). When an effect has a direction or pattern, the cause usually does too \u2014 follow the clue back to its source." },
+    { text: "Your friend was laughing hard at lunch and then suddenly got the hiccups.",
+      ask: "What probably caused the hiccups? How could you find out for sure?",
+      answer: "Laughing/eating fast gulped air, which set off the hiccups. Ask what they were doing right before.",
+      why: "Reason from the effect back to what came just before it that could DO it. 'What changed right before?' is the question that finds most causes \u2014 but you still confirm, you don't assume." },
+    { text: "Every morning the grass in one yard is wet, even on days it didn't rain.",
+      ask: "What's a likely cause besides rain? How would you check?",
+      answer: "A sprinkler on a timer, or morning dew. Watch early to see if a sprinkler runs.",
+      why: "When the obvious cause (rain) is ruled out, don't stop \u2014 there's always another cause doing the work. List the other ways grass gets wet, then go look. The wrong first guess isn't the end of thinking." }
+  ],
+  chain: [
+    { text: "These got mixed up:  (a) the plant grew  (b) you planted a seed  (c) you watered it and the sun shone",
+      ask: "Put them in order: first -> then -> so. Why is that the order?",
+      answer: "b (plant a seed) -> c (water + sun) -> a (it grows).",
+      why: "Each step has to come before it can cause the next: no seed, nothing to water; no water and sun, nothing grows. A chain only works in the order where each cause sets up the next effect." },
+    { text: "Mixed up:  (a) you felt warm and cozy  (b) you got cold outside  (c) you came in and put on a sweater",
+      ask: "Order them first -> then -> so, and say why.",
+      answer: "b (got cold) -> c (put on a sweater) -> a (felt cozy).",
+      why: "The cold is what makes you reach for the sweater, and the sweater is what makes you cozy. Find the FIRST cause \u2014 the thing that started it \u2014 and the rest lines up behind it." },
+    { text: "Mixed up:  (a) the floor got slippery  (b) someone wiped it up  (c) milk spilled on the floor",
+      ask: "Put the events in order first -> then -> so. Explain the order.",
+      answer: "c (milk spilled) -> a (floor got slippery) -> b (wiped it up).",
+      why: "Each event is caused by the one before it: spill makes it slippery, slippery makes someone clean it. Ask 'what had to happen first for the next thing to make sense?' and the chain sorts itself." },
+    { text: "Mixed up:  (a) you weren't hungry at dinner  (b) you ate a big snack at 5pm  (c) you said no thanks to dinner",
+      ask: "Order them first -> then -> so. Why does it go that way?",
+      answer: "b (big snack) -> a (not hungry) -> c (said no to dinner).",
+      why: "The snack fills you up, full means not hungry, not hungry leads to skipping dinner. One choice early can quietly cause a chain of things later \u2014 worth noticing before you make it." },
+    { text: "Mixed up:  (a) the team lost the game  (b) the star player got hurt and sat out  (c) the player tripped at practice",
+      ask: "Put them in order first -> then -> so. Why?",
+      answer: "c (tripped at practice) -> b (hurt, sat out) -> a (team lost).",
+      why: "Trace it link by link: the trip caused the injury, the injury caused the benching, the benching helped cause the loss. But notice \u2014 'helped cause' isn't 'guaranteed.' Even a real chain can have other things pushing on it too." }
+  ],
+  coincidence: [
+    { text: "\"Every time I bring my umbrella, it doesn't rain. So my umbrella STOPS the rain!\"",
+      ask: "Did the umbrella really cause the dry weather? Why or why not?",
+      answer: "No \u2014 an umbrella can't change the sky. The dry days and the umbrella just happened together.",
+      why: "Ask the killer question: could this thing ACTUALLY do that job? An umbrella can't push clouds around. Two things lining up isn't proof one caused the other \u2014 that's the oldest trick there is." },
+    { text: "\"I ate cereal this morning and then aced my spelling test. The cereal made me smart!\"",
+      ask: "Did the cereal cause the good score? What really did?",
+      answer: "No \u2014 studying and knowing the words did. The cereal came before, but didn't do the work.",
+      why: "'It happened after, so it caused it' is a trap. Lots of things happened that morning. The cause of a good test is the studying that actually built the knowing \u2014 not whatever you ate first." },
+    { text: "An ad: \"People who drink FizzCola smile more in our photos. Drink FizzCola to be happier!\"",
+      ask: "Does the drink really cause the happiness? What's the catch?",
+      answer: "No \u2014 they picked smiling photos on purpose. The drink didn't make them happy.",
+      why: "They chose the happy pictures, then pointed at the drink. The smile and the can are near each other, but the can didn't cause the smile. Ads love to stand next to good feelings and take the credit." },
+    { text: "\"The rooster crows, and then the sun comes up. So the rooster's crow makes the sun rise.\"",
+      ask: "Does the crow cause the sunrise? How do you know?",
+      answer: "No \u2014 the sun would rise even if the rooster stayed quiet. The crow just comes first.",
+      why: "Test it in your head: if the rooster slept in, would the sun stay down? Of course not. 'Comes first' is not 'causes.' A tiny rooster can't move the sun \u2014 check whether the cause is even big enough to do the job." },
+    { text: "\"Ice cream sales go up in summer, and so do bee stings. So ice cream must attract bees to sting people!\"",
+      ask: "Is ice cream really causing the stings? What's the real reason both go up?",
+      answer: "No \u2014 hot summer weather causes BOTH. People eat more ice cream AND go outside near bees more.",
+      why: "Sometimes two things rise together because a THIRD thing causes both. Hot weather drives the ice cream and the bee time. When two things move together, ask: is one causing the other, or is something behind them pushing both?" }
+  ]
+};
+
+/* ---- cause_effect_chains layout (mirrors logic_deduction row layout) ---- */
+function ceRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function ceRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    forward: "AND THEN WHAT?", backward: "WHAT CAUSED THIS?",
+    chain: "PUT IT IN ORDER", coincidence: "DID IT REALLY CAUSE IT?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
