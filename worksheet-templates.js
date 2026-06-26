@@ -7329,6 +7329,251 @@ function ceRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
   return cy;
 }
 
+window.TEMPLATES.says_who = {
+  id: "says_who",
+  label: "Says who? (checking claims & evidence)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Evidence, sources & evaluating claims",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "howKnow",   label: "How do you KNOW? (checked it vs. someone said it)" },
+        { value: "saysWho",   label: "Says who? (who's the source — and could they be wrong?)" },
+        { value: "everybody", label: "\"Everybody knows...\" (does saying it loud make it true?)" },
+        { value: "changeMind", label: "What would change your mind? (testing a claim)" },
+        { value: "mixed",     label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["howKnow", "saysWho", "everybody", "changeMind"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = swShuffle(SW_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Says Who?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Anyone can SAY anything. The question a sharp thinker asks is: how would we actually KNOW? There's a big difference between \"I checked it myself\" and \"somebody told me.\" Who is saying it, and could they be wrong — or want you to believe it? \"Everybody knows\" is not proof; saying something louder or more often doesn't make it true. For each one, don't just agree or disagree — figure out what would actually settle it.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"My friend SWEARS that touching a frog gives you warts.\"  ->  Says who? A friend repeating something they also just heard. That's not the same as KNOWING. How could we actually check? Look it up from people who study frogs, or notice that lots of kids touch frogs and don't get warts. A confident voice isn't evidence — the check is.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 92);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = swRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = swRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- says_who content banks ---- */
+function swShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the claim / situation the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const SW_BANKS = {
+  howKnow: [
+    { text: "\"The big rock by the creek is too heavy for any kid to lift.\"",
+      ask: "How could you KNOW this for real — not just guess?",
+      answer: "Go try to lift it yourself, or watch someone try. Checking beats guessing.",
+      why: "Some claims you can test with your own hands today. 'Too heavy' is one of them — don't take it on faith, go find out. Knowing because you CHECKED is the strongest kind of knowing." },
+    { text: "Two kids argue: one says the slide is hot, the other says it's cool.",
+      ask: "Who's right — and how would you settle it without arguing?",
+      answer: "Touch the slide. The one who checked wins; arguing louder doesn't.",
+      why: "When people disagree about something you can check, stop arguing and go look. The world settles it, not whoever talks the most. That's how a sovereign thinker ends a fight — with the facts." },
+    { text: "\"There are exactly 12 apples left in the bowl.\"",
+      ask: "Is this something you can KNOW for sure? How?",
+      answer: "Yes — count them yourself. A count is a check anyone can repeat.",
+      why: "A number you can count is checkable. Don't just trust the bowl — count it. If someone's number is off, the apples will tell you, not their confidence." },
+    { text: "\"It's freezing cold outside right now.\"",
+      ask: "How could you find out if that's really true?",
+      answer: "Step outside and feel it, or read a thermometer.",
+      why: "'Cold' can mean different things to different people, so check it two ways: feel it AND read a number. Your own senses plus a measurement beats a single guess." },
+    { text: "Someone tells you the new kid is 'really mean.'",
+      ask: "Do you KNOW that yet? How would you find out for yourself?",
+      answer: "No — that's one person's report. Talk to the new kid yourself and watch.",
+      why: "Hearing it isn't knowing it. People pass along opinions like facts. Meet the person yourself before you decide — you might've been handed someone else's grudge." }
+  ],
+  saysWho: [
+    { text: "\"This candy is the healthiest snack in the world!\" — printed on the candy's own wrapper.",
+      ask: "Says who? Why does it matter WHO is saying this?",
+      answer: "The company selling it. They want your money, so they're not a fair judge.",
+      why: "The source has a reason to say it — they profit. When someone gains from you believing them, weigh their claim with extra care. Always ask who's talking and what they get out of it." },
+    { text: "A weather report says it will rain tomorrow.",
+      ask: "Says who — and is this a source worth trusting? Why?",
+      answer: "People who study weather with tools. Pretty trustworthy, but they can still be wrong.",
+      why: "A good source isn't perfect, but it has a real method behind it — tools, training, a track record. Trust it MORE than a wild guess, but stay ready to be surprised. No source is magic." },
+    { text: "\"My older brother says the moon is made of cheese.\"",
+      ask: "Says who? Should an older kid be believed just because they're older?",
+      answer: "His brother — being older doesn't make him right. Check it from people who study the moon.",
+      why: "Older, bigger, or louder doesn't equal correct. Even people you look up to repeat wrong things. Judge the claim by the evidence behind it, not by who said it." },
+    { text: "A sign at the park: \"Danger — thin ice. Do not walk on the pond.\"",
+      ask: "Says who? Is this a source you'd listen to? Why?",
+      answer: "The people who care for the park and saw the ice. Worth listening — the cost of being wrong is high.",
+      why: "Not every source is selling you something — some are warning you. When a source has nothing to gain and the danger is real, listen first and question later. Smart trust isn't the same as no trust." },
+    { text: "An ad: \"Doctors recommend ZoomVitamins!\" (but it doesn't say which doctors).",
+      ask: "Says who, exactly? What's missing from this claim?",
+      answer: "No real names — 'doctors' is vague. Maybe one, maybe paid, maybe none.",
+      why: "A blurry source is a red flag. 'Doctors say' with no name, no count, no proof is built to SOUND trustworthy while hiding who's actually talking. Ask for the real source — if it's hidden, ask why." }
+  ],
+  everybody: [
+    { text: "\"Everybody knows this band is the best ever. You're weird if you don't like them.\"",
+      ask: "Does 'everybody knows' make it true? What's really going on here?",
+      answer: "No — 'best' is an opinion, and 'everybody' is pressure, not proof.",
+      why: "'Everybody knows' is a trick to skip the proof and rush you into agreeing. Even if a million people like something, that's a popularity count, not a fact. You're allowed to like what you like." },
+    { text: "Lots of kids at school are sure that the gym is haunted because 'everyone says so.'",
+      ask: "Does lots of people saying it make it true? How could you actually check?",
+      answer: "No. Repeated stories aren't evidence. Look for what's really making the noises.",
+      why: "A story passed around enough starts to FEEL true — but feeling true and being true are different. Trace it back: where did it start, and is there any actual proof? Crowds can be wrong together." },
+    { text: "\"All the cool kids stay up past midnight, so it must be a good idea.\"",
+      ask: "Does 'all the cool kids do it' make it smart? Why or why not?",
+      answer: "No — lots of people doing something doesn't make it good for you.",
+      why: "Popular and wise are not the same thing. 'Everyone's doing it' tells you what's common, not what's good. Decide on the actual reasons — your sleep, your day — not on the crowd." },
+    { text: "\"It's just common sense that the bigger team always wins.\"",
+      ask: "Is 'common sense' the same as proof? How would you check this one?",
+      answer: "No — look at real games. Smaller teams beat bigger ones all the time.",
+      why: "'Common sense' often means 'something everybody assumes and nobody checked.' Test it against the real world — the scoreboard, not the saying. Lots of 'common sense' falls apart when you actually look." },
+    { text: "A kid says, \"My whole class agrees the test was unfair, so it WAS unfair.\"",
+      ask: "Does everyone agreeing prove it? What would actually show it was unfair?",
+      answer: "No — a hard test feels unfair to many. 'Unfair' needs a real reason, like a question on stuff never taught.",
+      why: "Agreement spreads feelings fast. To call something unfair you need a specific reason, not just a shared groan. Ask 'what exactly was wrong?' — a real answer beats a loud one." }
+  ],
+  changeMind: [
+    { text: "\"Plants don't need light to grow — they just need water.\"",
+      ask: "What test could PROVE this right or wrong? What would change your mind?",
+      answer: "Grow one plant in light and one in a dark box, same water. The dark one will struggle.",
+      why: "A real thinker names what would change their mind BEFORE arguing. Set up a fair test — change one thing, keep the rest the same — and let the result decide. Being willing to be wrong is a superpower." },
+    { text: "You believe your bike is faster than your friend's bike.",
+      ask: "What would actually settle it? What result would make you admit you were wrong?",
+      answer: "Race them on the same path, take turns on each bike. If theirs wins twice, yours isn't faster.",
+      why: "Pick the test and the losing condition first — 'if it happens twice, I was wrong.' That keeps you honest. If you can't say what would change your mind, you're not thinking, you're just cheering." },
+    { text: "\"This jar of jellybeans has more red ones than any other color.\"",
+      ask: "How could you test it? What result would prove the claim wrong?",
+      answer: "Sort and count by color. If another color has more, the claim is wrong.",
+      why: "A clear claim can be checked with a clear test. Counting is the judge. Notice how good it feels to KNOW instead of argue — that's what evidence gives you." },
+    { text: "\"You can't balance an egg on its end. It's impossible.\"",
+      ask: "How would you test 'impossible'? What single result would change your mind?",
+      answer: "Try it carefully many times. One success proves 'impossible' wrong.",
+      why: "'Impossible' is a huge claim — it only takes ONE success to break it. Before you believe a never-ever claim, ask what would disprove it, then go try. Big claims need big evidence." },
+    { text: "A friend insists the longer line at the store always moves faster.",
+      ask: "What would actually test this? What result would change their mind?",
+      answer: "Time several lines on different days. If short lines often win, the rule is false.",
+      why: "Don't argue from one lucky memory — gather more than one try. A claim that's true should hold up again and again. If it only worked once, it was luck wearing a rule's costume." }
+  ]
+};
+
+/* ---- says_who layout (mirrors cause_effect_chains row layout) ---- */
+function swRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function swRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    howKnow: "HOW DO YOU KNOW?", saysWho: "SAYS WHO?",
+    everybody: "\"EVERYBODY KNOWS\"", changeMind: "WHAT WOULD CHANGE YOUR MIND?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The claim / situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
 /* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
