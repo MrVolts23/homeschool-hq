@@ -7575,6 +7575,258 @@ function swRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — TRADE-OFFS (every choice has a cost)
+   Sovereign-thinking: there is no "free," no "best of both."
+   Every yes is also a no. The skill is naming what you give up
+   (opportunity cost), spotting "have it all" tricks, and noticing
+   that an unexamined choice is one someone else made for you.
+============================================================ */
+window.TEMPLATES.trade_offs = {
+  id: "trade_offs",
+  label: "Trade-offs (every choice has a cost)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Decision reasoning, opportunity cost & trade-offs",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "giveUp",    label: "What do you give up? (every yes is a no)" },
+        { value: "worthIt",   label: "Is it worth it? (weigh the cost vs. the gain)" },
+        { value: "noFree",    label: "Nothing is free (find the hidden cost)" },
+        { value: "haveItAll", label: "\"Have it all\" trap (spot the false 'both')" },
+        { value: "mixed",     label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["giveUp", "worthIt", "noFree", "haveItAll"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = toShuffle(TO_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Trade-offs";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Here's a secret grown-ups don't always say out loud: every single choice has a cost. When you say YES to one thing, you are saying NO to something else — that's just how it works, and it's not bad, it's true. There is no \"free,\" and almost never a real \"have it all.\" The trick is to NAME what you're giving up before you decide, instead of finding out later. A choice you never really looked at isn't free either — it just means someone else decided for you. For each one, figure out the real cost, then decide.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"A game is FREE to download!\"  ->  What's the real cost? Free of money, sure. But it costs your TIME, your attention, and it's built to keep you tapping and asking for more. Saying yes to hours of the game is saying no to whatever else you'd have done with those hours. \"Free\" almost always hides a cost somewhere — your job is to find where.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 92);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = toRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = toRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- trade_offs content banks ---- */
+function toShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the choice / situation the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const TO_BANKS = {
+  giveUp: [
+    { text: "You have one hour before bed. You can play outside OR watch a show.",
+      ask: "If you pick the show, what are you giving up? Name it.",
+      answer: "An hour outside — moving, fresh air, maybe friends. The show costs you that.",
+      why: "Time is the one thing you can't get more of. Every hour spent on one thing is an hour that can't be spent on anything else. Saying yes to the show is the same as saying no to outside — there's no way to do both with one hour." },
+    { text: "You spend all your birthday money on a toy you want right now.",
+      ask: "What did you give up by spending it all today?",
+      answer: "Everything else that money could've become — saving up for something bigger, or buying later.",
+      why: "Money spent is money gone. The cost isn't just the price tag — it's every OTHER thing that money could have done. Smart deciders ask 'what am I trading away?' before the cash leaves their hand." },
+    { text: "A friend wants you to join their team. You'd have to quit the club you're in.",
+      ask: "What are you giving up to join the team? Is the trade clear to you?",
+      answer: "The club, the people in it, the time it took to get good there. That's the real cost of the team.",
+      why: "Big choices trade one whole thing for another. Before you jump, picture what you're walking away from — not just what you're walking toward. Then the trade is honest, and it's YOURS." },
+    { text: "You stay up late to finish a fun book.",
+      ask: "What does staying up late cost you tomorrow? Name the give-up.",
+      answer: "Sleep — so a slower, grumpier, foggier tomorrow. That's the price of the extra chapters.",
+      why: "Costs don't always show up right away. The book feels free at night and bills you in the morning. A sharp thinker counts tomorrow's cost tonight, before deciding." },
+    { text: "You can spend recess helping set up the game OR running around playing it.",
+      ask: "Either way, what are you giving up? There's a cost both ways.",
+      answer: "Help = less play time. Play = the setup (and maybe no game at all). Both have a cost.",
+      why: "Here's the deep part: doing NOTHING is also a choice with a cost. There's no option that costs zero. Once you see that, you stop looking for the 'free' choice and start picking the trade you like best." }
+  ],
+  worthIt: [
+    { text: "A fancy snack costs all your saved coins. A plain snack costs almost nothing.",
+      ask: "Is the fancy one WORTH the extra cost to you? How would you decide?",
+      answer: "Depends — how much better is it, really, and what else could those coins do? Compare gain to cost.",
+      why: "'Worth it' isn't about the price alone — it's price compared to how much you actually GET. A small treat for a huge cost is a bad trade; a big joy for a tiny cost is a great one. You weigh it; nobody decides that for you." },
+    { text: "You could practice an instrument an hour a day. It's boring now but you'd get good.",
+      ask: "Is the boring hour worth what you'd gain? What are you trading?",
+      answer: "Trading fun-now for skill-later. Worth it if you really want the skill; not if you don't.",
+      why: "Some trades pay you back in the future, not today. The cost is real (boring hours) and so is the prize (being good). Only YOU can judge if the prize is worth the price — but judge it on purpose, don't just drift." },
+    { text: "A line for the best ride is 40 minutes long. Other rides have no line.",
+      ask: "Is the big ride worth giving up 40 minutes of other rides? How do you weigh it?",
+      answer: "Count what 40 minutes of other rides would be, then ask if the one big ride beats all of them.",
+      why: "Waiting IS a cost, even though no money changes hands. The real question is always 'what else could this time/money buy?' — and is this thing better than all of that? That comparison is the whole game." },
+    { text: "You can buy a cheap toy that breaks fast, or a sturdy one that costs more.",
+      ask: "Which is really worth more? Think past the price tag.",
+      answer: "Often the sturdy one — a cheap toy you replace twice costs more in the end.",
+      why: "Cheap isn't the same as worth-it. The true cost is price PLUS how long it lasts plus how much you'll enjoy it. A 'deal' that breaks is the expensive choice in disguise." },
+    { text: "A show offers to let you skip ads if you watch one long ad first.",
+      ask: "Is skipping the little ads worth watching one big one? How do you weigh it?",
+      answer: "Add up the time either way. Sometimes the 'skip' costs more time than the ads it skips.",
+      why: "People offer you trades all day long, hoping you won't do the math. Do the math. 'Worth it' is just cost vs. gain — when you actually add it up, a lot of 'great deals' aren't." }
+  ],
+  noFree: [
+    { text: "\"Sign up FREE and get a free gift!\" says the website.",
+      ask: "If it's free, what are they getting from you? Find the hidden cost.",
+      answer: "Your name, email, and attention — which they sell or use to sell you stuff later.",
+      why: "When something is 'free,' you are usually the thing being sold. Companies don't give away gifts for nothing. If you can't see the price, look harder — you're paying with your info, your time, or your attention." },
+    { text: "A friend says, \"Just copy my homework, it's no big deal, it costs you nothing.\"",
+      ask: "Does copying really cost nothing? What's the hidden price?",
+      answer: "You don't learn it, so the test (and real life) costs you later. Plus it's not honest.",
+      why: "'It costs nothing' is one of the most common tricks there is. Skipping the learning feels free today and charges you later when you actually need to know it. Hidden costs are still costs." },
+    { text: "A free app on your tablet keeps showing ads and asking you to buy things.",
+      ask: "It cost no money — so what IS it costing? Name it.",
+      answer: "Your attention and time, plus a constant pull to spend money inside it.",
+      why: "Free-of-money is not the same as free. The app farms your attention and tries to turn it into money. Notice what's being taken even when your wallet stays shut — that's the real cost." },
+    { text: "Someone offers to do your chore for you today, 'as a favor.'",
+      ask: "Favors can have a hidden cost too. What might this one cost you later?",
+      answer: "They may expect a favor back, or you skip learning to do it yourself.",
+      why: "Even kindness can carry a quiet cost — an unspoken 'you owe me,' or missing the chance to get good at something. You don't have to refuse help. Just SEE the cost so it doesn't surprise you." },
+    { text: "A store gives away free samples at the door.",
+      ask: "Why would a store give food away? What are they really after?",
+      answer: "They hope a taste makes you want to buy — the sample is bait, not a gift.",
+      why: "Almost nothing is given to you for free with no reason. The sample costs the store a little, hoping to earn a lot back from you. Ask 'what's in it for them?' — there's always an answer." }
+  ],
+  haveItAll: [
+    { text: "\"Eat all the candy you want AND stay healthy — easy!\"",
+      ask: "Can you really have both? Where does this 'both' break?",
+      answer: "No — too much candy isn't healthy. You have to trade some candy for health, or the reverse.",
+      why: "When someone promises you BOTH sides of a real trade-off, your ears should perk up. Some things genuinely pull against each other. 'Have it all' is usually a wish dressed up as a promise." },
+    { text: "An ad: \"Spend more time on your phone AND get more done!\"",
+      ask: "Do those two really go together, or is one stealing from the other?",
+      answer: "Usually one steals from the other — more phone often means less actually done.",
+      why: "Watch for 'both' claims that quietly fight each other. The hours are the same hours. When something promises you two things that compete for the same time, one of them is going to lose." },
+    { text: "\"Buy now AND save money!\" shouts the sale sign.",
+      ask: "Can buying ever SAVE money? When is 'both' just a trick?",
+      answer: "Spending isn't saving. You only 'save' vs. a price you might never have paid anyway.",
+      why: "Stores love to mash 'spend' and 'save' into one happy word. But money that leaves your pocket is spent, full stop. The only real save is the thing you DIDN'T buy. Don't let a sign do your math." },
+    { text: "\"You can stay up super late AND feel great in the morning!\"",
+      ask: "Is this a real 'both,' or are they hiding a trade? Which one gives?",
+      answer: "It's a hidden trade — less sleep usually means a rougher morning. You can't fully have both.",
+      why: "Real trade-offs don't disappear because someone says 'and.' Your body needs sleep; that need doesn't vanish. When a promise ignores a real cost, the cost is still there waiting — it just got hidden." },
+    { text: "A toy is advertised as \"the cheapest AND the best one out there.\"",
+      ask: "Cheapest and best at the same time — is that usually real? What's the catch?",
+      answer: "Rarely. Cheap usually trades off quality. 'Best' costs something — if not money, then something else.",
+      why: "Best things usually cost more for a reason. 'Cheapest AND best' is a flag to check carefully, not to trust on sight. Someone is hoping you'll hear 'both' and skip the questions. Don't skip them." }
+  ]
+};
+
+/* ---- trade_offs layout (mirrors says_who row layout) ---- */
+function toRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function toRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    giveUp: "WHAT DO YOU GIVE UP?", worthIt: "IS IT WORTH IT?",
+    noFree: "NOTHING IS FREE", haveItAll: "\"HAVE IT ALL\" TRAP"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The choice / situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
