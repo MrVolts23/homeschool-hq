@@ -7827,6 +7827,303 @@ function toRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — WONDER & WHY (grown-up reads aloud)
+   The critical-thinking library was locked to Grade 1+ (readers).
+   Oakley (4/K) and other pre-readers had almost no sovereign-
+   thinking sheet of their own. This is a READ-ALOUD worksheet:
+   the grown-up reads the tiny scene + question out loud, the child
+   answers by TALKING, DRAWING, or CIRCLING/POINTING — no reading
+   or writing required. The child does the thinking; the paper just
+   holds the prompt and a big space for their answer.
+
+   Sovereign, curiosity-first voice: there's no "right answer to
+   memorize" here — we want the child's OWN guess and, above all,
+   the word "because". Every item has a grown-up script line so the
+   parent knows how to ask and how to honour a real reason instead
+   of steering toward a "correct" one. Modes:
+     wonder    — "I wonder why...?" first-principles curiosity
+     whatIf    — "what would happen if...?" prediction / imagination
+     whichOne  — circle/point: which doesn't belong & WHY (pre-logic)
+     noticing  — "what do you see / hear?" close observation
+     mixed     — a bit of each
+   Young-only: capped at Grade 1 in TEMPLATE_MAX_GRADE below.
+   Deterministic, never calls AI. Mirrors the pdf* helper layout.
+============================================================ */
+window.TEMPLATES.wonder_why = {
+  id: "wonder_why",
+  label: "Wonder & Why (grown-up reads aloud)",
+  subject: "reading",
+  grades: ["K", "1"],
+  topicHint: "Pre-reader critical thinking & curiosity (read-aloud)",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking skill",
+      options: [
+        { value: "wonder",   label: "I wonder WHY? (curiosity / first-principles)" },
+        { value: "whatIf",   label: "What would happen if...? (predict / imagine)" },
+        { value: "whichOne",  label: "Which one is different \u2014 and why? (circle it)" },
+        { value: "noticing", label: "What do you notice? (look & listen closely)" },
+        { value: "mixed",    label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of questions", default: 6, min: 3, max: 10 },
+    { id: "drawBox", type: "boolean", label: "Give a big box to draw the answer in", default: true },
+    { id: "showScript", type: "boolean", label: "Print the grown-up read-aloud script under each", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(3, Math.min(10, parseInt(m.count, 10) || 6));
+    const modes = m.mode === "mixed"
+      ? ["wonder", "whatIf", "whichOne", "noticing"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = wwShuffle(WW_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return {
+      items,
+      drawBox: m.drawBox !== false,
+      showScript: m.showScript !== false,
+      modifiers: m
+    };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Wonder & Why";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "A read-aloud page \u2014 for a grown-up and a thinker who can't read yet. Read the little scene and the question OUT LOUD. Then let the child answer however they like: talk it out, draw it, or point/circle. There is no answer to memorize here. What we're really after is one magic word \u2014 \u201cbecause.\u201d Whatever they guess, ask \u201cwhy do you think so?\u201d and take their reason seriously. A kid who can say WHY is learning to think for themselves, not just repeat what they're told.",
+      y, pageW, margin
+    );
+
+    content.items.forEach((it, idx) => {
+      const needed = wwRowHeight(doc, it, pageW - margin * 2, content.drawBox, content.showScript, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = wwRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.drawBox, content.showScript, opts.showAnswers);
+      y += 14;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- wonder_why content banks ---- */
+function wwShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { scene, ask, script, think }
+//   scene  = the tiny picture-in-words the grown-up sets up (large print)
+//   ask    = the question to ask the child (large print)
+//   script = grown-up coaching line: how to ask + how to honour a real reason
+//   think  = "answer key" for the grown-up: NOT a right answer, but the KIND
+//            of thinking to listen for + a good follow-up "why"
+const WW_BANKS = {
+  wonder: [
+    { scene: "The sky is blue in the day, and dark at night.",
+      ask: "Why do you think the sky changes?",
+      script: "Ask it slowly, then wait \u2014 let them guess anything. When they answer, ask \u201cwhy do you think that?\u201d Don't correct; get their reason.",
+      think: "Any guess is good \u2014 you're listening for a chain of thinking (\u201cthe sun goes away\u2026\u201d), not the science. Reward \u201cbecause.\u201d" },
+    { scene: "Ice is hard and cold. If you hold it, it turns into water.",
+      ask: "Why do you think the ice melts in your hand?",
+      script: "Let them touch a real ice cube if you can. Ask, then ask \u201cwhat is your hand doing to it?\u201d",
+      think: "Aim for \u201cmy hand is warm.\u201d First-principles win: warm makes cold things change. Praise noticing their OWN hand as the cause." },
+    { scene: "When you drop a ball, it always falls DOWN. Never up.",
+      ask: "Why do you think it never falls up?",
+      script: "Try it together first. Then ask. Any theory is welcome \u2014 the point is that they NOTICED a rule that never breaks.",
+      think: "You want wonder, not the word \u201cgravity.\u201d Listen for \u201cit always\u2026\u201d \u2014 spotting a rule that's always true is real thinking." },
+    { scene: "Plants stay in one spot. They can't walk to find food or water.",
+      ask: "Why do you think a plant doesn't need to walk around?",
+      script: "Ask what a plant eats and drinks. Guide gently with \u201cwhere does it get water?\u201d if they're stuck.",
+      think: "Great answers connect: sun + rain come TO the plant, so it doesn't have to go get them. Honour any \u201cbecause the sun/rain comes.\u201d" },
+    { scene: "You have a shadow on a sunny day. On a cloudy day, it hides.",
+      ask: "Why do you think your shadow goes away when it's cloudy?",
+      script: "Do it outside if you can. Ask what makes a shadow. Follow up: \u201cwhat is the cloud doing to the sun?\u201d",
+      think: "Listen for the link: no bright sun = no shadow. A kid saying \u201cthe cloud covers the sun\u201d has built a real cause-and-effect." },
+    { scene: "Your tummy makes a growly noise when you are hungry.",
+      ask: "Why do you think your tummy talks to you?",
+      script: "Ask what the growl is trying to tell them. There's no wrong guess \u2014 you're teaching that the BODY sends signals.",
+      think: "The idea to celebrate: your body tells you what it needs. \u201cIt says feed me\u201d is perfect \u2014 reading your own signals is sovereignty." }
+  ],
+  whatIf: [
+    { scene: "Pretend it rained candy instead of water for one whole week.",
+      ask: "What would happen? Tell me or draw it.",
+      script: "Let them run wild first, then sneak in \u201cwould anything go wrong?\u201d to stretch it past \u201cyay candy.\u201d",
+      think: "You want them to follow the idea forward \u2014 sticky streets, no water for plants. Prediction + consequences = real thinking." },
+    { scene: "Imagine everybody in the world was exactly the same and liked the same things.",
+      ask: "What would that be like? Would you like it?",
+      script: "Ask gently. Follow up \u201cwhat would we lose?\u201d Let them decide \u2014 don't hand them the answer.",
+      think: "The seed here is that different is good and it's fine to want your own things. Any honest opinion + a reason is the goal." },
+    { scene: "What if you had NO bedtime and could stay up as long as you wanted?",
+      ask: "What would happen the next day? Why?",
+      script: "This one's fun \u2014 let them imagine it, then ask \u201chow would you feel in the morning?\u201d Let THEM find the trade-off.",
+      think: "You're planting cause \u2192 effect and trade-offs: fun now, tired later. If they reach \u201cI'd be tired,\u201d that's them reasoning it out." },
+    { scene: "Imagine your shoes were on the wrong feet all day.",
+      ask: "What would you notice? What would you do?",
+      script: "Ask what their feet would tell them. The lesson: your body notices when something's off \u2014 trust that feeling.",
+      think: "Listen for \u201cit would feel weird / hurt, so I'd fix it.\u201d Noticing discomfort and acting on it is a life skill, not a wrong answer." },
+    { scene: "What if you planted one little seed in a cup of dirt by a window?",
+      ask: "What do you think would happen over many days?",
+      script: "If you can, actually plant one. Ask what it needs. Predict together, then check reality later.",
+      think: "You want a prediction (\u201cit grows!\u201d) and ideally what it needs (water, sun). Best of all: \u201clet's find out\u201d \u2014 testing beats guessing." },
+    { scene: "Pretend animals could talk to us for one day.",
+      ask: "Who would you ask a question, and what would you ask?",
+      script: "Open and playful. Whatever they pick, ask \u201cwhy them?\u201d \u2014 the reason is the thinking.",
+      think: "No wrong answers \u2014 you're rewarding curiosity and a reason behind a choice. \u201cThe dog, because I want to know if he likes his food\u201d = gold." }
+  ],
+  whichOne: [
+    { scene: "Three of these can FLY, one cannot: a bird, a bee, an airplane, a fish.",
+      ask: "Which one is different? Circle it. Then tell me WHY.",
+      script: "Read all four. Let them point or circle. The circle isn't the win \u2014 the \u201cwhy\u201d is. Ask \u201chow did you know?\u201d",
+      think: "Answer: the fish (it swims, doesn't fly). But accept any answer with a solid reason \u2014 a good WHY beats the \u201cexpected\u201d pick." },
+    { scene: "Three of these are things you EAT, one is not: an apple, a rock, a banana, bread.",
+      ask: "Which one does NOT belong? Circle it and say why.",
+      script: "Read them out. Let them decide, then ask the reason. Praise the reason more than the circle.",
+      think: "Answer: the rock (you can't eat it). The skill is sorting by a rule (\u201cfood vs. not food\u201d) and saying the rule out loud." },
+    { scene: "Three make LIGHT, one does not: the sun, a lamp, a candle, a spoon.",
+      ask: "Which one is the odd one out? Circle it. Why?",
+      script: "Read slowly. Ask which ones you could see by in the dark. Let them reason to the spoon.",
+      think: "Answer: the spoon. Listen for the grouping rule (\u201cthese give light\u201d). Naming the group is the thinking, not just pointing." },
+    { scene: "Three of these have WHEELS, one does not: a car, a bike, a boat, a bus.",
+      ask: "Which one is different? Circle it and tell me why.",
+      script: "Read all four. Let them picture each. Ask \u201cwhat do the other three have?\u201d if stuck.",
+      think: "Answer: the boat (floats, no wheels). A kid who says \u201cthe others roll\u201d has found the shared rule \u2014 that's the goal." },
+    { scene: "Three of these are COLD, one is hot: snow, ice, a campfire, a popsicle.",
+      ask: "Which one does not belong? Circle it. Why not?",
+      script: "Read them out with feeling (brrr / hot!). Let them sort by feel. Ask them to say the rule.",
+      think: "Answer: the campfire. You're listening for \u201cthe others are cold.\u201d Sorting by a shared quality is early logic." },
+    { scene: "Three of these you do at NIGHT, one you do in the morning: sleep, dream, wake up, put on pajamas.",
+      ask: "Which one is different? Circle it and say why.",
+      script: "Read gently. This one's about time-of-day. Ask \u201cwhen do you do that one?\u201d",
+      think: "Answer: wake up (morning). The skill is grouping by WHEN. Accept a well-reasoned surprise \u2014 the reason is what counts." }
+  ],
+  noticing: [
+    { scene: "Look out a window right now, or picture the room around you.",
+      ask: "Tell me three things you can SEE. Draw one.",
+      script: "Give them time to really look. Push gently past the first thing: \u201cwhat else? what's the smallest thing you see?\u201d",
+      think: "You're training close attention \u2014 the more they notice, the harder they're looking. \u201cLook closer\u201d is the whole game." },
+    { scene: "Close your eyes for a moment and just listen.",
+      ask: "What sounds can you hear? Which is loudest?",
+      script: "Do it together, eyes shut, ten seconds. Then ask. Then ask \u201cwhich was quietest?\u201d to stretch it.",
+      think: "The win is noticing sounds they usually tune out. Ranking loud/quiet adds comparing \u2014 a bonus bit of thinking." },
+    { scene: "Look at your own two hands.",
+      ask: "What do you notice? How are they the same and different?",
+      script: "Let them study their hands. Ask \u201care they exactly the same?\u201d Guide to lines, fingers, one bigger.",
+      think: "Great answers spot small differences (\u201cthis thumb is\u2026\u201d). \u201cThe same\u201d usually means \u201cI didn't look long enough\u201d \u2014 nudge closer." },
+    { scene: "Think about the last thing you ate today.",
+      ask: "Was it soft or crunchy? Warm or cold? What did it taste like?",
+      script: "Slow them down to remember details. Ask one sense at a time. There are no wrong memories.",
+      think: "You're building the habit of describing with the senses. Every detail they add is sharper noticing \u2014 that's the skill." },
+    { scene: "Look at the clothes you are wearing right now.",
+      ask: "What colors do you see? What is the softest part?",
+      script: "Let them look down and touch. Ask \u201cwhich part is your favorite and why?\u201d",
+      think: "Observation + a reasoned preference. \u201cThe hood, because it's cozy\u201d = noticing plus a WHY. Celebrate the why." },
+    { scene: "Picture your favorite person's face in your mind.",
+      ask: "What do you remember about it? Draw the part you remember best.",
+      script: "Warm and open. Ask what made them think of that part. Any memory is right.",
+      think: "This is noticing from memory \u2014 and what stands out to them tells you what they value. Follow with \u201cwhy that part?\u201d" }
+  ]
+};
+
+/* ---- wonder_why layout ---- */
+function wwRowHeight(doc, it, w, drawBox, showScript, showAnswers) {
+  const bw = w - 24;
+  doc.setFontSize(13);
+  const sceneLines = doc.splitTextToSize(it.scene, bw);
+  doc.setFontSize(12);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  let h = 20;                                  // number + top gap
+  h += sceneLines.length * 16 + 6;             // large scene print
+  h += askLines.length * 15 + 8;               // large question print
+  if (showScript) {
+    doc.setFontSize(9);
+    const scriptLines = doc.splitTextToSize("Grown-up: " + it.script, bw);
+    h += scriptLines.length * 11 + 6;
+  }
+  if (showAnswers) {
+    doc.setFontSize(9.5);
+    const thinkLines = doc.splitTextToSize("Listen for: " + it.think, bw);
+    h += thinkLines.length * 12 + 6;
+  } else if (drawBox) {
+    h += 96;                                   // big draw / answer box
+  } else {
+    h += 26;                                   // just a talk-it-out line
+  }
+  return h + 10;
+}
+
+function wwRenderRow(doc, it, num, x, y, w, drawBox, showScript, showAnswers) {
+  const modeTag = {
+    wonder: "I WONDER WHY?", whatIf: "WHAT IF...?",
+    whichOne: "CIRCLE THE DIFFERENT ONE", noticing: "WHAT DO YOU NOTICE?"
+  }[it.mode] || "";
+
+  // Number dot + mode tag
+  pdfDrawNumberedDot(doc, String(num), x + 9, y + 9, 9);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 24, y + 12);
+  }
+  let cy = y + 28;
+  const bx = x + 24;
+  const bw = w - 24;
+
+  // Scene (large print, the grown-up reads this)
+  doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(20, 20, 20);
+  const sceneLines = doc.splitTextToSize(it.scene, bw);
+  doc.text(sceneLines, bx, cy);
+  cy += sceneLines.length * 16 + 6;
+
+  // Question (large print)
+  doc.setFont("helvetica", "normal"); doc.setFontSize(12); doc.setTextColor(33, 130, 130);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 15 + 8;
+  doc.setTextColor(20, 20, 20);
+
+  // Grown-up script line
+  if (showScript) {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(120, 120, 120);
+    const scriptLines = doc.splitTextToSize("Grown-up: " + it.script, bw);
+    doc.text(scriptLines, bx, cy);
+    cy += scriptLines.length * 11 + 6;
+    doc.setTextColor(20, 20, 20);
+  }
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const thinkLines = doc.splitTextToSize("Listen for: " + it.think, bw);
+    doc.text(thinkLines, bx, cy);
+    cy += thinkLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else if (drawBox) {
+    const boxH = 90;
+    doc.setDrawColor(170); doc.setLineWidth(0.6);
+    doc.roundedRect(bx, cy, bw, boxH, 6, 6, "S");
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(180, 180, 180);
+    doc.text("draw or talk about your answer here", bx + 8, cy + 12);
+    doc.setTextColor(20, 20, 20);
+    cy += boxH + 6;
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 12, x + w, cy + 12);
+    cy += 26;
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
@@ -7838,6 +8135,7 @@ const GRADE_SEQ = ["K", "1", "2", "3", "4", "5", "6"];
 function gSeqRank(g) { const i = GRADE_SEQ.indexOf(g); return i < 0 ? 0 : i; }
 const TEMPLATE_MAX_GRADE = {
   count_to_10: "1", ways_to_make: "2",
+  wonder_why: "1",
   tracing_shapes: "1", tracing_letters_numbers: "3", tracing_words: "3",
   sight_words_practice: "2",
   capitalize_questions: "3", story_middle_end: "3", combine_sentences: "3",
