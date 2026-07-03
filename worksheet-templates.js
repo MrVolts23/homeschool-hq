@@ -8124,6 +8124,295 @@ function wwRenderRow(doc, it, num, x, y, w, drawBox, showScript, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — FAIR? (rules, who made them, and why)
+   The critical-thinking library teaches kids to question ADS,
+   CLAIMS, COSTS, and CAUSES — but nothing yet teaches them to
+   interrogate RULES and AUTHORITY itself. This closes that gap.
+   It is NOT "obey the rule" and NOT "break the rule" — it's the
+   sovereign middle: understand a rule from first principles so
+   the choice about it is genuinely YOURS. Every rule was made by
+   a person, for a reason, and that reason either still holds or
+   it doesn't. A rule you never examined isn't yours — it's just
+   someone else's decision wearing the costume of "the way things
+   are." Modes:
+     whoMadeIt  — every rule has an author; find them, ask their reason
+     whatFor    — what is this rule actually TRYING to do? (purpose)
+     whoBenefits— who does this rule help / who does it cost? (cui bono)
+     isItFair   — same rule, everyone? or bent for some? spot unfairness
+     stillMakesSense — good reason once, but does it still hold NOW?
+     mixed      — a bit of each
+   Deterministic, never calls AI. Mirrors trade_offs row layout.
+============================================================ */
+window.TEMPLATES.fair_rules = {
+  id: "fair_rules",
+  label: "Fair? (rules, who made them & why)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Reasoning about rules, authority, fairness & purpose",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "whoMadeIt",        label: "Who made this rule? (every rule has an author)" },
+        { value: "whatFor",          label: "What's it FOR? (the rule's real job)" },
+        { value: "whoBenefits",      label: "Who does it help / cost? (who benefits)" },
+        { value: "isItFair",         label: "Is it fair? (same rule for everyone?)" },
+        { value: "stillMakesSense",  label: "Does it still make sense? (good reason then — now?)" },
+        { value: "mixed",            label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["whoMadeIt", "whatFor", "whoBenefits", "isItFair", "stillMakesSense"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = frShuffle(FR_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Fair? — rules, who made them & why";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Here's something worth knowing: every rule was made by a PERSON, for a REASON. Rules aren't part of the weather — nobody was born knowing them, someone decided them. That doesn't make rules bad. A lot of rules are smart and keep people safe. But a rule you never looked at isn't really yours — it's just someone else's choice that you're carrying. So for each one, don't just ask \"am I allowed?\" Ask the deeper questions: WHO made it, what is it actually FOR, who does it help, is it the same for everyone, and does the reason still hold TODAY? A rule that passes those questions is one you can keep on purpose. A rule that fails them is worth talking about — calmly, with the grown-up in charge. Understanding the rule is not the same as breaking it.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "RULE: \"No running by the pool.\"  ->  Who made it? The people who run the pool. What's it FOR? So nobody slips on wet tiles and cracks their head. Does the reason still hold? Yes — wet tiles are still slippery. So this rule makes sense, and you'd keep it even if no lifeguard were watching, because YOU understand why. That's the goal: not obeying because you'll get caught, but choosing because you see the reason.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 104);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = frRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = frRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- fair_rules content banks ---- */
+function frShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the rule / situation the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const FR_BANKS = {
+  whoMadeIt: [
+    { text: "\"Bedtime is 8 o'clock.\"",
+      ask: "Who made this rule? Ask them WHY 8, not 7 or 9.",
+      answer: "A grown-up in your home made it — probably so you get enough sleep to feel good the next day.",
+      why: "No rule falls out of the sky. Someone chose it. When you know who chose it and why, you can actually talk about it like a real person — 'here's my reason, what's yours?' — instead of just guessing or grumbling." },
+    { text: "\"You must raise your hand before you speak.\"",
+      ask: "Who decided this, and what problem were they trying to fix?",
+      answer: "A teacher or class leader — so twenty voices don't talk at once and nobody gets heard.",
+      why: "Find the author, find the reason. This one has a real reason: many people in one room can't all talk at once. Knowing that, you can see it's not about power — it's about everyone getting a turn." },
+    { text: "\"No phones at the dinner table.\"",
+      ask: "Who set this rule? Guess the reason they'd give if you asked.",
+      answer: "Usually a parent — so the family actually talks and pays attention to each other.",
+      why: "A rule is a person's decision. Ask them straight: 'what's this for?' Most fair rule-makers can tell you. If someone can't say WHY a rule exists, that itself is worth noticing." },
+    { text: "\"Wash your hands before you eat.\"",
+      ask: "Who's behind this rule, and what did they know that made them make it?",
+      answer: "Grown-ups made it because germs on your hands can make you sick — you can't see them, but they're there.",
+      why: "Sometimes the rule-maker knows something you can't see yet — like invisible germs. That's a rule made FROM knowledge, not bossiness. Learning the reason turns 'because I said so' into 'oh, that's actually smart.'" },
+    { text: "\"Stop at a red light.\"",
+      ask: "Who made this rule, and why would total strangers all agree to follow it?",
+      answer: "People who plan roads made it; everyone follows it so cars don't crash into each other.",
+      why: "Some rules everyone agrees to because they protect everyone at once — if we all stop at red, we all get home safe. That's a rule that earns its keep. Knowing the reason is why you'd stop even at 3am on an empty road." }
+  ],
+  whatFor: [
+    { text: "\"Line up single file in the hallway.\"",
+      ask: "What is this rule actually trying to DO? Name its job.",
+      answer: "Keep a crowd moving without crashing, shoving, or losing anyone.",
+      why: "Every rule has a job. Once you can say the job out loud, you can check if the rule actually does it. If the rule's job is 'move safely,' then the rule makes sense in a crowd — and maybe less so when you're the only one there." },
+    { text: "\"Helmets on when you ride your bike.\"",
+      ask: "What's the real job of this rule? What is it protecting?",
+      answer: "It's protecting your head — the one part you really can't replace — if you crash.",
+      why: "The job here is huge: your brain. When a rule's job is 'stop something you can never undo,' that's a rule worth keeping even when it's a little annoying. Big, permanent risks are exactly what good rules guard against." },
+    { text: "\"Say please and thank you.\"",
+      ask: "What's this rule FOR? Is it just being fussy, or does it do a job?",
+      answer: "It's for treating people like they matter — small words that keep things kind.",
+      why: "Not every rule is about safety. Some do the job of keeping people friendly to each other. That's a real job too. Ask 'what does this rule build?' — this one builds people wanting to help you back." },
+    { text: "\"Don't spend all your money the day you get it.\"",
+      ask: "What is this rule trying to do for you? Who does it serve?",
+      answer: "It's trying to leave you options later instead of being broke — and it serves YOU, not someone else.",
+      why: "The best kind of rule is one whose job is to protect YOU from a future you can't see yet. Notice: this rule's whole job is your own benefit. Those are worth keeping even when nobody's checking." },
+    { text: "\"Take turns on the swing.\"",
+      ask: "What's the job of this rule? What would happen with no rule at all?",
+      answer: "Its job is to share fairly; with no rule, the biggest or pushiest kid just hogs it.",
+      why: "Here's a secret about many rules: without them, the strongest or loudest wins by default. A 'take turns' rule exists to protect the small and patient from the big and pushy. That's the rule doing an honest job." }
+  ],
+  whoBenefits: [
+    { text: "A store rule: \"You must walk all the way to the back for milk.\"",
+      ask: "Who does this rule help — you, or the store? Why is it set up that way?",
+      answer: "The store — they put milk in back so you walk past lots of other stuff and buy more.",
+      why: "Ask of any rule: who wins? Sometimes a 'rule' is really just a setup that helps the person who made it, not you. That's not evil — but you should SEE it, so you decide what to buy instead of the store deciding for you." },
+    { text: "A game says: \"Wait 30 minutes, OR pay $2 to keep playing now.\"",
+      ask: "Who does this rule benefit? What is it really trying to get from you?",
+      answer: "The game company — the wait is on purpose, built to make you pay to skip it.",
+      why: "Some rules are designed to be annoying so you'll pay to escape them. That's the rule working for THEM, against your wallet. The moment you see 'this rule exists to squeeze me,' you're back in charge — you can just wait, or walk away." },
+    { text: "\"Kids can't stay up late, but I (the grown-up) can.\"",
+      ask: "Who does this rule help? Is there a fair reason for the difference?",
+      answer: "It can be fair — kids' growing bodies need more sleep, and adults have grown-up jobs to do.",
+      why: "A rule being different for different people isn't automatically unfair — sometimes there's a real reason (kids and adults genuinely need different sleep). The test is: is there an HONEST reason for the difference, or is it just 'because I'm bigger'?" },
+    { text: "\"Only buy the brand-name shoes, the others aren't cool.\"",
+      ask: "Who benefits if you believe this 'rule'? Who's telling you it?",
+      answer: "The brand and the ads — they benefit when you pay extra for a name.",
+      why: "Watch out for 'rules' that aren't real rules at all — just ideas someone planted so you'd spend more or feel less. Ask 'who benefits if I believe this?' Nobody made you agree to that one. You can un-agree." },
+    { text: "\"Finish your whole plate before you leave the table.\"",
+      ask: "Who does this rule serve? Could it ever work against you?",
+      answer: "Meant to serve you (don't waste, eat enough) — but forcing food when you're full can work against you.",
+      why: "Even a well-meant rule can have a spot where it stops helping. A rule made to stop waste is good — but eating past full isn't good for you either. Naming who a rule helps AND where it stops helping is how you talk about it fairly." }
+  ],
+  isItFair: [
+    { text: "\"Everyone gets one cookie.\" — then one kid quietly takes three.",
+      ask: "Is the RULE fair? Is what happened fair? What's the difference?",
+      answer: "The rule is fair (same for all); what happened isn't — someone broke it and got more.",
+      why: "A fair rule and a fair outcome aren't the same thing. The rule treated everyone equally; the cheating didn't. Notice which one broke down. Fairness lives in whether the rule is actually FOLLOWED, not just written." },
+    { text: "\"You have to share your toys, but your sibling never has to share theirs.\"",
+      ask: "Is this fair? What would make it fair?",
+      answer: "Not fair as-is — the same rule should apply both ways. Fair = share goes both directions.",
+      why: "A quick fairness test: does the rule point the same way at everyone? If 'you share' but 'they don't,' the rule isn't really about sharing — it's just aimed at you. Fair rules face everyone equally." },
+    { text: "\"The winner of the race is whoever the judge LIKES best.\"",
+      ask: "Is this a fair rule for a race? Why or why not?",
+      answer: "Not fair — a race should be won by who's fastest, not who's liked. The rule ignores the real measure.",
+      why: "A fair rule measures the thing it's supposed to measure. A race is about speed; if the 'rule' is really about favorites, it's a fake rule wearing a race costume. Ask: is this rule measuring what it claims to?" },
+    { text: "\"New kids have to earn their turn; the rest already have theirs.\"",
+      ask: "Is this fair to the new kid? What's a fairer version?",
+      answer: "Usually not fair — a fairer rule gives newcomers a turn too, not just the old crowd.",
+      why: "Rules can quietly protect whoever got there first. That's worth spotting. 'You have to earn what we were handed' isn't fairness — it's a head start dressed up as a rule. A fair version treats the new kid by the same measure." },
+    { text: "\"Bigger kids go first because they're bigger.\"",
+      ask: "Is 'because they're bigger' a fair reason? Test it.",
+      answer: "No — being bigger isn't a reason to deserve more; it's just size. That's 'might makes right.'",
+      why: "Here's a big one: 'because I'm bigger/older/stronger' is NOT a real reason for a rule — it's just power. A fair rule stands on a reason that would still make sense if you were the small one. If it only works when you're big, it's not fairness." }
+  ],
+  stillMakesSense: [
+    { text: "A rule from long ago: \"Be home before dark because there are no streetlights.\" Now the street is fully lit.",
+      ask: "Did the rule make sense once? Does the SAME reason still hold now?",
+      answer: "It made sense before lights existed; now that exact reason is weaker — worth a calm talk with the rule-maker.",
+      why: "Rules are made for a time and a reason. When the reason changes, it's fair to ask if the rule should too. That's not being sneaky — that's thinking. The move is to talk to whoever made it, not to just ignore it." },
+    { text: "\"Save this seat for Grandma\" — but Grandma already went home an hour ago.",
+      ask: "The reason for the rule is gone. Does the rule still apply? How would you check?",
+      answer: "The reason left with Grandma, so probably not — but ASK first, don't just assume.",
+      why: "When a rule's reason disappears, the rule usually should too — but the polite, smart move is to check with whoever made it, not decide alone. 'The reason's gone, can I sit here now?' is a great question." },
+    { text: "\"No dessert until you finish dinner\" — on a day you're actually sick and can't eat.",
+      ask: "The rule made sense on normal days. Does it fit THIS day? Why might it not?",
+      answer: "It doesn't fit — the reason (eat your real food first) doesn't work when you're too sick to eat.",
+      why: "Good rules are made for normal days. Weird days sometimes need a rethink — and the reason tells you when. If the WHY behind a rule doesn't apply today, that's exactly the moment to talk it through, calmly, with the grown-up." },
+    { text: "\"Always use a calculator's exact answer\" — but the question just asks about how many buses you need for 53 kids.",
+      ask: "Does following the rule exactly give a sensible answer here? When should the reason bend?",
+      answer: "No — 53 kids at 40 per bus is 1.3 buses, but you can't have 1.3 buses; you need 2. Real life rounds up.",
+      why: "Sometimes a rule (use the exact number) collides with the real reason behind it (get everyone on a bus). When the reason and the rule disagree, the REASON wins. Rules serve reasons, not the other way around." },
+    { text: "\"You've always done homework at the kitchen table\" — but now a baby naps there every afternoon.",
+      ask: "The habit made sense before. Does the situation still fit? What changed?",
+      answer: "The situation changed (a napping baby); the old spot no longer fits, so the habit-rule can change too.",
+      why: "Not every 'rule' is even a rule — some are just habits nobody updated. When the world around a habit changes, it's smart to ask if the habit should. Noticing 'this made sense before, but now?' is first-class thinking." }
+  ]
+};
+
+/* ---- fair_rules layout (mirrors trade_offs row layout) ---- */
+function frRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function frRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    whoMadeIt: "WHO MADE THIS RULE?", whatFor: "WHAT'S IT FOR?",
+    whoBenefits: "WHO BENEFITS?", isItFair: "IS IT FAIR?",
+    stillMakesSense: "DOES IT STILL MAKE SENSE?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The rule / situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
