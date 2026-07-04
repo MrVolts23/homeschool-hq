@@ -8413,6 +8413,276 @@ function frRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   ESTIMATE & MEASURE — "Guess & Check" (math, Gr1-3)
+   Real-world number sense as a THINKING skill, not a fact drill.
+   The loop every item runs: make a reasoned GUESS first, then CHECK
+   it against reality, then honestly notice the gap and ask WHY.
+   That calibration habit — comparing your own prediction to what the
+   world actually does, instead of accepting a handed-down answer — is
+   the same sovereign thread as says_who / nature_detective, applied to
+   quantity, size, distance and time.
+   Modes:
+     howMany  — estimate a count, then count (number sense)
+     howBig   — estimate a size/length with body units, then measure
+     howLong  — estimate a duration, then time it
+     whichMore— reason which is more/bigger WITHOUT measuring, then check
+     mixed    — a bit of each
+   Deterministic, never calls AI. Mirrors says_who / trade_offs row layout.
+============================================================ */
+window.TEMPLATES.estimate_measure = {
+  id: "estimate_measure",
+  label: "Guess & Check (estimate, then measure)",
+  subject: "math",
+  grades: ["1", "2", "3"],
+  topicHint: "Estimation, measurement & number sense",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Estimating skill",
+      options: [
+        { value: "howMany",   label: "How many? (guess a count, then count)" },
+        { value: "howBig",    label: "How big? (guess a size, then measure)" },
+        { value: "howLong",   label: "How long? (guess the time, then time it)" },
+        { value: "whichMore", label: "Which is more? (reason first, then check)" },
+        { value: "mixed",     label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["howMany", "howBig", "howLong", "whichMore"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = emShuffle(EM_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Guess & Check";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "A guess isn't a wild shot in the dark \u2014 it's your best thinking BEFORE you check. For each one, first write your GUESS (your estimate). Then actually CHECK it \u2014 count it, measure it, or time it in the real world. Last, notice: how close were you? A sharp thinker doesn't feel bad about a guess that's off \u2014 they ask WHY, and their next guess gets better. You don't need anyone to tell you the answer. The world will show you if you go look.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "How many steps across the kitchen?  My guess: 10 steps.  Check: I walked it \u2014 8 steps.  How close? Off by 2, pretty good. Why? My steps were bigger than I pictured. Next time I'll guess a little lower. I didn't need to be told \u2014 I found out by walking it.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 88);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = emRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = emRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- estimate_measure content banks ---- */
+function emShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { prompt, checkHow, answer, why }
+//   prompt   = the thing to estimate (the child writes a guess)
+//   checkHow = the real-world action that settles it (the "check")
+//   answer   = a plausible real-world result / range (answer key only)
+//   why      = the reasoning, plain kid language, sovereign voice
+const EM_BANKS = {
+  howMany: [
+    { prompt: "How many books are on the biggest shelf in the house?",
+      checkHow: "Count them one by one, sliding your finger along.",
+      answer: "Depends on the shelf \u2014 often 15 to 40. Whatever YOUR count says is the truth.",
+      why: "Guessing a count first trains your eye. Then counting proves it. If your guess was way off, that's useful \u2014 it tells you your eye stretched or shrank the pile. Next guess, better." },
+    { prompt: "How many spoons are in the kitchen drawer?",
+      checkHow: "Open the drawer and count every spoon.",
+      answer: "Usually somewhere around 8 to 20. Your count is the answer.",
+      why: "You can KNOW small counts for sure \u2014 just count. Don't trust the feeling of 'a lot'; a lot could be 9 or 90. The count settles it every time." },
+    { prompt: "How many steps to walk from the front door to your bedroom?",
+      checkHow: "Walk it and count your steps out loud.",
+      answer: "Whatever you count \u2014 and it changes with big vs. little steps.",
+      why: "Here's the trick: the answer depends on YOUR step size. That's a real discovery \u2014 the number isn't fixed, it depends on the tool you measure with. Try big steps and little steps and watch the number change." },
+    { prompt: "How many words are in your favorite short storybook page?",
+      checkHow: "Point to each word as you count.",
+      answer: "Often 30 to 100 on a page. Your count wins.",
+      why: "A page 'looks' like a certain amount, but eyes fool you. Counting turns a feeling into a fact. Now you have a real number to compare the next page to." },
+    { prompt: "How many red things can you find in this room?",
+      checkHow: "Look around slowly and count each red thing you spot.",
+      answer: "More than you first think \u2014 keep looking, small things hide.",
+      why: "First guesses undercount, because you only counted the obvious ones. Looking closer almost always finds more. That gap between your quick guess and your careful count is worth noticing." }
+  ],
+  howBig: [
+    { prompt: "How many of YOUR hand-widths across is the kitchen table?",
+      checkHow: "Lay your hand flat and 'walk' it across the table, counting.",
+      answer: "Maybe 6 to 12 hands \u2014 and a grown-up's hands give a different number.",
+      why: "Your hand is a measuring tool you always carry. But notice: a bigger hand gives a smaller number for the SAME table. Size depends on the ruler \u2014 that's why the world invented standard units everyone shares." },
+    { prompt: "How many of your feet (heel-to-toe) long is your bedroom?",
+      checkHow: "Walk heel-to-toe across the room, counting each foot.",
+      answer: "Often 10 to 20 of your feet. Your count is the measure.",
+      why: "Heel-to-toe is an old, real way to measure \u2014 that's literally where the word 'foot' comes from. You just did what people did before rulers. The number is real, and it's tied to YOUR foot." },
+    { prompt: "Which is taller: the fridge, or you with your arm stretched up?",
+      checkHow: "Stand next to it, reach up, and see.",
+      answer: "Try it \u2014 the fridge is often close to a reaching kid. Your look decides.",
+      why: "Guess with your eyes first, then stand and check. Standing beside something beats guessing from across the room \u2014 your eyes shrink faraway things and stretch close ones." },
+    { prompt: "How many cups of water fill the biggest pot in the kitchen?",
+      checkHow: "Fill a cup, pour it in, and count how many it takes.",
+      answer: "Maybe 6 to 16 cups. Pouring and counting settles it.",
+      why: "You can't eyeball volume well \u2014 tall and skinny fools everyone. The only honest way is to pour and count. Your guess vs. the real count teaches you how deep 'big' really is." },
+    { prompt: "How far can you jump from a standing start \u2014 in your own feet?",
+      checkHow: "Mark your start, jump, then measure the gap heel-to-toe.",
+      answer: "Often 3 to 6 of your own feet. Measure it and see.",
+      why: "Guess before you jump \u2014 then jump and measure. People almost always guess they can jump farther than they do. Noticing that gap honestly is how you learn what your body can really do." }
+  ],
+  howLong: [
+    { prompt: "How many seconds can you hold your breath? (Guess first!)",
+      checkHow: "Have someone count seconds out loud while you hold it.",
+      answer: "Often 15 to 40 seconds for a kid. The count is the truth.",
+      why: "Your guess about your own body is just a feeling until you test it. Timing it turns the feeling into a real number \u2014 and lots of kids are surprised they last longer OR shorter than they thought." },
+    { prompt: "How long does it take to walk to the mailbox and back?",
+      checkHow: "Time it with a clock or count 'one-Mississippi' out loud.",
+      answer: "Maybe 30 seconds to a few minutes. Timing it settles it.",
+      why: "Time feels stretchy \u2014 a boring wait feels long, a fun trip feels short. That's why we CHECK with a clock instead of trusting the feeling. The clock doesn't get bored." },
+    { prompt: "How many times can you clap in 10 seconds? (Guess, then try.)",
+      checkHow: "Have someone time 10 seconds while you clap and count.",
+      answer: "Often 25 to 50 claps. Your count is the answer.",
+      why: "This one flips it: the TIME is fixed, and you find out how much fits in it. Guessing first, then counting, shows you how fast 10 seconds really goes \u2014 usually faster than you'd think." },
+    { prompt: "How long does it take you to tidy up all your toys?",
+      checkHow: "Start a timer, tidy, and stop it when you're done.",
+      answer: "Whatever the timer says \u2014 often less than the dread makes it feel.",
+      why: "The job usually FEELS longer than it is. Timing it once gives you the real number \u2014 and knowing 'it's only 4 minutes' makes it easier to just start. You measured your way out of the dread." },
+    { prompt: "How long can you balance on one foot? (Guess your best.)",
+      checkHow: "Have someone count seconds while you balance.",
+      answer: "Often 10 to 60 seconds. Time it and see \u2014 then try to beat it.",
+      why: "A guess about yourself is a hypothesis. Testing it gives you a real starting number, and now you can practice and watch it grow. That's you measuring your own progress \u2014 no report card needed." }
+  ],
+  whichMore: [
+    { prompt: "Which has more: a handful of rice, or a handful of big marshmallows?",
+      checkHow: "Count each handful (or line them up) to check.",
+      answer: "Way more grains of rice \u2014 small things pack in by the hundreds.",
+      why: "'A handful' is the same SPACE, but tiny things fill it with far more pieces. Big things look like 'more' but are fewer. Your eyes judge size; counting judges number \u2014 and they don't always agree." },
+    { prompt: "Which is more: 3 quarters, or 8 pennies? (Reason it out first.)",
+      checkHow: "Add up the value of each \u2014 count in cents.",
+      answer: "3 quarters = 75\u00a2, 8 pennies = 8\u00a2. The 3 coins are worth more.",
+      why: "MORE COINS isn't more money. A few big-value coins beat a pile of small ones. Never let 'a bigger pile' fool you \u2014 what matters is the value, not the count." },
+    { prompt: "Which is taller when poured out: a tall skinny glass, or a short wide cup \u2014 same water?",
+      checkHow: "Pour the same water into each and compare, then pour back.",
+      answer: "Same water either way \u2014 the tall glass just LOOKS like more.",
+      why: "This one's a trick your eyes fall for every time. Tall-and-skinny screams 'more' but it's the same water. Pouring it back and forth proves the amount didn't change \u2014 only the shape did." },
+    { prompt: "Which pile has more: 10 stacked blocks, or 10 blocks spread out in a line?",
+      checkHow: "Count both piles.",
+      answer: "Exactly the same \u2014 10 is 10 no matter how it's arranged.",
+      why: "Spreading things out makes them LOOK like more, but the number never changed. Counting proves it. People (and ads) use 'spread out to look bigger' all the time \u2014 now you'll spot it." },
+    { prompt: "Which is farther: across your yard, or around the whole outside of your house?",
+      checkHow: "Pace off each one heel-to-toe and compare the counts.",
+      answer: "Around the house is usually much farther \u2014 four sides add up.",
+      why: "'Around' means adding up every side, so it's almost always more than straight 'across.' Guessing first, then pacing it, shows you how much the going-around adds \u2014 a real number, not a feeling." }
+  ]
+};
+
+/* ---- estimate_measure layout (mirrors says_who row layout) ---- */
+function emRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const promptLines = doc.splitTextToSize(it.prompt, w - 24);
+  const checkLines = doc.splitTextToSize("Check it: " + it.checkHow, w - 24);
+  let h = 16;
+  h += promptLines.length * 13 + 6;
+  h += checkLines.length * 12 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 20;              // "My guess:" line
+    h += 20;              // "What I found:" line
+    if (explain) h += 22; // "How close? Why?" line
+  }
+  return h + 8;
+}
+
+function emRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    howMany: "HOW MANY?", howBig: "HOW BIG?",
+    howLong: "HOW LONG?", whichMore: "WHICH IS MORE?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The thing to estimate
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const promptLines = doc.splitTextToSize(it.prompt, bw);
+  doc.text(promptLines, bx, cy);
+  cy += promptLines.length * 13 + 6;
+
+  // How to check it
+  doc.setFont("helvetica", "italic"); doc.setFontSize(9.5); doc.setTextColor(70, 70, 70);
+  const checkLines = doc.splitTextToSize("Check it: " + it.checkHow, bw);
+  doc.text(checkLines, bx, cy);
+  cy += checkLines.length * 12 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    // "My guess:" line
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(90, 90, 90);
+    doc.text("My guess:", bx, cy + 2);
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx + doc.getTextWidth("My guess: ") + 6, cy + 4, x + w, cy + 4);
+    cy += 20;
+    // "What I found:" line
+    doc.text("What I found:", bx, cy + 2);
+    doc.line(bx + doc.getTextWidth("What I found: ") + 6, cy + 4, x + w, cy + 4);
+    cy += 20;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("How close? Why?", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("How close? Why? ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
