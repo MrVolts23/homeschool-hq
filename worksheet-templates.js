@@ -8683,6 +8683,270 @@ function emRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — WHOSE STORY IS THIS? (framing & spin literacy)
+   Sovereign-thinking: the deepest manipulation isn't lying — it's
+   telling only-true things, but PICKED and WORDED to steer you.
+   Same facts, two tellings. The skill: notice the loaded words,
+   notice what got left OUT, and ask "who wants me to feel this
+   way, and what am I NOT being shown?" Nobody lied — and you were
+   still moved. That's the trick worth seeing.
+============================================================ */
+window.TEMPLATES.whose_story = {
+  id: "whose_story",
+  label: "Whose story is this? (framing & spin)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Framing, word choice & what gets left out",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "twoTellings", label: "Same facts, two tellings (which words steer you?)" },
+        { value: "leftOut",     label: "What got left OUT? (the missing half of the story)" },
+        { value: "loadedWords", label: "Loaded words (spot the word doing the pushing)" },
+        { value: "mixed",       label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 6, min: 3, max: 12 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(3, Math.min(12, parseInt(m.count, 10) || 6));
+    const modes = m.mode === "mixed"
+      ? ["twoTellings", "leftOut", "loadedWords"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = wsStoryShuffle(WS_STORY_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Whose Story Is This?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "The sneakiest way to steer someone is not to lie — it's to tell only TRUE things, but pick which ones and word them just so. Same event, two tellings, and you end up feeling two different ways. A sharp thinker notices the pushy words, notices what got left OUT, and asks: who wants me to feel this, and what am I not being shown? Nobody lied — and you were still moved. That's the trick to catch.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "A: \"The team FINALLY won a game after weeks of losing.\"   B: \"The team won again, keeping their season alive!\"  ->  Both are true — the team won. But A picks 'finally' and 'weeks of losing' to make them look weak; B picks 'again' and 'alive' to make them look strong. Same win. Which words are doing the steering? 'Finally' and 'again.' Ask: what did each teller want me to feel?",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 104);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = wsStoryRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = wsStoryRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 14;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- whose_story content banks ----
+   twoTellings items: { a, b, ask, answer, why }   (a/b = two tellings of the same facts)
+   leftOut items:     { text, ask, answer, why }   (a rosy telling; what's missing?)
+   loadedWords items: { text, ask, answer, why }   (one telling; which word is pushing?)
+*/
+function wsStoryShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+const WS_STORY_BANKS = {
+  twoTellings: [
+    { a: "\"Only 3 kids showed up to the bake sale.\"",
+      b: "\"A close group of 3 kids ran the whole bake sale themselves!\"",
+      ask: "Same 3 kids. Which telling makes it sound like a flop, and which like a win? What word does the steering?",
+      answer: "A ('only') makes it a flop; B ('themselves!') makes it a win. Both true — 3 kids came.",
+      why: "'Only' shrinks it; 'themselves' celebrates it. Nobody lied about the number — they just chose the frame. When someone hands you a feeling, check the bare fact underneath: 3 kids. You decide what that means." },
+    { a: "\"He's already read 4 books this month.\"",
+      b: "\"He's only read 4 books this month.\"",
+      ask: "Same 4 books. One word flips it. Which word, and how does each make you feel about him?",
+      answer: "'Already' makes 4 sound impressive; 'only' makes 4 sound lazy. The fact is identical.",
+      why: "One tiny word — 'already' vs 'only' — decides whether you're proud of him or disappointed. Watch for these little steering words. The number never changed; someone just aimed it at you." },
+    { a: "\"The new park rule bans skateboards to keep little kids safe.\"",
+      b: "\"The new park rule stops older kids from skateboarding where they've always skated.\"",
+      ask: "Both describe the SAME rule. What does each teller want you to feel — and who do they seem to be rooting for?",
+      answer: "A roots for little kids (rule = protection); B roots for skaters (rule = loss). Same rule, two sides shown.",
+      why: "The rule is one thing; each telling shines a light on a different person it affects. Neither is a lie — but each hides the other half. Ask 'who ELSE does this touch?' to see the whole board." },
+    { a: "\"She spent all afternoon fixing her bike instead of playing.\"",
+      b: "\"She spent all afternoon learning to fix her own bike.\"",
+      ask: "Same afternoon. Which telling sounds like a waste, which like a smart move? What got swapped?",
+      answer: "A frames it as missing out ('instead of playing'); B frames it as a skill gained ('learning'). Same afternoon.",
+      why: "One teller measures what she LOST (playtime), the other what she GAINED (a skill). Both are real. When you catch yourself judging fast, ask which half you were shown — and go look at the other half yourself." },
+    { a: "\"Half the class failed the quiz.\"",
+      b: "\"Half the class passed the quiz.\"",
+      ask: "Exactly the same result. Why do these two lines feel so different? Which would a teacher wanting more study time pick?",
+      answer: "Identical fact (50/50). 'Failed' sounds alarming; 'passed' sounds fine. A teller picks whichever pushes their point.",
+      why: "'Half failed' and 'half passed' are the SAME number wearing two costumes. Whoever's talking picks the costume that helps their case. Do the math yourself and the spin falls off." }
+  ],
+  leftOut: [
+    { text: "\"Our juice is made with REAL fruit!\" (The label doesn't say how much — it's mostly water and sugar.)",
+      ask: "It's true there's real fruit in it. What did they leave OUT that would change your mind?",
+      answer: "How MUCH real fruit — almost none. 'Real fruit' is true but tiny; the missing amount is the whole story.",
+      why: "The trick isn't the words that are there — it's the number that's missing. 'Real fruit' with no amount is built to make you fill in the blank yourself, generously. Ask 'how much?' The gap is where the steering hides." },
+    { text: "\"I cleaned my whole room!\" (The closet is stuffed full and the door won't shut.)",
+      ask: "The floor really is clean. What part of the room got left out of the story?",
+      answer: "The closet — everything got shoved in there. 'Whole room' skips the part that's hidden.",
+      why: "A true-sounding 'whole' can hide the messy part you can't see. When a story sounds complete, ask what's just out of view. The closet is always where the left-out stuff lives." },
+    { text: "\"This game is FREE to play!\" (You can play, but you have to pay to unlock almost everything good.)",
+      ask: "It is free to START. What did they leave out that you'd really want to know first?",
+      answer: "That the fun parts cost money. 'Free to play' is true but leaves out 'not free to enjoy.'",
+      why: "'Free' does a lot of heavy lifting while quietly leaving out the price of everything that matters. When something's free, ask 'free to do WHAT — and what costs money?' The left-out part is usually the real deal." },
+    { text: "\"Nine out of ten kids picked our cereal!\" (They only asked ten kids, and gave them candy for answering.)",
+      ask: "The number might be real. What got left out that would make you trust it less?",
+      answer: "How FEW kids were asked (just 10), and that they were bribed. The tiny, rigged sample is hidden.",
+      why: "A big-sounding fraction can hide a tiny, tilted sample. '9 out of 10' means nothing if it's 9 out of 10 total, chosen and bribed. Ask 'out of how many, and who picked them?' The hidden setup is the whole trick." },
+    { text: "\"Everyone had an amazing time at the party!\" (Two kids left early crying and weren't mentioned.)",
+      ask: "Maybe most kids did have fun. Who got left out of 'everyone'?",
+      answer: "The kids who had a bad time. 'Everyone' quietly drops the ones who don't fit the happy story.",
+      why: "'Everyone' is a big word that often means 'everyone I want to count.' The people left out are usually the ones who'd complicate the story. Ask 'everyone — really? Who's not in this picture?'" }
+  ],
+  loadedWords: [
+    { text: "\"The stubborn kid REFUSED to change his answer on the test.\"",
+      ask: "Which word makes him sound bad? Say the same true thing WITHOUT the pushy word.",
+      answer: "'Stubborn' and 'refused' push you to dislike him. Neutral: 'He kept his original answer.' (Maybe he was right!)",
+      why: "'Stubborn' and 'refused' sneak a judgement in before you've decided. Strip them out and you get the bare fact: he kept his answer. Then YOU judge — was he being pig-headed, or was he simply sure? The loaded word tried to answer that for you." },
+    { text: "\"She BRAGGED that she finished her reading early.\"",
+      ask: "Which word is doing the steering? What's the plain, un-pushy way to say it?",
+      answer: "'Bragged' makes her sound show-offy. Neutral: 'She said she finished early.' Maybe she was just happy.",
+      why: "'Bragged' vs 'said' — one word decides whether you roll your eyes or not. The teller chose it for you. Swap in the plain word and see if you still feel the same. Often the feeling walks out the door with the loaded word." },
+    { text: "\"They CRAMMED forty people into the little room.\"",
+      ask: "Which word makes it sound bad or crowded? What would a plain telling say?",
+      answer: "'Crammed' makes it sound unpleasant. Neutral: 'Forty people were in the room.' Maybe it was cozy and fun.",
+      why: "'Crammed' paints a picture — hot, tight, too many. But '40 people in a room' could be a great party. The verb did the steering. Notice the picture-painting words and ask if the plain fact really earns that picture." },
+    { text: "\"The politician ADMITTED he changed his mind about the new road.\"",
+      ask: "Which word makes changing his mind sound like a bad thing? Try a fairer word.",
+      answer: "'Admitted' makes it sound like a guilty confession. Fairer: 'He changed his mind.' Changing your mind can be smart!",
+      why: "'Admitted' treats changing your mind like getting caught. But updating what you think when you learn more is exactly what good thinkers DO. The word smuggled in a judgement — that changing your mind is shameful. It isn't." },
+    { text: "\"A GANG of kids gathered by the fence after school.\"",
+      ask: "Which word makes them sound scary? What's a plain word for a bunch of kids together?",
+      answer: "'Gang' sounds threatening. Neutral: 'a group of kids.' They might just be friends talking.",
+      why: "'Gang' vs 'group' — same kids, wildly different feeling. One word can turn friends into a threat in your mind before you've even looked. Catch the scary-sounding word and picture the plain version. Then decide with your own eyes." }
+  ]
+};
+
+/* ---- whose_story layout (two tellings side-by-side for twoTellings; single block otherwise) ---- */
+function wsStoryRowHeight(doc, it, w, explain, showAnswers) {
+  const bw = w - 24;
+  let h = 16; // number + mode tag row
+  if (it.mode === "twoTellings") {
+    // Two stacked labeled tellings A / B
+    doc.setFontSize(10.5);
+    const aLines = doc.splitTextToSize(it.a, bw - 22);
+    const bLines = doc.splitTextToSize(it.b, bw - 22);
+    h += aLines.length * 12 + 6;
+    h += bLines.length * 12 + 8;
+  } else {
+    doc.setFontSize(11);
+    const tLines = doc.splitTextToSize(it.text, bw);
+    h += tLines.length * 13 + 6;
+  }
+  doc.setFontSize(10.5);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    doc.setFontSize(9.5);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;
+    if (explain) h += 22;
+  }
+  return h + 8;
+}
+
+function wsStoryRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    twoTellings: "SAME FACTS, TWO TELLINGS",
+    leftOut: "WHAT GOT LEFT OUT?",
+    loadedWords: "SPOT THE LOADED WORD"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  if (it.mode === "twoTellings") {
+    // Telling A
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(76, 47, 110);
+    doc.text("A:", bx, cy);
+    doc.setFont("helvetica", "italic"); doc.setTextColor(20, 20, 20);
+    const aLines = doc.splitTextToSize(it.a, bw - 22);
+    doc.text(aLines, bx + 22, cy);
+    cy += aLines.length * 12 + 6;
+    // Telling B
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10.5); doc.setTextColor(76, 47, 110);
+    doc.text("B:", bx, cy);
+    doc.setFont("helvetica", "italic"); doc.setTextColor(20, 20, 20);
+    const bLines = doc.splitTextToSize(it.b, bw - 22);
+    doc.text(bLines, bx + 22, cy);
+    cy += bLines.length * 12 + 8;
+  } else {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+    const tLines = doc.splitTextToSize(it.text, bw);
+    doc.text(tLines, bx, cy);
+    cy += tLines.length * 13 + 6;
+  }
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("who wants me to feel this — and what am I not being shown?", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("who wants me to feel this — and what am I not being shown? ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
