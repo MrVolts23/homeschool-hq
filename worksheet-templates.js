@@ -8947,6 +8947,252 @@ function wsStoryRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — SORT IT YOUR WAY (categories are made, not found)
+   The library already teaches single-rule sorting (odd-one-out in
+   pattern_recognition) and framing/spin (whats_missing, whose_story).
+   The missing piece: the first-principles idea that CATEGORIES ARE
+   HUMAN CHOICES. The same pile of things can be grouped many valid
+   ways; the way someone chooses to sort is itself an argument; and
+   "which box does this go in?" is a favourite lever of manipulation
+   (junk-vs-treats aisles, us-vs-them labels, "healthy" stickers).
+   Four thinking modes:
+     manyWays   — sort the same set TWO different (both-valid) ways
+     findRule   — reverse-engineer the hidden rule behind a grouping
+     whereGoes  — the tricky item that fits two boxes / no box
+     whoDecided — someone's labels steer you: who chose them & why?
+     mixed      — a bit of each
+   Deterministic, never calls AI. Mirrors trade_offs row layout.
+============================================================ */
+window.TEMPLATES.sort_it = {
+  id: "sort_it",
+  label: "Sort It Your Way (categories are chosen)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Classification logic & the made-not-found nature of categories",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "manyWays",   label: "Many ways to sort (same pile, two right answers)" },
+        { value: "findRule",   label: "Find the hidden rule (why are these together?)" },
+        { value: "whereGoes",  label: "Where does it go? (the box-breaker item)" },
+        { value: "whoDecided", label: "Who made these labels? (categories that steer you)" },
+        { value: "mixed",      label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["manyWays", "findRule", "whereGoes", "whoDecided"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = siShuffle(SI_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Sort It Your Way";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Here's something almost nobody tells you: the boxes we sort things into aren't hiding out there in the world waiting to be found — PEOPLE make them. The same pile of stuff can be sorted a dozen right ways, depending on what you decide matters. That means when someone hands you the boxes already made — \"junk vs. good,\" \"us vs. them,\" \"cool vs. lame\" — they've already made a choice FOR you, and it steers what you think. Your job here: notice that the sorting is a choice, ask who made it and why, and remember you're always allowed to sort it your own way. For each one, do the thinking, then explain it.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "Pile: apple, banana, red block, red ball, orange.  ->  You could sort by KIND (fruit vs. toy): apple/banana/orange in one box, blocks/balls in the other. OR by COLOUR (red things vs. not): red block/red ball/apple, then banana/orange. Both are correct! Neither is \"the real\" sorting — you PICKED what mattered. That's the whole secret: the boxes come from you, not from the stuff.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 100);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = siRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = siRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- sort_it content banks ---- */
+function siShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the pile / grouping / label the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const SI_BANKS = {
+  manyWays: [
+    { text: "A pile: a spoon, a fork, a crayon, a marker, a pencil.",
+      ask: "Sort these TWO different ways. What did you pick to make each sorting?",
+      answer: "By job: eating things (spoon, fork) vs. drawing/writing things (crayon, marker, pencil). Or by material, or by which end you hold — lots of valid ways.",
+      why: "Nothing in the pile TELLS you how to sort it. You decide what matters — the job, the colour, the size — and the boxes appear. Change what matters, change the boxes. Both are right." },
+    { text: "Five kids: two wear glasses, three are tall, two like soccer, one likes all three.",
+      ask: "Show two different ways to split them into groups. Is either one 'the true' way?",
+      answer: "By glasses/no-glasses, by tall/short, by sport/no-sport — all valid. None is 'the true' one.",
+      why: "People aren't born pre-sorted. Whoever picks the trait (glasses? height? sport?) makes the groups. So whenever someone splits people into 'types,' ask: who chose that trait, and why THAT one?" },
+    { text: "Your toys: a wooden car, a plastic dinosaur, a wooden boat, a plastic robot, a teddy bear.",
+      ask: "Sort by ONE idea, then re-sort by a DIFFERENT idea. Name each idea.",
+      answer: "By material (wood vs. plastic vs. cloth) or by what-it-is (vehicles vs. animals). Two clean, different sorts.",
+      why: "The same toys jump into totally different boxes depending on the question you ask. That's proof the boxes live in your HEAD, not in the toys. You're not finding the right box — you're choosing one." },
+    { text: "Snacks: apple, cookie, carrot, chips, grapes.",
+      ask: "One person calls it 'healthy vs. junk.' Sort it a different way instead. What else could matter?",
+      answer: "By crunchy vs. soft, by grows-on-a-plant vs. made-in-a-factory, by sweet vs. salty — many honest ways.",
+      why: "'Healthy vs. junk' feels like THE way to sort snacks — but it's just ONE choice someone made. Sort by crunch or colour and the boxes flip. Notice when a sorting is handed to you as if it's the only one." }
+  ],
+  findRule: [
+    { text: "Someone put these together: a fire truck, a stop sign, a strawberry, a ladybug.",
+      ask: "What is the hidden rule? What makes them 'belong' together?",
+      answer: "They're all red. The rule is colour, not what-they-are.",
+      why: "To find someone's rule, ask 'what do ALL of these share that the leftovers don't?' Once you see the rule, you see what they were paying attention to — and what they were ignoring." },
+    { text: "In one box: a bike, a scooter, a wagon, roller skates. Left out: a couch, a lamp.",
+      ask: "What's the rule for the box? Why are the couch and lamp left out?",
+      answer: "The box is 'things with wheels / things you ride.' Couch and lamp don't move you around.",
+      why: "The stuff left OUT is a huge clue. A rule is really a line: in on one side, out on the other. Find the line and you've found the rule — and you can decide if it's a line you'd draw too." },
+    { text: "A friend grouped: whale, bat, dog, cat. Not in the group: shark, eagle, snake.",
+      ask: "What's the rule? (Hint: it's trickier than 'lives in water' or 'can fly.')",
+      answer: "They're mammals (fur/hair, feed milk). Whale isn't a fish, bat isn't a bird — the rule beats appearances.",
+      why: "The obvious rule (whale = water, bat = flies) is a trap. A whale swims but is a mammal; a shark swims but isn't. Good sorters look past how things LOOK to how they actually work. The real rule hides underneath." },
+    { text: "Someone sorted words into two piles. Pile A: cat, run, big. Pile B: apple, rabbit, elephant.",
+      ask: "What's the rule splitting A from B?",
+      answer: "Pile A has one syllable (one beat); Pile B has two or three. The rule is beats, not meaning.",
+      why: "A rule can be about the WORDS themselves, not what they mean — sound, length, letters. When a grouping seems weird, test rules you wouldn't expect. The rule is whatever cuts the pile cleanly." }
+  ],
+  whereGoes: [
+    { text: "Boxes: 'Fruit' and 'Vegetable.' The item to place: a tomato.",
+      ask: "Which box does a tomato go in? What if it fits BOTH — or neither box is quite right?",
+      answer: "Science says fruit (it has seeds); cooking says vegetable. It fits both, depending on why you're asking.",
+      why: "Some things sit right on the line. That's not a mistake in the thing — it's a hint the boxes were never perfect. When an item breaks the boxes, the boxes are the problem, not the item. You may need a new box." },
+    { text: "Boxes: 'Land animals' and 'Water animals.' The item: a frog.",
+      ask: "Where does a frog go? Is one box enough for it?",
+      answer: "Both — a frog lives in water as a tadpole and on land as an adult. One box can't hold it.",
+      why: "Real things spill out of neat boxes all the time. When something won't fit, don't force it — that's your clue that reality is richer than the two choices you were given. Ask for a better set of boxes." },
+    { text: "Boxes at the store: 'Toys' and 'Books.' The item: a book that's also a puzzle you build.",
+      ask: "Where does it belong? Who decides — and does the label change how you see it?",
+      answer: "It's both. Whoever shelves it picks — and where it sits changes who finds it and what they call it.",
+      why: "Where a thing gets filed isn't neutral. Put the book-puzzle with toys and it's 'a toy'; with books and it's 'a book.' The SAME object, two identities, decided by a shelf. Boxes don't just describe — they shape." },
+    { text: "Boxes: 'Grown-up jobs' and 'Kid jobs.' The item: cooking dinner.",
+      ask: "Which box? Or is this box-set itself a bit made-up?",
+      answer: "Either! Kids can cook; grown-ups cook. The 'grown-up vs. kid' split is a choice people made, not a law.",
+      why: "Some boxes feel real but are just habits — 'that's a grown-up thing,' 'that's for boys/girls.' When an item won't stay in its assigned box, question whether the box should exist at all. Habits aren't rules." }
+  ],
+  whoDecided: [
+    { text: "A cereal has a big 'HEALTHY CHOICE!' badge on the front of the box.",
+      ask: "Who put it in the 'healthy' box — a doctor, or the company selling it? Why does that matter?",
+      answer: "The company that wants you to buy it. They chose the label; it's an ad, not a fact.",
+      why: "Whoever gets to name the box gets to steer you. A company calling its own cereal 'healthy' picked the flattering box on purpose. Always ask 'who chose this label, and what do they get if I believe it?'" },
+    { text: "A store puts candy and chips in an aisle labelled 'SNACKS' and hides the fruit in 'PRODUCE.'",
+      ask: "Who decided candy = 'snack' and apples don't? What does that sorting make you reach for?",
+      answer: "The store did, to sell more of what makes them money. The labels nudge your hand toward candy.",
+      why: "The way a place is sorted is a quiet argument about what's normal. If 'snack' means candy, fruit starts to feel like 'not a snack.' The aisle labels aren't neutral facts — they're choices that shape your choices." },
+    { text: "A show splits everyone into 'the cool kids' and 'the losers.'",
+      ask: "Who made those two boxes? Is it a real line, or one someone drew to sell the show?",
+      answer: "The writers drew it — it makes drama. In real life those boxes are made up and change all the time.",
+      why: "'Cool vs. loser,' 'us vs. them' — these boxes feel obvious but someone always DREW the line, usually because it gets you watching, arguing, or belonging. A made-up line can still hurt real people. Spot who drew it." },
+    { text: "A game calls some players 'winners' and everyone else 'losers' the second it ends.",
+      ask: "Who decided those are the only two boxes? Are they the only ways to think about a game?",
+      answer: "The game's makers did. You could also sort by 'had fun,' 'played fair,' 'got better' — richer boxes.",
+      why: "Handing you only two boxes ('win/lose') is a way to control what the game means. But you can always add boxes: Did you improve? Was it fun? Were you kind? Whoever limits the boxes limits how you get to feel." }
+  ]
+};
+
+/* ---- sort_it layout (mirrors trade_offs row layout) ---- */
+function siRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function siRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    manyWays: "MANY WAYS TO SORT", findRule: "FIND THE HIDDEN RULE",
+    whereGoes: "WHERE DOES IT GO?", whoDecided: "WHO MADE THESE LABELS?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The pile / grouping / label
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
