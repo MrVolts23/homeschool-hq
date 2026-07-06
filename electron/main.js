@@ -190,29 +190,54 @@ function registerBackupHandlers() {
 }
 
 // ── Auto-updater ──────────────────────────────────────────────────────────────
+// This app is UNSIGNED, so macOS Squirrel can't apply updates itself. We download
+// via electron-updater and swap the bundle with our own script. Every step is
+// logged to updater.log in the data folder — a *silent* swap failure is exactly
+// what caused the old "update prompt loop" (app re-prompts forever because the
+// install never actually lands), so nothing here is allowed to fail quietly.
+const UPDATER_LOG = path.join(app.getPath('userData'), 'updater.log');
+function ulog(...parts) {
+  const line = `[${new Date().toISOString()}] ` +
+    parts.map(p => (typeof p === 'string' ? p : JSON.stringify(p))).join(' ') + '\n';
+  try { fs.appendFileSync(UPDATER_LOG, line); } catch (_) {}
+  try { console.log('[updater]', ...parts); } catch (_) {}
+}
+function openReleasesPage() {
+  shell.openExternal('https://github.com/MrVolts23/homeschool-hq/releases/latest');
+}
+
 function setupUpdater() {
   if (!app.isPackaged) return; // only the installed app updates
   autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Keep this OFF. For an unsigned mac app the built-in on-quit install is a no-op
+  // that fails silently — the app relaunches at the OLD version and re-prompts on
+  // an endless loop. We install the swap ourselves instead.
+  autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.logger = {
+    info: (m) => ulog('info', m), warn: (m) => ulog('warn', m),
+    error: (m) => ulog('error', m), debug: () => {}
+  };
 
+  autoUpdater.on('update-available', (info) => ulog('update-available', info && info.version, 'current', app.getVersion()));
+  autoUpdater.on('update-not-available', () => ulog('up to date', app.getVersion()));
+  autoUpdater.on('download-progress', (p) => ulog('downloading', (p && Math.round(p.percent)) + '%'));
   autoUpdater.on('update-downloaded', (info) => {
-    downloadedUpdateFile = info && info.downloadedFile || null;
+    downloadedUpdateFile = (info && info.downloadedFile) || null;
+    ulog('update-downloaded', info && info.version, 'file', downloadedUpdateFile);
     dialog.showMessageBox(mainWindow, {
       type: 'info',
       title: 'Update ready',
-      message: 'A new version of SOVRN Homeschool HQ has been downloaded. Restart to apply it.',
-      buttons: ['Restart now', 'Later']
+      message: `SOVRN Homeschool HQ ${info && info.version ? info.version + ' ' : ''}is ready. Restart to apply it.`,
+      buttons: ['Restart now', 'Later'],
+      defaultId: 0, cancelId: 1
     }).then(({ response }) => { if (response === 0) applyUpdateAndRestart(); });
   });
-  autoUpdater.on('error', err => console.error('[updater]', err && err.message));
+  autoUpdater.on('error', err => ulog('ERROR', err && (err.stack || err.message || String(err))));
 
-  autoUpdater.checkForUpdates();
-  setInterval(() => autoUpdater.checkForUpdates(), 15 * 60 * 1000);
+  autoUpdater.checkForUpdates().catch(e => ulog('checkForUpdates threw', e && e.message));
+  setInterval(() => { autoUpdater.checkForUpdates().catch(e => ulog('recheck threw', e && e.message)); }, 15 * 60 * 1000);
 }
 
-// macOS Squirrel refuses to auto-apply updates to UNSIGNED apps, so we swap the
-// bundle ourselves: a detached script waits for this process to exit, replaces the
-// app, strips quarantine, and relaunches it. (Same approach as the Trading Journal.)
 function findStagedZip() {
   if (downloadedUpdateFile && fs.existsSync(downloadedUpdateFile)) return downloadedUpdateFile;
   try {
@@ -222,33 +247,63 @@ function findStagedZip() {
   } catch { return null; }
 }
 
+// Swap the bundle ourselves. Safety rule: the running app is deleted ONLY after
+// the new bundle has been extracted, copied to a sibling, and validated — so a
+// bad/partial download can never leave the user with no app. Rolls forward only.
 function applyUpdateAndRestart() {
+  const zip = findStagedZip();
+  const appPath = path.resolve(process.execPath, '..', '..', '..'); // /Applications/SOVRN Homeschool HQ.app
+  ulog('applyUpdate zip=', zip, 'appPath=', appPath);
+
+  // No usable download → be honest and point at the manual download. NEVER a
+  // silent no-op (that's what looped before).
+  if (!zip || !appPath.endsWith('.app')) {
+    ulog('no staged zip or non-.app path — offering manual download');
+    dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: 'Couldn’t auto-install',
+      message: 'The update downloaded but couldn’t be installed automatically. I’ll open the download page — drag the new app into Applications to finish updating.',
+      buttons: ['Open download page', 'Cancel'], defaultId: 0, cancelId: 1
+    }).then(({ response }) => { if (response === 0) openReleasesPage(); });
+    return;
+  }
+
   try {
-    const zip = findStagedZip();
-    const appPath = path.resolve(process.execPath, '..', '..', '..'); // /Applications/Homeschool HQ.app
-    if (!zip || !appPath.endsWith('.app')) { autoUpdater.quitAndInstall(); return; }
     const tmp = path.join(app.getPath('temp'), 'hs-update-extract');
     const script = path.join(app.getPath('temp'), 'hs-apply-update.sh');
     const sh = `#!/bin/bash
-APP_PID="$1"; ZIP="$2"; APP_PATH="$3"; TMP="$4"
+set -u
+APP_PID="$1"; ZIP="$2"; APP_PATH="$3"; TMP="$4"; LOG="$5"
+log(){ echo "[$(date -u +%FT%TZ)] swap: $*" >> "$LOG" 2>/dev/null; }
+log "start pid=$APP_PID zip=$ZIP"
 for i in $(seq 1 120); do kill -0 "$APP_PID" 2>/dev/null || break; sleep 0.5; done
 rm -rf "$TMP"; mkdir -p "$TMP"
-/usr/bin/ditto -x -k "$ZIP" "$TMP" || exit 1
+if ! /usr/bin/ditto -x -k "$ZIP" "$TMP"; then log "ERROR unzip failed — reopening old app"; /usr/bin/open "$APP_PATH"; exit 1; fi
 NEW_APP="$(/usr/bin/find "$TMP" -maxdepth 1 -name '*.app' | head -1)"
-if [ -n "$NEW_APP" ]; then
-  rm -rf "$APP_PATH"
-  /usr/bin/ditto "$NEW_APP" "$APP_PATH"
-  /usr/bin/xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true
-  /usr/bin/open "$APP_PATH"
-fi
+if [ -z "$NEW_APP" ] || [ ! -f "$NEW_APP/Contents/Info.plist" ]; then log "ERROR no valid .app in zip — reopening old app"; /usr/bin/open "$APP_PATH"; exit 1; fi
+STAGE="$APP_PATH.new"
+rm -rf "$STAGE"
+if ! /usr/bin/ditto "$NEW_APP" "$STAGE"; then log "ERROR stage copy failed — reopening old app"; rm -rf "$STAGE"; /usr/bin/open "$APP_PATH"; exit 1; fi
+if [ ! -f "$STAGE/Contents/Info.plist" ]; then log "ERROR staged bundle invalid — reopening old app"; rm -rf "$STAGE"; /usr/bin/open "$APP_PATH"; exit 1; fi
+# New bundle staged + validated. Only now do we remove the old app.
+rm -rf "$APP_PATH"
+if ! mv "$STAGE" "$APP_PATH"; then log "ERROR final move failed — launching staged copy"; /usr/bin/open "$STAGE"; exit 1; fi
+/usr/bin/xattr -dr com.apple.quarantine "$APP_PATH" 2>/dev/null || true
 rm -rf "$TMP"
+log "OK -> $APP_PATH"
+/usr/bin/open "$APP_PATH"
 `;
     fs.writeFileSync(script, sh, { mode: 0o755 });
-    spawn('/bin/bash', [script, String(process.pid), zip, appPath, tmp], { detached: true, stdio: 'ignore' }).unref();
+    ulog('spawning swap script');
+    spawn('/bin/bash', [script, String(process.pid), zip, appPath, tmp, UPDATER_LOG], { detached: true, stdio: 'ignore' }).unref();
     setTimeout(() => app.quit(), 250);
   } catch (e) {
-    console.error('[updater] custom install failed:', e.message);
-    try { autoUpdater.quitAndInstall(); } catch (_) {}
+    ulog('applyUpdate exception', e && e.message);
+    dialog.showMessageBox(mainWindow, {
+      type: 'warning', title: 'Update failed',
+      message: 'The update couldn’t be installed automatically. Open the download page to update manually?',
+      buttons: ['Open download page', 'Cancel'], defaultId: 0, cancelId: 1
+    }).then(({ response }) => { if (response === 0) openReleasesPage(); });
   }
 }
 
