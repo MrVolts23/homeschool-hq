@@ -9193,6 +9193,247 @@ function siRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — FACT, OPINION, or GUESS?  (the sorting hat)
+   Sovereign-thinking: before you can weigh a claim, you have to
+   know what KIND of thing it is. A FACT can be checked and settled
+   (it's the same for everyone). An OPINION is someone's taste or
+   judgment ("best," "yuck," "should") — real, but not provable, and
+   yours can differ. A GUESS/PREDICTION is about something not-yet-
+   known (usually the future) — it can turn out right or wrong later.
+   The sharp move is catching an OPINION wearing a FACT costume
+   ("It's just a FACT that...") — that's how people smuggle their
+   preferences past you. Sorting first keeps you from being steered.
+============================================================ */
+window.TEMPLATES.fact_opinion_guess = {
+  id: "fact_opinion_guess",
+  label: "Fact, opinion, or guess? (the sorting hat)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Telling facts, opinions & predictions apart",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "sort",       label: "Sort it: fact, opinion, or guess?" },
+        { value: "costume",    label: "Opinion in a fact costume (spot the smuggle)" },
+        { value: "checkIt",    label: "If it's a fact — HOW would you check it?" },
+        { value: "mixed",      label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["sort", "costume", "checkIt"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = fogShuffle(FOG_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Fact, Opinion, or Guess?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Three very different things get said in the same confident voice. A FACT can be checked and settled — it's the same for everybody. An OPINION is somebody's taste or judgment (best, yuck, should) — real, but not provable, and yours is allowed to differ. A GUESS (or prediction) is about something not known yet — it can turn out right or wrong later. Sort each one first. Watch for an opinion sneaking in wearing a fact costume: starting with \"It's a FACT that...\" doesn't make it one.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"Chocolate ice cream is the best flavor, and it's a fact.\"  ->  Sort it: this is an OPINION. \"Best\" is a taste word — it's different for different people. The words \"it's a fact\" are just a costume; you can't check \"best\" the way you'd check the temperature. A fact would be \"this scoop is cold\" — you can touch it and settle it. So: opinion, no matter how confidently it's said.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 100);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = fogRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = fogRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- fact_opinion_guess content banks ---- */
+function fogShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the statement the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const FOG_BANKS = {
+  sort: [
+    { text: "\"This rock weighs more than that leaf.\"",
+      ask: "Fact, opinion, or guess? Circle one and say how you know.",
+      answer: "Fact. You can put them on a scale (or in your hands) and settle it — same answer for everyone.",
+      why: "A fact is checkable. Anybody who weighs them lands on the same result, so nobody's taste changes the answer. That's the mark of a fact: the world decides it, not you." },
+    { text: "\"Winter is way better than summer.\"",
+      ask: "Fact, opinion, or guess? What kind of word is \"better\"?",
+      answer: "Opinion. \"Better\" is a taste word — a summer-lover would flip it and neither of you is wrong.",
+      why: "Opinions are real feelings, but they can't be proven right or wrong. When you spot a taste word (better, best, prettiest, gross), you've usually found an opinion — and you're free to have your own." },
+    { text: "\"It's going to rain tomorrow afternoon.\"",
+      ask: "Fact, opinion, or guess? Can we know this for sure right now?",
+      answer: "Guess (a prediction). We can't check tomorrow yet — we find out when it comes.",
+      why: "A prediction is about the not-yet-known. It can be a good guess or a bad one, but it only becomes true-or-false later. Notice how a confident voice can't make the future arrive early." },
+    { text: "\"There are seven days in a week.\"",
+      ask: "Fact, opinion, or guess? How could someone check it?",
+      answer: "Fact. Count the days on any calendar — same answer everywhere.",
+      why: "Some facts are so settled we forget they're checkable, but they still are. If you doubted it, you could count. Being able to check — even when you don't need to — is what makes it a fact." },
+    { text: "\"My drawing is the ugliest one in the class.\"",
+      ask: "Fact, opinion, or guess? Whose judgment is this?",
+      answer: "Opinion. \"Ugliest\" is a judgment — someone else might love it.",
+      why: "Even when YOU say it about yourself, \"ugliest\" is still a taste-judgment, not a fact. Don't let a strong feeling disguise itself as the truth. Your opinion of your art isn't a measurement of your art." },
+    { text: "\"If I plant this seed and water it, it will grow into a plant.\"",
+      ask: "Fact, opinion, or guess? What makes it more than a wild guess?",
+      answer: "Guess (a prediction) — but a strong one, because it's happened many times before.",
+      why: "Some guesses are shaky and some are backed by patterns you've seen over and over. It's still a prediction until it happens, but a prediction with evidence behind it beats one pulled from thin air." }
+  ],
+  costume: [
+    { text: "\"It's just a scientific FACT that our team is the greatest team ever.\"",
+      ask: "Is this really a fact? What's the costume, and what's underneath it?",
+      answer: "Opinion in a fact costume. \"Greatest ever\" is a taste-judgment; the words \"scientific fact\" are just dressing it up.",
+      why: "People slap \"it's a fact\" on their opinions to skip the arguing and make you agree. Peek under the costume: is there something you could actually check? \"Greatest\" can't be measured, so it's an opinion wearing a badge it didn't earn." },
+    { text: "\"Everybody knows broccoli is disgusting — that's just the truth.\"",
+      ask: "Fact or opinion in disguise? What word gives it away?",
+      answer: "Opinion in disguise. \"Disgusting\" is a taste; \"everybody knows / the truth\" is the costume.",
+      why: "\"Everybody knows\" and \"that's just the truth\" are flags that someone is smuggling a feeling past you as if it were settled. Plenty of people like broccoli. Taste isn't truth, no matter how many people you claim agree." },
+    { text: "\"Obviously this movie is the best one this year — it's a fact.\"",
+      ask: "Strip off the costume: is there anything here you could actually check?",
+      answer: "No — \"best\" can't be checked. It's an opinion; \"obviously\" and \"it's a fact\" are the disguise.",
+      why: "Words like \"obviously\" try to make you feel silly for asking. Ask anyway. If you can't name a way to check it, it's an opinion, and dressing it in fact-words doesn't change that." },
+    { text: "\"It's a proven fact that video games are more fun than books.\"",
+      ask: "What's the taste-word hiding inside this \"proven fact\"?",
+      answer: "\"More fun\" is the taste-word. Fun differs person to person, so it's an opinion — \"proven fact\" is fake armor.",
+      why: "\"Proven\" and \"fact\" sound heavy and official, but they can't turn a taste into a truth. When someone armors up their opinion like this, it's often because they don't want you to notice it's just their preference." },
+    { text: "\"Science says pink is the prettiest color, everyone knows it.\"",
+      ask: "Does \"science says\" make \"prettiest\" a fact? Why or why not?",
+      answer: "No. \"Prettiest\" is an opinion; \"science says / everyone knows\" is borrowed authority to disguise it.",
+      why: "Borrowing a trusted name (\"science says,\" \"doctors say\") is a classic costume. Science can measure a color's wavelength — it can't crown a favorite. The taste-word is still doing the talking underneath." }
+  ],
+  checkIt: [
+    { text: "\"This water is boiling hot.\"",
+      ask: "If it's a fact — HOW exactly would you check it? Name the tool or test.",
+      answer: "Fact. Check with a thermometer, or carefully feel the steam. Boiling has a real number (100 C at sea level).",
+      why: "The power of a fact is that you can name a way to settle it. If you can point to a tool or a test, you're holding a fact. If you can't name any check, ask yourself whether it was really a fact at all." },
+    { text: "\"There are more red cars than blue cars in the parking lot.\"",
+      ask: "Fact — so what's the exact test to prove it?",
+      answer: "Fact. Walk the lot and count reds and blues. The count settles it.",
+      why: "A good check is one anyone could repeat and get the same answer. Counting is one of the most honest checks there is — it doesn't care what you were hoping for." },
+    { text: "\"Our new puppy is heavier than the cat.\"",
+      ask: "How would you check this instead of just guessing?",
+      answer: "Fact. Weigh each one on a scale and compare the numbers.",
+      why: "It's tempting to eyeball it and call it done, but a real check beats an impression. Put both on the scale — the numbers don't argue, they just tell you." },
+    { text: "\"The library closes at 6 o'clock today.\"",
+      ask: "It's a fact — where would you go to check it for sure?",
+      answer: "Fact. Check the sign on the door, the library's posted hours, or ask a librarian.",
+      why: "Facts have sources you can go to. Knowing WHERE to check is half the skill. When you can point at where the answer lives, you never have to just trust a memory or a mood." },
+    { text: "\"This bridge is longer than that one.\"",
+      ask: "Name a way to actually check this — no guessing allowed.",
+      answer: "Fact. Measure both with a tape or steps, or look up their lengths, then compare.",
+      why: "\"Longer\" sounds like a matter of opinion until you remember length is measurable. Anything you can measure with a number is a fact waiting to be checked — you just need the right tool." }
+  ]
+};
+
+/* ---- fact_opinion_guess layout (mirrors says_who row layout) ---- */
+function fogRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line (their sort + reason)
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function fogRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    sort: "FACT, OPINION, OR GUESS?", costume: "SPOT THE COSTUME",
+    checkIt: "HOW WOULD YOU CHECK IT?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The statement
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    // "Circle one" sorting choices for young readers
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(90, 90, 90);
+    doc.text("FACT      OPINION      GUESS", bx, cy + 2);
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 14, x + w, cy + 14);
+    cy += 26;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
