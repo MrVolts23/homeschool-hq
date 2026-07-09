@@ -9434,6 +9434,314 @@ function fogRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — WHERE DOES IT COME FROM? (systems & origins)
+   The critical-thinking library was strong on DECISION reasoning
+   (trade-offs, fair, money), MEDIA literacy (persuasion, framing,
+   fact/opinion), and LOGIC — but had a real gap: how the physical
+   world actually WORKS. Kids grow up thinking food comes from the
+   store, water from the tap, power from the wall, things from a
+   box on the porch. That "it just appears" reflex is the root of
+   dependency: if you don't know where a thing comes from, you
+   can't make it, fix it, judge it, or do without it.
+
+   This sheet trains SYSTEMS / FIRST-PRINCIPLES thinking: trace an
+   everyday thing back up the chain to its real origin and the
+   natural + human work that made it. Four modes:
+     trace     — walk it back: store/tap/wall -> ... -> raw source
+     order     — put a scrambled origin chain in the right order
+     whoMade   — name the PEOPLE + WORK behind a finished thing
+     whatIfGone — if one link broke, what stops? (find the weak link)
+     mixed     — a bit of each
+   Sovereign voice: nothing just "appears" — everything came from
+   somewhere, made by someone, out of something real. Know the
+   chain and you're never at the mercy of the last link.
+   Deterministic, never calls AI. Mirrors trade_offs layout.
+============================================================ */
+window.TEMPLATES.origins = {
+  id: "origins",
+  label: "Where does it come from? (systems & origins)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Systems thinking, origins & how the real world works",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "trace",      label: "Trace it back (store/tap/wall -> real source)" },
+        { value: "order",      label: "Put the chain in order (scrambled steps)" },
+        { value: "whoMade",    label: "Who made this? (name the people + work)" },
+        { value: "whatIfGone", label: "What if a link broke? (find the weak link)" },
+        { value: "mixed",      label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["trace", "order", "whoMade", "whatIfGone"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = orShuffle(OR_BANKS[mode].slice());
+      const item = Object.assign({ mode }, pools[mode].pop());
+      // For "order" mode, pre-scramble the steps deterministically per item
+      if (mode === "order" && Array.isArray(item.steps)) {
+        item.scrambled = orShuffle(item.steps.map((s, ix) => ({ s, ix })));
+      }
+      items.push(item);
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Where Does It Come From?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Nothing just appears. The food doesn't start at the store, the water doesn't start at the tap, and the power doesn't start at the wall \u2014 those are the LAST stop, not the first. Every single thing came from somewhere, was made by someone, out of something real. When you can trace a thing back up the chain to where it actually starts, you understand it \u2014 and you're never fooled into thinking it magically shows up. For each one, follow the chain and do the thinking.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "Where does BREAD come from? Trace it back: store shelf <- bakery/oven <- flour <- wheat ground up <- wheat growing in a field <- a seed + soil + sun + rain + a farmer's work. The store is just the last stop. The REAL start is a plant in the dirt and people doing work at every step. Now you know bread \u2014 and you could even make it yourself.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 96);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = orRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = orRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- origins content banks ---- */
+function orShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// trace / whoMade / whatIfGone items: { text, ask, answer, why }
+// order items:                        { text, ask, steps:[...ordered], answer, why }
+//   text   = the thing / situation the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   steps  = (order mode) the correct origin chain, first -> last
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const OR_BANKS = {
+  trace: [
+    { text: "You turn on the tap and clean water comes out.",
+      ask: "Trace the water BACK. Where was it before the tap? Keep going \u2014 where does it really start?",
+      answer: "Tap <- pipes <- a treatment plant that cleans it <- a lake, river, or well <- rain/snow that fell from the sky.",
+      why: "The tap is the last door, not the source. Water fell as rain, gathered in a lake, got cleaned, and got pushed through pipes to your house. Knowing that, you understand why clean water can run out, get dirty, or freeze \u2014 and you'd know how to find water if the tap ever stopped." },
+    { text: "You plug something in and it turns on. Electricity from the wall.",
+      ask: "Trace the power BACK from the wall. Where is it actually made?",
+      answer: "Wall <- wires to your house <- power lines <- a power station that spins generators using water, wind, sun, gas, or nuclear <- some energy source.",
+      why: "The wall socket makes nothing \u2014 it's the end of a very long wire. Somewhere, something is spinning a generator right now to fill that wire. That's why the power can go out, and why it costs money: someone is burning or catching energy far away to send it to you." },
+    { text: "A hamburger on your plate.",
+      ask: "Trace the burger BACK to where its parts really start. Name the chain.",
+      answer: "Bun <- flour <- wheat <- field. Meat <- a cow <- grass/feed <- a farm. Both took land, animals/plants, and lots of people's work.",
+      why: "A burger isn't one thing \u2014 it's a bundle of chains, each starting in dirt and living things. The store hides all of that behind a wrapper. See the chain and you see the true cost, the work, and the fact that food is grown and raised, never manufactured from nothing." },
+    { text: "A t-shirt from a store.",
+      ask: "Trace the shirt BACK. What was it before it was a shirt? Keep going.",
+      answer: "Shirt <- sewn by workers <- cut cloth <- woven thread <- spun fiber <- cotton plant (or plastic from oil).",
+      why: "That shirt was a plant in a field or oil in the ground, turned into thread, cloth, then sewn by real people, often far away. 'It came from the store' skips everyone who actually made it. Knowing the chain, you understand why clothes cost what they do \u2014 and that you could mend or even make one." },
+    { text: "A wooden pencil.",
+      ask: "Trace the pencil BACK. Where did the wood and the 'lead' come from?",
+      answer: "Pencil <- factory <- wood from a tree + graphite (a rock) mined from the ground + paint & glue.",
+      why: "Even something tiny is a little machine of origins: a tree grew for years, a rock was dug from the earth, and both were shaped by machines and people. Nothing here is simple or free \u2014 it just LOOKS simple because you never saw the chain." },
+    { text: "Milk in the fridge.",
+      ask: "Trace the milk BACK from the fridge to where it truly starts.",
+      answer: "Fridge <- store <- truck <- a dairy that bottles it <- a cow being milked <- a cow eating grass on a farm.",
+      why: "Milk comes out of an animal, not a carton. The carton is just the last container in a cold, fast chain that starts with a living cow and a farmer up early. Once you know that, you understand why milk spoils, why it must be kept cold, and why there's real work behind a 'cheap' jug." }
+  ],
+  order: [
+    { text: "How PAPER is made \u2014 the steps got scrambled.",
+      ask: "Number the steps 1-4 in the right order, from the very start to the finished paper.",
+      steps: ["A tree grows in the forest", "The tree is cut and ground into wet pulp", "The pulp is pressed and dried flat", "It's cut into sheets of paper"],
+      answer: "1) tree grows  2) ground into pulp  3) pressed & dried  4) cut into sheets.",
+      why: "Order matters because each step needs the one before it \u2014 you can't dry pulp you haven't made yet. Seeing the real order tells you paper starts as a living tree, which is why paper isn't free and why reusing it saves a whole chain of work." },
+    { text: "How you get to EAT AN APPLE \u2014 steps scrambled.",
+      ask: "Put these in order, 1-4, from the very beginning to the apple in your hand.",
+      steps: ["A seed is planted and grows into a tree", "The tree blossoms and grows apples", "A farmer picks the ripe apples", "The apples are sold and you buy one"],
+      answer: "1) seed planted  2) tree grows apples  3) farmer picks  4) sold to you.",
+      why: "Every step depends on the last, and the whole thing starts with a seed and years of waiting. The store is step 4 of 4 \u2014 the easy part. Real food takes time and can't be rushed, which is worth remembering the next time it seems to 'just appear.'" },
+    { text: "How a HOUSE gets built \u2014 steps out of order.",
+      ask: "Order these 1-4, from the first thing that has to happen to the last.",
+      steps: ["The ground is cleared and a strong base (foundation) is laid", "The frame and walls go up", "The roof, windows, and doors are added", "People move in and live there"],
+      answer: "1) foundation  2) frame & walls  3) roof & doors  4) move in.",
+      why: "You can't put a roof on walls that don't exist yet. Big things get built from the bottom up, step by step, and skipping a step makes the whole thing fall. That's true for houses, and it's true for learning and building almost anything." },
+    { text: "How RAIN comes back around \u2014 the water cycle, scrambled.",
+      ask: "Put these 4 steps in order to make a loop that repeats forever.",
+      steps: ["The sun heats water and it rises as invisible vapor", "The vapor cools high up and forms clouds", "The clouds get heavy and it rains or snows", "The water flows back to lakes, rivers, and the sea"],
+      answer: "1) sun lifts vapor  2) clouds form  3) rain/snow falls  4) flows back \u2014 then it repeats.",
+      why: "This one is a CIRCLE, not a straight line \u2014 the last step feeds the first, over and over. The same water has been cycling for millions of years. Understanding the loop is how you understand where ALL your water really comes from: the sky, on repeat." },
+    { text: "How a WOOL SWEATER happens \u2014 steps mixed up.",
+      ask: "Order these 1-4, from the animal to the sweater you wear.",
+      steps: ["A sheep grows a thick wool coat", "The sheep is sheared (its wool is cut off, like a haircut)", "The wool is spun into yarn", "The yarn is knitted into a sweater"],
+      answer: "1) sheep grows wool  2) sheared  3) spun into yarn  4) knitted into sweater.",
+      why: "A warm sweater started as hair on a living animal. No sheep, no wool; no shearing, no yarn. Each step unlocks the next. Knowing the chain, you'd know a sweater can be un-knitted and re-used \u2014 and that wool is grown, not invented." }
+  ],
+  whoMade: [
+    { text: "A slice of pizza shows up at your table.",
+      ask: "Name at least THREE people whose work had to happen for this pizza to exist.",
+      answer: "A farmer (wheat/tomatoes), a cheesemaker, a truck driver, the cook, maybe a miner for the oven's metal \u2014 many hands.",
+      why: "One little slice is really a team you never see. Realizing how many people's work goes into ordinary things makes you notice how connected everyone is \u2014 and less likely to think stuff 'just happens' by itself." },
+    { text: "The road in front of your house.",
+      ask: "Who and what had to work to make this road? Name the people AND the raw stuff.",
+      answer: "Engineers who planned it, workers who built it, machines, and rock/tar/sand dug from the earth.",
+      why: "Even the ground you walk on was made on purpose by people, out of materials from the earth. Nothing built is an accident. Seeing the work behind 'ordinary' things is the start of being able to build and fix things yourself." },
+    { text: "The book or screen you're reading right now.",
+      ask: "Name the people and materials behind it. Trace it to real work and real stuff.",
+      answer: "Writers, printers/engineers, factory workers, miners (metal & sand for glass), plus trees or oil for materials.",
+      why: "Whatever you're reading took writers, makers, and materials dug from the earth. When you know how much work sits behind a thing, you value it more \u2014 and you understand it isn't magic, it's people plus materials plus effort." },
+    { text: "A single crayon.",
+      ask: "Who made it, and what is it even made of? Trace it back.",
+      answer: "Wax (often from oil or plants) + color (from minerals/chemicals), mixed and molded in a factory by workers and machines.",
+      why: "Even the simplest toy is wax and color from the earth, shaped by people and machines. There is no such thing as a 'simple' object once you look at where its parts came from. Everything is made of something, by someone." },
+    { text: "The lunch you ate today.",
+      ask: "Count the DIFFERENT people whose work fed you \u2014 from soil to plate. How many can you name?",
+      answer: "Farmers, harvesters, packers, drivers, store workers, and whoever cooked it \u2014 easily five to ten people or more.",
+      why: "One meal is a chain of dozens of strangers doing their part. You depend on people you'll never meet, and they depend on people too. That's not a weakness \u2014 it's how the world works. But knowing the chain means you'd also know how to feed yourself if it broke." }
+  ],
+  whatIfGone: [
+    { text: "Your food chain: farm -> truck -> store -> your kitchen.",
+      ask: "If the TRUCKS stopped for two weeks, what happens? Which link is the weak one?",
+      answer: "Stores empty fast \u2014 most food travels far by truck. The 'delivery' link is weak because there's little backup.",
+      why: "A chain is only as strong as its weakest link. Food may be grown fine, but if it can't MOVE, it can't reach you. Spotting the weak link tells you what to be ready for \u2014 like knowing a garden or a stocked shelf is real independence." },
+    { text: "Your power: energy source -> power station -> lines -> your wall.",
+      ask: "If the power LINES go down in a storm, what still works and what stops? Where's the weak link?",
+      answer: "Anything plugged in stops; battery, gas, wood, and sun-powered things still work. The delivery lines are the fragile link.",
+      why: "When you know the chain, a blackout isn't a mystery \u2014 you know exactly which link broke and what still works without it. People who understand their systems stay calm and ready; people who think power 'comes from the wall' just panic." },
+    { text: "Water: sky -> lake -> treatment plant -> pipes -> your tap.",
+      ask: "If the treatment plant broke, could you still drink the tap water safely? What's the risk?",
+      answer: "Not safely \u2014 raw water can carry germs. The cleaning step is a critical link; you'd need to boil or filter water yourself.",
+      why: "The invisible link (cleaning) is often the most important one. Knowing it exists tells you WHY tap water is safe and what to do if that link fails \u2014 boil it, filter it, find another source. That knowledge is the difference between helpless and prepared." },
+    { text: "A phone or tablet: mined metals -> factory -> ship -> store -> you.",
+      ask: "The chain crosses the whole world. Name one link that, if it broke, would stop new phones being made.",
+      answer: "Any link \u2014 no mined metals, no parts; no factory, no build; no ships, no delivery. A long chain has many weak points.",
+      why: "The longer and farther a chain reaches, the more places it can break \u2014 and the less control you have over it. That's worth knowing: things that come from far away, through many hands, are convenient but fragile. Short chains you can see are sturdier." },
+    { text: "Your morning: alarm -> lights -> toast -> hot shower, all needing power.",
+      ask: "One thing they ALL share is a hidden link. What is it \u2014 and what happens if it's gone?",
+      answer: "Electricity (and for some, water). Pull that one link and most of the morning stops at once.",
+      why: "Sometimes many chains secretly share ONE link. Find that shared link and you've found the thing everything depends on. That's powerful to know \u2014 it tells you what matters most and what to protect or prepare for first." }
+  ]
+};
+
+/* ---- origins layout (mirrors trade_offs row layout) ---- */
+function orRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (it.mode === "order" && Array.isArray(it.scrambled)) {
+    h += it.scrambled.length * 15 + 6; // one line per scrambled step
+  }
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    if (it.mode !== "order") h += 22; // one writing line for non-order modes
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function orRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    trace: "TRACE IT BACK", order: "PUT IT IN ORDER",
+    whoMade: "WHO MADE THIS?", whatIfGone: "FIND THE WEAK LINK"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The thing / situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  // "order" mode: print the scrambled steps with a small blank box to number them
+  if (it.mode === "order" && Array.isArray(it.scrambled)) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10); doc.setTextColor(30, 30, 30);
+    it.scrambled.forEach(step => {
+      // little box for the child to write the step number
+      doc.setDrawColor(150); doc.setLineWidth(0.6);
+      doc.rect(bx, cy - 8, 12, 12);
+      if (showAnswers) {
+        doc.setFont("helvetica", "bold"); doc.setTextColor(180, 30, 30);
+        doc.text(String(step.ix + 1), bx + 3.5, cy + 1.5);
+        doc.setFont("helvetica", "normal"); doc.setTextColor(30, 30, 30);
+      }
+      const stepLines = doc.splitTextToSize(step.s, bw - 20);
+      doc.text(stepLines, bx + 18, cy);
+      cy += Math.max(15, stepLines.length * 12 + 3);
+    });
+    cy += 4;
+  }
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    if (it.mode !== "order") {
+      doc.setDrawColor(170); doc.setLineWidth(0.5);
+      doc.line(bx, cy + 8, x + w, cy + 8);
+      cy += 22;
+    }
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
