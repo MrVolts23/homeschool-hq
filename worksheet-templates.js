@@ -9742,6 +9742,314 @@ function orRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — FAIR TRADE (barter, value & voluntary exchange)
+   The math library already has money_sense (coins/change/value),
+   estimate_measure, and time_telling. What was MISSING is the thing
+   underneath money itself: barter and voluntary exchange. Money is
+   just a tool for trading; before kids reason about prices, they can
+   reason from first principles about TRADES.
+
+   This sheet teaches four things at once, and they're all sovereign:
+     1. fairSwap  (arithmetic) — add up the value of each side of a
+        trade and decide if it's even. Real equivalence math.
+     2. bothWin   (reasoning)  — a trade only happens when BOTH sides
+        think they come out ahead. Value isn't a fixed number stamped
+        on a thing; it lives in the person. Two people can both "win"
+        the same trade because they want different things.
+     3. spotBadDeal (manipulation literacy) — someone is PUSHING a
+        lopsided trade with a big smile. Do the math, name the trick,
+        and know you're allowed to say no. Nobody can make you trade.
+     4. whatsItWorth (subjective value) — the same thing is worth
+        different amounts to different people, and in different times
+        and places. "Worth" is a judgement, not a fact printed on a tag.
+
+   Voice: a trade is only fair if BOTH sides walk away glad; do the
+   math before you shake on it; and you never have to make a trade you
+   don't like — walking away is always one of your moves.
+
+   Deterministic, never calls AI. Mirrors the origins/trade_offs
+   pdf* helper layout. fairSwap items are generated arithmetically so
+   the numbers vary each print; the reasoning modes draw from banks.
+============================================================ */
+window.TEMPLATES.fair_trade = {
+  id: "fair_trade",
+  label: "Fair Trade (barter, value & fair swaps)",
+  subject: "math",
+  grades: ["1", "2", "3"],
+  topicHint: "Barter, value reasoning & voluntary exchange",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Trade skill",
+      options: [
+        { value: "fairSwap",     label: "Even swap? (add up each side, is it fair?)" },
+        { value: "bothWin",      label: "Both win? (why a good trade helps BOTH sides)" },
+        { value: "spotBadDeal",  label: "Spot the bad deal (someone's pushing a lopsided trade)" },
+        { value: "whatsItWorth", label: "What's it worth? (value lives in the person)" },
+        { value: "mixed",        label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["fairSwap", "bothWin", "spotBadDeal", "whatsItWorth"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (mode === "fairSwap") {
+        items.push(ftGenFairSwap());
+      } else {
+        if (!pools[mode] || pools[mode].length === 0) pools[mode] = ftShuffle(FT_BANKS[mode].slice());
+        items.push(Object.assign({ mode }, pools[mode].pop()));
+      }
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Fair Trade";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Long before money, people TRADED \u2014 my thing for your thing. Money is just a tool that made trading easier; underneath, it's still swaps. A trade is FAIR when both sides walk away glad they did it. Here's the trick almost nobody says out loud: the SAME thing can be worth different amounts to different people, so two people can BOTH win the same trade. Your job is to do the math on each side, decide if the swap is even, and \u2014 most of all \u2014 remember that you never have to make a trade you don't like. Walking away is always one of your moves.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "Say a marble is worth 2 points and a sticker is worth 3 points. A friend offers you 3 marbles (3 \u00d7 2 = 6 points) for your 2 stickers (2 \u00d7 3 = 6 points). 6 = 6, so that's an EVEN swap \u2014 fair by the numbers. But 'fair' also means you both WANT the trade: if you're sick of marbles and love stickers, you might happily give MORE, because to YOU the stickers are worth extra. Do the math first, then decide with your own head.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 104);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ftRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = ftRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- fair_trade helpers ---- */
+function ftShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+function ftPick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+// fairSwap is generated arithmetically so numbers vary each print.
+// A small set of trade "goods" each carry a point-value the child adds up.
+const FT_GOODS = [
+  { name: "marble",  plural: "marbles",  val: 2 },
+  { name: "sticker", plural: "stickers", val: 3 },
+  { name: "card",    plural: "cards",    val: 4 },
+  { name: "eraser",  plural: "erasers",  val: 5 },
+  { name: "coin",    plural: "coins",    val: 6 }
+];
+
+function ftGoodPhrase(good, n) {
+  return n + " " + (n === 1 ? good.name : good.plural) + " (worth " + good.val + " each)";
+}
+
+function ftGenFairSwap() {
+  // Pick two different goods, build two sides, sometimes even, sometimes not.
+  let a = ftPick(FT_GOODS), b = ftPick(FT_GOODS);
+  let guard = 0;
+  while (b.name === a.name && guard++ < 10) b = ftPick(FT_GOODS);
+  // side A: 1-4 of good a
+  const nA = 1 + Math.floor(Math.random() * 4);
+  const valA = nA * a.val;
+  // Decide even vs. not. If even is possible with a whole count of b, sometimes make it even.
+  const wantEven = Math.random() < 0.5 && (valA % b.val === 0);
+  let nB;
+  if (wantEven) {
+    nB = valA / b.val;
+  } else {
+    nB = 1 + Math.floor(Math.random() * 4);
+    // avoid an accidental exact tie when we wanted it uneven
+    if (nB * b.val === valA) nB = nB === 1 ? 2 : nB - 1;
+  }
+  if (nB < 1) nB = 1;
+  const valB = nB * b.val;
+  const even = valA === valB;
+  const diff = Math.abs(valA - valB);
+  const richer = valA > valB ? "the first pile" : "the second pile";
+  let answer, why;
+  if (even) {
+    answer = "First pile = " + nA + " \u00d7 " + a.val + " = " + valA + ". Second pile = " + nB + " \u00d7 " + b.val +
+             " = " + valB + ". " + valA + " = " + valB + ", so YES \u2014 it's an even swap.";
+    why = "By the numbers it's fair \u2014 both piles add up to the same value. But 'fair by math' and 'a trade you WANT' aren't the same thing. Even when it's even, you still get to say no if you'd rather keep what you have. Even trades are allowed to be turned down too.";
+  } else {
+    answer = "First pile = " + nA + " \u00d7 " + a.val + " = " + valA + ". Second pile = " + nB + " \u00d7 " + b.val +
+             " = " + valB + ". Not equal \u2014 " + richer + " is worth " + diff + " more, so it is NOT an even swap by the numbers.";
+    why = "The math says one side is worth " + diff + " more. That doesn't automatically make it a BAD trade \u2014 maybe the smaller pile has something you want way more. But you should always KNOW when a swap is uneven, so you're choosing it on purpose instead of being fooled into it.";
+  }
+  return {
+    mode: "fairSwap",
+    text: "A friend wants to trade you " + ftGoodPhrase(b, nB) + " for your " + ftGoodPhrase(a, nA) + ".",
+    ask: "Add up each side. Is it an EVEN swap by the numbers? If not, which side is worth more, and by how much?",
+    answer, why
+  };
+}
+
+// bothWin / spotBadDeal / whatsItWorth items: { text, ask, answer, why }
+const FT_BANKS = {
+  bothWin: [
+    { text: "You have two red apples but no snacks you like. A friend has two granola bars and loves apples.",
+      ask: "If you swap one apple for one granola bar, can you BOTH be happier? How is that possible?",
+      answer: "Yes \u2014 you get a snack you like, they get an apple they love. Both walk away better off.",
+      why: "This is the secret of every good trade: value lives in the PERSON, not the thing. The apple is 'worth more' to your friend and the granola bar is 'worth more' to you \u2014 so trading makes you BOTH richer, even though nothing new was made. That's not magic; that's why people trade at all." },
+    { text: "You're stuffed and have a full lunch left. Your friend is starving and has a cool toy they're bored of.",
+      ask: "Could a swap make you both happy? Explain why a trade can help two people at once.",
+      answer: "Yes \u2014 they get food they badly want, you get a toy you want more than extra food. Both win.",
+      why: "A trade isn't one person winning and the other losing. When it's done freely, BOTH sides give up something they want less for something they want more. If even one side didn't think they were winning, they simply wouldn't shake on it." },
+    { text: "Two kids each have a whole pack of trading cards \u2014 but each has doubles the OTHER one is missing.",
+      ask: "Why does swapping doubles make both collections better, even though no new cards appear?",
+      answer: "Each gives away a card they already have for one they're missing \u2014 both collections improve.",
+      why: "Nothing was created, yet both kids end up better off. That's the whole point of trading: moving things to whoever values them most. A doubled card is nearly worthless to you and precious to someone missing it \u2014 the swap unlocks value that was just sitting there." },
+    { text: "A neighbour needs their lawn raked but hates raking. You'd happily rake for some of their old comic books.",
+      ask: "Is this a trade where both sides win? Who gives what, and why is each side glad?",
+      answer: "Yes \u2014 they trade comics (which they don't want) for work they don't want to do; you trade work for comics.",
+      why: "Trades aren't only thing-for-thing \u2014 you can trade your WORK too. Each side hands over what they value less (their time, or old comics) for what they value more. That's a job, a chore-for-pay, and a barter all at once \u2014 and everyone comes out ahead." },
+    { text: "You grew too many tomatoes. Your neighbour grew too many carrots. Neither of you can eat it all.",
+      ask: "Why would trading some tomatoes for some carrots leave you both better off?",
+      answer: "You each swap a food you have too much of for one you have none of \u2014 more variety, less waste, both happier.",
+      why: "When you have plenty of one thing, the NEXT one is worth less to you \u2014 you're sick of tomatoes. Trading your extras for their extras means both families eat better and waste less. This is exactly why whole towns and countries trade: everybody grows what they're good at, then swaps." }
+  ],
+  spotBadDeal: [
+    { text: "A big kid says: \"Give me your whole lunch and I'll give you this one chip. Great deal, trust me!\"",
+      ask: "Is this a fair trade? Do the rough math, name the trick, and say what YOU would do.",
+      answer: "No \u2014 a whole lunch for one chip is wildly uneven. You'd say no thanks and keep your lunch.",
+      why: "A pushy 'trust me, great deal!' is a red flag, not a reason. Fair trades don't need pressure \u2014 the numbers speak for themselves. When someone rushes you or makes you feel silly for thinking, slow WAY down. You are always allowed to say no and walk away." },
+    { text: "\"I'll trade you my old broken toy for your brand-new one \u2014 mine's way cooler, so it's basically even!\"",
+      ask: "Is 'it's cooler' a real reason it's even? What's actually being swapped here?",
+      answer: "No \u2014 broken-for-new is not even. 'Cooler' is just talk; a broken toy is worth less no matter how it's described.",
+      why: "People try to win a trade with WORDS instead of value \u2014 calling junk 'cool,' 'rare,' or 'special.' Ignore the sales talk and ask the plain question: what does each side actually GET? If your side is worth more, it's a bad deal, no matter how nicely it's dressed up." },
+    { text: "\"Trade me your five best cards for my one card now \u2014 or you get NOTHING, last chance!\"",
+      ask: "The 'last chance!' part \u2014 is that a reason to trade? Is five-for-one fair?",
+      answer: "No \u2014 five-for-one is very uneven, and 'last chance' is just pressure. Better to keep your five cards.",
+      why: "'Now or never!' and 'last chance!' are tricks to stop you from thinking. A truly good trade is still good if you sleep on it. Anyone who won't let you think it over is usually hiding that the deal is bad. Real chances come back around; fake ones vanish the moment you slow down." },
+    { text: "A kid offers you a shiny wrapper for your actual snack: \"But look how shiny it is!\"",
+      ask: "Does shiny make it worth your snack? What's each side really worth to you?",
+      answer: "No \u2014 a wrapper you can't use isn't worth a snack you'd enjoy. Shiny isn't the same as valuable.",
+      why: "Shiny, new, and flashy grab your eyes \u2014 which is exactly why people use them to distract you from the value question. Always ask: what can I actually DO with this? A snack feeds you; a wrapper does nothing. Don't trade something useful for something that just LOOKS good." },
+    { text: "\"Everyone at school is trading their whole allowance for these. You don't want to be left out, right?\"",
+      ask: "Is 'everyone's doing it' a reason it's a fair trade? What question should you ask instead?",
+      answer: "No \u2014 lots of people doing something doesn't make it a good deal. Ask what YOU actually get for your money.",
+      why: "'Everyone's doing it' and 'don't be left out' aim at your feelings, not your math. A crowd can be wrong about value \u2014 that's how fads and rip-offs work. Step out of the rush and ask the boring, powerful question: is this actually worth what they want for it? Decide for yourself." }
+  ],
+  whatsItWorth: [
+    { text: "A cold bottle of water.",
+      ask: "Is it worth more to someone in the desert at noon, or someone standing by a river? Why the difference?",
+      answer: "Far more to the person in the desert \u2014 they badly need it; the river person can get water for free.",
+      why: "The bottle didn't change \u2014 the SITUATION did. Value isn't printed on a thing; it depends on how much someone needs or wants it right then. Understand that, and you'll see why the same item can be a bargain in one place and a rip-off in another." },
+    { text: "A warm winter coat.",
+      ask: "Is it worth more in January or in July? Is it worth the same to everyone? Explain.",
+      answer: "Worth more in freezing January than hot July, and more to someone cold than someone who already has three coats.",
+      why: "Worth swings with time, weather, and how much you already have. The tenth coat is worth almost nothing to you; the first coat to someone freezing is worth a lot. 'What's it worth?' always has a hidden second half: worth to WHOM, and WHEN?" },
+    { text: "Your favourite stuffed animal from when you were little.",
+      ask: "Is it worth a lot of money at a store? Is it worth a lot to YOU? Can both be true at once?",
+      answer: "Probably almost nothing at a store, but a lot to you \u2014 both are true. Value to you \u2260 value to a stranger.",
+      why: "Some things are priceless to you and worthless to everyone else, because value lives in the person. That's not silly \u2014 it's real. It also means don't let anyone tell you what your own things are 'worth' to you. That's yours to decide." },
+    { text: "One more slice of pizza when you've already eaten four slices.",
+      ask: "Is the fifth slice worth as much to you as the first slice was? Why does that matter in a trade?",
+      answer: "No \u2014 the fifth is worth much less; you're already full. So you'd trade it away more easily than the first.",
+      why: "The MORE you have of something, the less the next one is worth to you \u2014 that's why full people trade away food and rich collectors swap their doubles. Knowing this, you'll trade from your 'extras' (worth little to you) and hold onto your 'firsts' (worth a lot)." },
+    { text: "A rare sticker that your friend is desperate to complete their set \u2014 but you don't even collect stickers.",
+      ask: "Is that sticker worth more to you or to your friend? How could you use that in a trade?",
+      answer: "Worth far more to your friend. So you could fairly ask for something good in return \u2014 they'll gladly give it.",
+      why: "When you have something that's worth little to you but a LOT to someone else, that's a strong trading position \u2014 and it's fair, because they still win too. Noticing who values a thing most is how you make trades where everyone leaves happy, including you." }
+  ]
+};
+
+/* ---- fair_trade layout (mirrors origins/trade_offs row layout) ---- */
+function ftRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function ftRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    fairSwap: "EVEN SWAP?", bothWin: "BOTH WIN?",
+    spotBadDeal: "SPOT THE BAD DEAL", whatsItWorth: "WHAT'S IT WORTH?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation / trade offer
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
