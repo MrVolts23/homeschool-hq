@@ -10049,6 +10049,278 @@ function ftRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
   return cy;
 }
 
+window.TEMPLATES.sure_maybe_no = {
+  id: "sure_maybe_no",
+  label: "Sure, Maybe, or No Way? (chance, luck & likelihood)",
+  subject: "math",
+  grades: ["1", "2", "3"],
+  topicHint: "Likelihood, chance, randomness & luck reasoning",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking skill",
+      options: [
+        { value: "howLikely",   label: "How likely? (certain / likely / unlikely / no way)" },
+        { value: "fairChance",  label: "Fair chance? (does everyone have the same shot?)" },
+        { value: "luckMemory",  label: "Does luck remember? (streaks & 'it's due')" },
+        { value: "workedOnce",  label: "Worked once? (one time isn't proof)" },
+        { value: "mixed",       label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["howLikely", "fairChance", "luckMemory", "workedOnce"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = smnShuffle(SMN_BANKS[mode].slice());
+      items.push(Object.assign({ mode }, pools[mode].pop()));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Sure, Maybe, or No Way?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Some things are SURE to happen, some MIGHT happen, and some are NO WAY \u2014 they just can't. Most of life sits in the middle: maybe. The trick grown-ups get fooled by is thinking they can control or predict the maybes \u2014 lucky socks, 'I'm due for a win,' 'it worked once so it always works.' Chance doesn't remember and it doesn't play favourites. Your job on each of these: think it through, sort how likely it really is, and don't let anybody sell you a sure thing that isn't one.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "A bag has 9 red marbles and 1 blue one. You reach in without looking. Pulling RED is likely (there are way more). Pulling BLUE is unlikely (only one). Pulling GREEN is NO WAY \u2014 there are none in the bag. And here's the sneaky part: even if you pull red five times in a row, the bag is exactly the same \u2014 blue is still just as unlikely on the next try. Chance has no memory. Count what's really in the bag; don't count on a feeling.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 112);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = smnRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = smnRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- sure_maybe_no helpers ---- */
+function smnShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+const SMN_BANKS = {
+  // HOW LIKELY: sort an everyday event as certain / likely / unlikely / impossible.
+  howLikely: [
+    { text: "The sun will come up tomorrow morning.",
+      ask: "Is this SURE, likely, unlikely, or NO WAY? How do you know?",
+      answer: "Sure \u2014 it has come up every single day of your whole life and there's a reason it does (Earth keeps spinning).",
+      why: "The strongest 'sure' isn't a feeling \u2014 it's a thing that happens the same way every time because there's a real cause behind it. That's different from just hoping." },
+    { text: "You will grow wings and fly to school on your own.",
+      ask: "Is this SURE, likely, unlikely, or NO WAY? Why?",
+      answer: "No way \u2014 people don't grow wings; our bodies just don't work like that.",
+      why: "'No way' means it breaks how the world actually works, not just that it's rare. Knowing the difference between 'never happens' and 'hardly ever' keeps you from being fooled by 'miracle' promises." },
+    { text: "It will rain at some point this month.",
+      ask: "Is this SURE, likely, unlikely, or NO WAY? What would change your answer?",
+      answer: "Likely in most places \u2014 but it depends where you live. In a rainforest it's nearly sure; in a desert it might be unlikely.",
+      why: "The honest answer is 'it depends' \u2014 and a good thinker says WHAT it depends on. Beware anyone who gives you one confident answer without asking where or when." },
+    { text: "You will flip a coin and it lands on heads.",
+      ask: "Is this SURE, likely, unlikely, or NO WAY? Roughly what are the chances?",
+      answer: "It's a maybe \u2014 about half the time. Two sides, one is heads, so it's an even 50-50.",
+      why: "A coin is the cleanest 'maybe' there is: two ways it can go, no way to know which. Nobody can truly call a coin flip \u2014 anyone who says they can is guessing or lying." },
+    { text: "You will roll a normal 6-sided die and get a 7.",
+      ask: "Is this SURE, likely, unlikely, or NO WAY? Look at the die first.",
+      answer: "No way \u2014 a normal die only has 1 through 6 on it. There is no 7 to land on.",
+      why: "Before you judge the odds, check what's actually possible. If the outcome isn't even ON the die, all the luck in the world won't make it happen. Count the real choices first." },
+    { text: "Someone at your school has the same birthday as you.",
+      ask: "Is this SURE, likely, unlikely, or NO WAY? Does the size of the school matter?",
+      answer: "The bigger the school, the more likely \u2014 with hundreds of kids it's actually pretty likely, even though it feels rare.",
+      why: "Your gut says 'no way, that's a huge coincidence,' but with lots of people, matches get likely fast. Rare-feeling things happen all the time when there are enough tries \u2014 that's not magic, it's just numbers." },
+    { text: "You will win a giant prize in a game where 1 in a million tickets wins.",
+      ask: "Is this SURE, likely, unlikely, or NO WAY? Why do so many people still play?",
+      answer: "Very unlikely \u2014 almost everyone who plays loses. People play because the prize is exciting and losing feels far away.",
+      why: "'Unlikely' and 'someone always wins' are both true at once \u2014 and sellers show you the rare winner, never the millions who lost. Ask 'what happens to MOST people?', not 'could I be the lucky one?'" },
+    { text: "You will drop a ball and it falls DOWN toward the ground.",
+      ask: "Is this SURE, likely, unlikely, or NO WAY? What makes you so certain?",
+      answer: "Sure \u2014 gravity pulls things down every time. It has never once fallen up.",
+      why: "Some 'sures' are as solid as it gets because a rule of nature is behind them. Those are the promises you can actually build on \u2014 unlike a 'sure thing' someone is trying to sell you." }
+  ],
+  // FAIR CHANCE: does everyone / every outcome really have an equal shot? spot rigged or lopsided setups.
+  fairChance: [
+    { text: "A jar has 20 blue jellybeans and 2 red ones. You grab one without looking and hope for red.",
+      ask: "Does red have a fair chance? Is hoping harder going to help?",
+      answer: "No \u2014 there are way more blue, so blue is much more likely. Hoping doesn't change what's in the jar.",
+      why: "The chances live in the JAR, not in your head. Wanting red really badly changes nothing. To improve your odds you'd have to change the jar \u2014 feelings don't move marbles." },
+    { text: "Two kids race, but one gets a 10-second head start every time.",
+      ask: "Is this a fair chance for both to win? What would make it fair?",
+      answer: "No \u2014 the head start makes it lopsided. It's fair only if both start together (or the faster one starts behind).",
+      why: "A 'game' can look like luck or skill but be rigged from the start. Before you play anything, ask: does everyone truly start equal? If not, the winner was half-decided before it began." },
+    { text: "A spinner is split into a HUGE red part and a tiny yellow sliver. A prize needs yellow.",
+      ask: "Is landing on yellow a fair chance? Would you play if it cost your allowance?",
+      answer: "No \u2014 yellow is a tiny sliver, so it's very unlikely. The big red area will win almost every spin.",
+      why: "People design games so the losing part LOOKS small but is actually huge, or the winning part looks reachable but is a sliver. Look at how BIG each part really is, not how the prize is described." },
+    { text: "You and a friend split a chocolate bar by one person breaking it and the OTHER person picking first.",
+      ask: "Is this a fair way to split? Why does letting the other kid pick make it fair?",
+      answer: "Yes, it's fair \u2014 the breaker tries to make both pieces even, because they'll get whatever piece is left.",
+      why: "This is a clever fairness trick: the person who divides doesn't choose. It lines up everyone's interests so no one can cheat. Notice how a good RULE can make things fair without anyone having to be nice." },
+    { text: "A grown-up says 'pick a number 1 to 10, if you're right I'll give you a dollar' \u2014 then never tells you the number.",
+      ask: "Did you have a fair chance? What's missing?",
+      answer: "Not a fair one \u2014 you can't tell if they ever really had a number. With no way to check, they could always say you're wrong.",
+      why: "A game you can't check isn't a fair game \u2014 it's just someone deciding. Real fairness means the answer is set and provable BEFORE you guess. 'Trust me' is not the same as fair." },
+    { text: "Everyone in class puts their name in a hat once, and one name is pulled for a prize.",
+      ask: "Does everyone have a fair chance? Why is 'one name each' important?",
+      answer: "Yes \u2014 one name each means everyone has exactly the same shot. That's what makes a draw fair.",
+      why: "A draw is fair only when everyone's in it equally and no one can peek or add extra slips. When you hear about a 'random winner,' ask: was everyone in it the same amount, and could anyone cheat?" },
+    { text: "A carnival game claims 'almost everyone wins!' but you notice the ring is barely bigger than the bottle.",
+      ask: "Is 'almost everyone wins' likely true? What does your own looking tell you?",
+      answer: "Probably not \u2014 if the ring barely fits, most people miss. Your eyes tell you more than their sign does.",
+      why: "The people selling a game get to write the sign; they don't get to write what your eyes see. Trust the setup you can measure over the promise you're told. Go look at the ring." }
+  ],
+  // LUCK MEMORY: chance has no memory. gambler's-fallacy & lucky-charm reasoning.
+  luckMemory: [
+    { text: "You flipped a coin and got heads 4 times in a row. Your friend says 'tails is DUE now for sure.'",
+      ask: "Is tails more likely on the next flip because of the streak? Why or why not?",
+      answer: "No \u2014 the coin doesn't remember. The next flip is still a fresh 50-50, same as always.",
+      why: "This is the biggest luck trap there is: thinking a run of one thing makes the other 'owed.' A coin has no memory and no fairness meter. Every flip starts over. 'It's due' has cost people everything." },
+    { text: "A kid wears the same 'lucky' socks and their team wins. Now they think the socks did it.",
+      ask: "Did the socks make the team win? How could you test that idea?",
+      answer: "No \u2014 socks can't play the game. To test it, notice all the times they wore them and LOST too, not just the wins.",
+      why: "We remember the hits and forget the misses \u2014 that's how a 'lucky' anything is born. To check any lucky charm, count the losses too. The socks never once caught a ball." },
+    { text: "Someone lost at a game 6 times, so they bet even MORE money, sure they'll win it back.",
+      ask: "Are they more likely to win now? What's the real reason they keep betting?",
+      answer: "No \u2014 losing before doesn't make winning more likely. They keep betting because losing hurts and they want it back.",
+      why: "Past losses don't 'store up' a win \u2014 that's a story we tell to feel better. This exact trap is how people lose their savings. The bravest move is to stop, not to double down." },
+    { text: "You pick the number 7 every week because '7 finally has to come up.'",
+      ask: "Is 7 more likely because it hasn't come up in a while? Why?",
+      answer: "No \u2014 each draw is fresh; 7 has the same small chance every time whether it's been picked before or not.",
+      why: "Numbers don't wait their turn. A ball that hasn't come up isn't 'hiding' or 'due' \u2014 the machine doesn't know or care what happened last week. Every draw is its own separate roll of the dice." },
+    { text: "A weather app was right yesterday, so a kid says 'it CAN'T be wrong two days in a row.'",
+      ask: "Does being right yesterday make it surer today? Why or why not?",
+      answer: "No \u2014 today's forecast stands on its own. Being right once doesn't 'protect' the next guess from being wrong.",
+      why: "One right answer doesn't build up credit against a wrong one. Judge each prediction by ITS reasons, not by a streak. Chance and guesses don't take turns being right." },
+    { text: "Rolling dice, a player blows on them and shakes hard, sure it changes what they roll.",
+      ask: "Does blowing or shaking change the odds of the roll? What actually decides it?",
+      answer: "No \u2014 the die still has the same six sides. How you throw it doesn't change what numbers exist.",
+      why: "Little rituals feel powerful, but they don't touch the actual chances. What decides the roll is what's ON the die, not your special shake. Comfort is fine; just don't bet on it working." }
+  ],
+  // WORKED ONCE: one result (good or bad) isn't proof. small samples, luck vs. real cause.
+  workedOnce: [
+    { text: "A kid tried a 'brain drink' once, then aced one spelling test, so they say the drink makes you smart.",
+      ask: "Is one good test enough to prove the drink works? What would prove it better?",
+      answer: "No \u2014 one test could just be luck or good studying. You'd need to compare many tests with and without the drink.",
+      why: "One time is a story, not proof. Maybe they studied, maybe it was an easy test, maybe luck. Real proof needs it to work again and again, and to fail without the thing. 'It worked once' sells a lot of junk." },
+    { text: "Grandpa smoked and lived to 95, so a cousin says 'see, smoking doesn't hurt you.'",
+      ask: "Does one person prove smoking is safe? What are we not seeing?",
+      answer: "No \u2014 one lucky person can't outweigh the millions it harmed. We only heard about the one who was fine.",
+      why: "One rare survivor doesn't beat what happens to MOST people. We hear the lucky story because it's surprising, and forget the many quiet ones who weren't lucky. Ask 'what happens to most?', not 'who got away with it?'" },
+    { text: "A kid took a shortcut once and got home fast, so now they swear it's always faster.",
+      ask: "Does one fast trip prove it's the faster way? How could you actually find out?",
+      answer: "No \u2014 maybe that day the main road was busy. You'd have to try both ways several times to really know.",
+      why: "One trip is one throw of the dice \u2014 traffic, luck, timing. To trust a claim, you test it a few times, not once. Beware 'I tried it and it worked' \u2014 that's the weakest evidence there is." },
+    { text: "An ad shows ONE person who used a gadget and got amazing results.",
+      ask: "Does one happy person prove it works for everyone? What are they NOT showing you?",
+      answer: "No \u2014 they picked the best story on purpose. They aren't showing the many people it did nothing for.",
+      why: "Ads hand-pick the shiniest result and hide the rest \u2014 that's their whole job. One glowing example is chosen, not typical. Always ask: how did it go for the AVERAGE person, not the one on TV?" },
+    { text: "It rained the one day a kid forgot their umbrella, so they decide 'forgetting always makes it rain.'",
+      ask: "Did forgetting the umbrella cause the rain? Why does it FEEL that way?",
+      answer: "No \u2014 the sky doesn't watch your umbrella. It feels true because that bad day sticks in your memory.",
+      why: "Our brains love to connect a memorable event to whatever we did that day \u2014 even when they've got nothing to do with each other. A cause has to actually be able to DO the thing. Clouds can't see your backpack." },
+    { text: "A new kid answered one question right on their first day, so everyone decides they're a 'genius.'",
+      ask: "Is one right answer enough to know how smart someone is? Why go slow on this?",
+      answer: "No \u2014 one answer barely tells you anything. Everyone has good and bad days; you'd learn more over many days.",
+      why: "Judging a whole person from one moment \u2014 good OR bad \u2014 is a small sample. First impressions are one data point. Give people, and yourself, more than one try before you decide who they are." }
+  ]
+};
+
+/* ---- sure_maybe_no layout (mirrors fair_trade / trade_offs row layout) ---- */
+function smnRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function smnRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    howLikely: "HOW LIKELY?", fairChance: "FAIR CHANCE?",
+    luckMemory: "DOES LUCK REMEMBER?", workedOnce: "WORKED ONCE?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
 /* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
