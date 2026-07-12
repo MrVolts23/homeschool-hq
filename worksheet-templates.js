@@ -10321,6 +10321,246 @@ function smnRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
   return cy;
 }
 
+window.TEMPLATES.is_that_true = {
+  id: "is_that_true",
+  label: "Is That True, or Is That My Head? (checking your own thinking)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Metacognition: separating facts from the stories, guesses & assumptions your own mind adds",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking-check skill",
+      options: [
+        { value: "factVsStory",  label: "What happened vs. the story I told myself" },
+        { value: "jumping",      label: "Jumping to conclusions (I guessed and called it fact)" },
+        { value: "alwaysNever",  label: "Always / never / everyone (the overgeneralizing trap)" },
+        { value: "howWouldIKnow", label: "How would I actually know? (check it yourself)" },
+        { value: "mixed",        label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["factVsStory", "jumping", "alwaysNever", "howWouldIKnow"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = ittShuffle(ITT_BANKS[mode].slice());
+      items.push(Object.assign({ mode }, pools[mode].pop()));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Is That True, or Is That My Head?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Your brain is fast \u2014 so fast that it often fills in the blanks with a GUESS and then hands it to you like it's a fact. \"She's mad at me.\" \"I'll never get this.\" \"Everyone saw.\" Most of the time you didn't SEE any of that; your head made it up in a blink. That's not being dumb \u2014 every brain does it. The sovereign move is to catch it. For each one, pull apart two things: what actually HAPPENED (what a camera would have recorded) and the STORY your head added on top. Then ask the most powerful question there is: \"Is that true \u2014 or is that just what my head decided?\" You don't have to believe every thought you think.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "Say: \"My friend walked past and didn't say hi. She's mad at me.\" WHAT HAPPENED (camera): she walked past without saying hi. THE STORY MY HEAD ADDED: \"she's mad at me\" \u2014 nobody said that; my head guessed the reason. Could there be other reasons? She didn't see me, she was in a hurry, she was thinking hard about something. HOW COULD I CHECK? Just ask her. The fact is real; the story is only a maybe until I check. Don't let a maybe run your whole day.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 110);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ittRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = ittRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- is_that_true helpers ---- */
+function ittShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Every item: { text, ask, answer, why }
+const ITT_BANKS = {
+  factVsStory: [
+    { text: "You wave at a kid across the playground. They don't wave back. You think: \"They don't like me.\"",
+      ask: "What actually HAPPENED (what a camera saw)? What STORY did your head add on top?",
+      answer: "Happened: you waved, they didn't wave back. Story your head added: \"they don't like me.\" Nobody said that \u2014 you guessed the reason.",
+      why: "A camera only records the waving and the not-waving-back. \"Doesn't like me\" is a reason your brain invented in a split second. Maybe they didn't see you, were squinting into the sun, or were focused on a game. The event is a fact; the reason WHY is a story you made up \u2014 and stories can be wrong." },
+    { text: "The teacher gives the class a big pile of homework. You think: \"She's trying to ruin our weekend.\"",
+      ask: "Separate the FACT from the STORY. What did your head add that you can't actually see?",
+      answer: "Fact: there's a lot of homework. Story: \"she's trying to ruin our weekend\" \u2014 you invented her secret reason.",
+      why: "You can see the homework; you can't see inside her head. Your brain filled the gap with the worst reason it could think of. Maybe there's a test coming, maybe she has to cover a topic \u2014 or maybe she just misjudged how long it takes. Guessing someone's hidden motive as if it's a fact is one of the sneakiest tricks your own mind plays." },
+    { text: "Your little brother knocks over your tower of blocks. You think: \"He did it on purpose to be mean.\"",
+      ask: "What happened, exactly? What's the part your head is guessing about?",
+      answer: "Happened: the tower got knocked over. Guessed: \"on purpose, to be mean\" \u2014 you don't actually know his reason.",
+      why: "The blocks falling is real. WHY they fell \u2014 clumsy accident, he tripped, he was reaching for something, or yes, maybe on purpose \u2014 that's the part you're guessing. Notice how your head jumps straight to the meanest option? Catching that jump is the whole skill. \"I don't actually know why yet\" is a perfectly good place to stand." },
+    { text: "You get a lower mark than you hoped on a drawing. You think: \"I'm bad at art.\"",
+      ask: "What's the real fact here? What giant story did your head build out of one small thing?",
+      answer: "Fact: one drawing got a lower mark than you wanted. Story: \"I'm bad at art\" \u2014 a huge conclusion from one drawing.",
+      why: "One mark on one drawing on one day is the fact. \"I'm bad at art\" is your head turning a single moment into a permanent label about WHO YOU ARE. That's a trap, because it makes you quit. A truer sentence is: \"This drawing didn't go how I wanted \u2014 yet.\" One result is data, not a life sentence." },
+    { text: "Two friends are laughing near you and you didn't hear the joke. You think: \"They're laughing at me.\"",
+      ask: "What did you actually see and hear? What did your head fill in that you have no proof of?",
+      answer: "Saw/heard: two friends laughing; you didn't hear why. Filled in: \"at me\" \u2014 pure guess, no proof at all.",
+      why: "Laughing is the fact. WHO or WHAT they're laughing at is the blank \u2014 and your head slammed the scariest answer into it. There are a hundred things people laugh at; \"me\" is just one, and usually not the one. When you feel that hot flash of \"they're laughing at me,\" that's your cue to pause and notice: I made that up." }
+  ],
+  jumping: [
+    { text: "Your friend hasn't texted back in an hour. You decide: \"They're ignoring me / they're mad.\"",
+      ask: "You know one fact. How many jumps did your head take to get to \"they're mad\"? Name another reason.",
+      answer: "One fact: no text back yet in an hour. Your head jumped straight to \"mad/ignoring.\" Other reasons: busy, phone dead, didn't see it, doing homework, sleeping.",
+      why: "This is mind-reading \u2014 acting like you KNOW what's in someone's head when you only know one small fact. \"No reply for an hour\" has dozens of boring explanations, almost none of them \"they hate me.\" When your brain reads a mind, catch it and say: \"I'm guessing, not knowing.\"" },
+    { text: "You have to give a talk in front of the class tomorrow. You're already sure: \"It's going to be a disaster.\"",
+      ask: "The talk hasn't happened yet. What is your head doing when it's this sure about the future?",
+      answer: "Your head is fortune-telling \u2014 predicting a bad future as if it already happened. Truth: nobody knows how tomorrow goes, including you.",
+      why: "This trap is called fortune-telling: your brain pretends it can see the future, and it almost always predicts the worst. But a prediction isn't a fact \u2014 it's a guess wearing a fact's costume. \"It might be hard\" is honest. \"It's DEFINITELY going to be a disaster\" is your head bluffing. You can prepare for hard; you can't prepare for a fake certainty." },
+    { text: "A new kid doesn't talk much on their first day. You conclude: \"They're stuck-up / they think they're better than us.\"",
+      ask: "What did you observe? What's the leap your head made, and what's a kinder reason that fits the same fact?",
+      answer: "Observed: quiet on day one. Leap: \"stuck-up.\" A reason that fits just as well: nervous, shy, doesn't know anyone yet, having a rough day.",
+      why: "Quiet is the fact; \"stuck-up\" is a motive you assigned with zero evidence. Notice that \"shy and nervous\" fits the exact same behaviour \u2014 and on a first day it's far more likely. When two stories fit the facts equally, your brain grabs the meanest one out of habit. Sovereign thinkers pause and ask: what ELSE could explain this?" },
+    { text: "You see one ant in the kitchen. You announce: \"The whole house is infested with ants!\"",
+      ask: "What do you actually know? How big did your head make it, and how could that fool you?",
+      answer: "Known: one ant, one time, one spot. Head's version: \"the whole house is infested.\" That's one fact blown up into a huge claim.",
+      why: "Going from one to \"everywhere\" is jumping to a conclusion with size. One ant means one ant. Maybe there are more \u2014 but you'd have to actually LOOK to know, not just panic. This same trap works on grown-ups: one scary story on the news becomes \"the whole world is dangerous.\" Count what you've actually seen before you decide how big it is." },
+    { text: "Your parent looks serious and quiet at dinner. You think: \"I'm in trouble / I did something wrong.\"",
+      ask: "What's the fact? Why does your head assume it's ABOUT YOU, and what else could it be?",
+      answer: "Fact: parent seems serious and quiet. Head's assumption: \"it's about me / I'm in trouble.\" Could be: tired, worried about work, money, a friend, feeling sick \u2014 nothing to do with you.",
+      why: "Brains love to assume everything is about US \u2014 it's called personalizing. But most of what other people feel has nothing to do with you at all. A quiet parent is just a quiet parent until you have a reason to think otherwise. Instead of guessing and worrying, you could just ask: \"You okay?\" Facts beat fear." }
+  ],
+  alwaysNever: [
+    { text: "You miss a goal in a soccer game and think: \"I ALWAYS mess up. I NEVER get it right.\"",
+      ask: "Are \"always\" and \"never\" really true? Find one time it wasn't true. What's a more honest word?",
+      answer: "No \u2014 you have gotten it right before, so \"always/never\" is false. Honest version: \"I missed THIS one,\" or \"sometimes I miss.\"",
+      why: "\"Always\" and \"never\" are almost always lies your feelings tell. It only takes ONE counter-example to break them \u2014 one time you scored, one time it went fine. These words feel true when you're upset, but they turn one bad moment into a forever-truth. Swap them for \"this time\" or \"sometimes\" and the trap loses its grip." },
+    { text: "After one argument, you decide: \"My sister and I NEVER get along. We fight about EVERYTHING.\"",
+      ask: "Is \"never\" and \"everything\" accurate? Can you think of a time you got along? What's truer?",
+      answer: "No \u2014 you've gotten along plenty; you don't fight about everything. Truer: \"we argued today about this one thing.\"",
+      why: "One fresh argument makes your brain rewrite history into \"we NEVER get along.\" But if you actually count, there are loads of times you were fine together. \"Everything\" and \"never\" erase all of that. Naming the ONE real thing you argued about (\"the TV remote\") is honest \u2014 and way easier to fix than \"everything.\"" },
+    { text: "One kid was unkind to you at recess. You think: \"EVERYONE at this school is mean.\"",
+      ask: "How many kids were actually unkind? How many go to the school? Is \"everyone\" fair to the rest?",
+      answer: "One kid was unkind. Hundreds of kids go there. \"Everyone is mean\" is one person stretched over the whole crowd \u2014 not fair or true.",
+      why: "This is overgeneralizing: taking one person's bad behaviour and painting the entire group with it. It's the exact same faulty move behind every stereotype \u2014 \"one of THEM did X, so they're ALL like that.\" Catching it in your own small life (\"one kid, not everyone\") is how you learn to spot it when grown-ups and the news do it big." },
+    { text: "You try a new food, don't like it, and declare: \"I HATE all vegetables. I'll NEVER like any of them.\"",
+      ask: "You tried how many vegetables just now? Is it fair to judge ALL of them and the whole future?",
+      answer: "You tried one, this once. \"All vegetables\" and \"never\" judge hundreds of foods and your entire future from a single bite.",
+      why: "One bite of one thing on one day cannot honestly tell you about ALL vegetables forever. Tastes even change as you grow. \"I didn't like THAT one today\" is the true-sized sentence. Watch how often \"all\" and \"never\" sneak in to make a tiny experience sound like a giant permanent fact \u2014 then cut them down to size." },
+    { text: "You get one hard homework question wrong and think: \"I'm just NOT a math person. I'll NEVER understand this.\"",
+      ask: "Is 'not a math person' a fact or a story? What did you actually get wrong \u2014 all of math, or one question?",
+      answer: "Story, not fact. You got ONE question wrong \u2014 not all of math, not forever. \"I haven't figured out THIS yet\" is the true version.",
+      why: "\"I'm not a math person\" is a label that tells you to quit \u2014 and it's built from \"never\" and \"just not,\" which are feeling-words, not facts. Nobody is born knowing math; everyone learns it one confusing question at a time. The magic word that breaks this trap is \"YET.\" \"I don't get it YET\" keeps the door open. \"Never\" slams it." }
+  ],
+  howWouldIKnow: [
+    { text: "You're certain your friend is secretly annoyed with you.",
+      ask: "How could you ACTUALLY find out if that's true, instead of just believing your worry?",
+      answer: "Ask them directly, or watch what they actually do (not what you imagine). The real test is asking \u2014 your worry isn't evidence.",
+      why: "A feeling of \"they're annoyed\" is not proof of anything \u2014 it's a guess in your body. The only real way to know what's in someone's head is to ask them or watch their real actions over time. When you catch yourself SURE about something you can't see, the sovereign move is: how would I check this? If you can't check it, you don't actually know it \u2014 so hold it loosely." },
+    { text: "You believe you're \"the slowest reader in the whole class.\"",
+      ask: "Is that something you've measured, or just a feeling? How could you find out for real?",
+      answer: "It's a feeling unless you've actually compared. You'd have to somehow measure or ask \u2014 and even then, \"slowest\" one day changes with practice.",
+      why: "\"The slowest in the whole class\" sounds like a fact, but have you tested every classmate? Almost certainly not \u2014 your brain just crowned you last place because you felt behind. Before you believe a ranking about yourself, ask: did I measure this, or did I feel it? Feelings are real, but they are not measurements." },
+    { text: "A kid tells you: \"That new movie is the best movie ever made. Everyone agrees.\"",
+      ask: "How could you find out if 'everyone agrees' is really true? What would actually settle it?",
+      answer: "You can't know 'everyone' agrees \u2014 nobody asked everyone. You'd check by asking around yourself, reading different reviews, or just watching it and deciding.",
+      why: "\"Everyone agrees\" is a claim you can test \u2014 and it falls apart fast, because nobody has asked everyone about anything. This is the same skill you use on ads and news: when someone says \"everyone knows\" or \"everyone agrees,\" ask how they could possibly know that. Usually they can't. The best test of a movie is your own eyes, not a crowd." },
+    { text: "You think: \"If I raise my hand and get it wrong, the whole class will laugh and remember it forever.\"",
+      ask: "Is that a fact or a prediction? How could you check whether it's likely \u2014 and what usually really happens?",
+      answer: "It's a prediction (fortune-telling), not a fact. Check it by remembering: how many wrong answers from OTHER kids do you actually remember from last week?",
+      why: "Here's a great way to test a scary prediction: run it on other people. Can you name three wrong answers other kids gave last week? Almost nobody can \u2014 because people forget them in minutes and are busy worrying about their own stuff. That's evidence your \"they'll remember forever\" prediction is false. Checking a fear against real evidence is how you shrink it." },
+    { text: "You wake up sure it's going to be \"the worst day ever\" before anything has even happened.",
+      ask: "Has the day happened yet? How would you actually know how it goes \u2014 and who gets a say in it?",
+      answer: "No \u2014 the day hasn't happened, so it's a prediction, not a fact. You find out by living it \u2014 and your own choices help decide how it goes.",
+      why: "You cannot know a day is \"the worst\" before living it \u2014 that's your head fortune-telling again. And here's the sovereign part: a day isn't just something that happens TO you. What you do, notice, and pay attention to changes how it goes. So a made-up \"worst day ever\" can actually help cause a bad day if you believe it. Don't let a guess about the future steal a day you haven't lived yet." }
+  ]
+};
+
+/* ---- is_that_true layout (mirrors fair_trade/trade_offs row layout) ---- */
+function ittRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function ittRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    factVsStory: "FACT vs. STORY", jumping: "JUMPING TO A CONCLUSION",
+    alwaysNever: "ALWAYS / NEVER / EVERYONE", howWouldIKnow: "HOW WOULD I KNOW?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation / thought
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
 /* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
