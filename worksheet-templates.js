@@ -10561,6 +10561,250 @@ function ittRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
   return cy;
 }
 
+window.TEMPLATES.follow_the_incentive = {
+  id: "follow_the_incentive",
+  label: "Who Wants You To? (follow the reason behind the message)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Incentives & motive literacy: who benefits when you believe, buy, or do a thing \u2014 and what they get out of it",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking skill",
+      options: [
+        { value: "whoBenefits", label: "Who benefits? (cui bono \u2014 who gains if you believe it)" },
+        { value: "whatsInItForThem", label: "What's in it for them? (the reason behind the message)" },
+        { value: "freeIsntFree", label: "\"Free\" isn't free (what are you really paying with?)" },
+        { value: "sameFactTwoSpins", label: "Same fact, two spins (who's telling it changes the story)" },
+        { value: "mixed", label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["whoBenefits", "whatsInItForThem", "freeIsntFree", "sameFactTwoSpins"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = ftiShuffle(FTI_BANKS[mode].slice());
+      items.push(Object.assign({ mode }, pools[mode].pop()));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Who Wants You To?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Almost every message that reaches you \u2014 an ad, a rule, a \"you HAVE to see this,\" a \"trust me\" \u2014 was sent by somebody who wants something. That doesn't make them evil; it just means the message isn't the whole truth. The sovereign question, the one that unlocks most of them, is: WHO WANTS ME TO believe this, buy this, or do this \u2014 and what do THEY get out of it? Follow the reason back to the person, and ask what's in it for them. When you can see who gains, you can decide for yourself instead of being someone else's plan. You're allowed to want the thing anyway \u2014 you just want it with your eyes open.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "A cereal box shouts: \"NEW! The breakfast of CHAMPIONS \u2014 now with a free toy inside!\" WHO WANTS YOU TO want it? The company that makes the cereal. WHAT DO THEY GET? Your family's money. The \"free\" toy isn't free \u2014 it's bait to make YOU beg for that box instead of the plain one, and the toy's price is already baked into what your parents pay. Is the cereal bad? Maybe, maybe not \u2014 that's a separate question you decide by reading what's actually in it. Spotting who gains doesn't tell you what to choose; it just makes sure YOU'RE the one choosing.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 116);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ftiRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = ftiRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- follow_the_incentive helpers ---- */
+function ftiShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Every item: { text, ask, answer, why }
+const FTI_BANKS = {
+  // WHO BENEFITS: name the person/group who gains if you believe or do the thing.
+  whoBenefits: [
+    { text: "A commercial says: \"Real kids LOVE these sneakers! Everybody's wearing them!\"",
+      ask: "Who paid for that commercial, and who benefits if you believe \"everybody's wearing them\"?",
+      answer: "The sneaker company paid for it, and they benefit \u2014 they sell more shoes and make more money if you feel like you have to have them.",
+      why: "The company isn't your friend giving advice; they're the one who profits from every pair sold. \"Everybody's wearing them\" is designed to make you feel left out so you'll push your parents to buy. Once you see who's paying to send the message, the message stops feeling like a fact and starts looking like what it is \u2014 a sales pitch." },
+    { text: "A big kid tells your friend: \"Give me your snack and I'll let you sit with us at lunch.\"",
+      ask: "Who gets the good part of this deal? Who's really benefiting here?",
+      answer: "The big kid benefits \u2014 they get a free snack. Your friend gives up something real for a \"maybe\" that the big kid controls and can take back anytime.",
+      why: "When someone offers you belonging, safety, or being \"cool\" in exchange for your stuff or your obedience, follow who ends up ahead. Here the big kid risks nothing and gains a snack; your friend pays and gets only a promise. A deal where one side holds all the power isn't a friendship offer \u2014 it's a toll booth." },
+    { text: "A game on a tablet keeps flashing: \"You're SO close! Just watch one quick ad to keep playing!\"",
+      ask: "Who makes money each time you watch that ad \u2014 you, or someone else?",
+      answer: "The game makers (and the advertisers) make money every time you watch. You get nothing but a few more minutes of a game built to keep you watching more ads.",
+      why: "Free games are usually free because YOU are the product \u2014 your attention is being sold to advertisers. \"You're so close\" is a hook to keep you glued so they can show you more ads. Knowing the game is designed to farm your attention lets you decide how much of it you actually want to give away." },
+    { text: "A kid says: \"Don't tell the teacher what happened. Real friends keep secrets.\"",
+      ask: "Who is protected if you stay quiet? Who benefits from the rule \"real friends keep secrets\"?",
+      answer: "The kid who did something wrong is protected \u2014 they benefit. The \"real friends keep secrets\" line exists to keep YOU quiet so THEY don't get in trouble.",
+      why: "Watch for rules that are handed to you right when someone needs you to follow them \u2014 that's a clue the rule was made for their benefit, not yours. A secret that only protects the person who made the mess isn't loyalty; it's them using your friendship as a shield. You get to decide who you protect." },
+    { text: "An influencer online says: \"This drink gave me SO much energy \u2014 use my code for 10% off!\"",
+      ask: "Who benefits when you use that code? Is the influencer just being helpful?",
+      answer: "The influencer AND the drink company benefit \u2014 the influencer gets paid for every person who uses the code, and the company sells more drinks. It's an ad, even if it doesn't look like one.",
+      why: "A discount code isn't a gift \u2014 it's a receipt that tells the company the influencer sent you, so they can pay them. That's the reason the video exists. The whole point of influencer ads is to feel like a friend's tip instead of a commercial. Ask \"is this person getting paid?\" and the friendly feeling snaps back into focus as a sales job." }
+  ],
+  // WHAT'S IN IT FOR THEM: reason back from the message to what the sender wants.
+  whatsInItForThem: [
+    { text: "A sign in a store window: \"SALE ENDS TONIGHT! Don't miss out \u2014 buy NOW!\"",
+      ask: "Why do they want you to hurry? What's in it for the store if you buy without thinking?",
+      answer: "They want you to buy before you can stop and think, compare prices, or decide you don't really need it. Hurrying you helps the store, not you.",
+      why: "\"Ends tonight!\" and \"don't miss out!\" are pressure, not information. A calm, thinking shopper buys less; a rushed, worried one buys more. So the store's reason for the countdown is simple: rushing you is good for their sales. Real sales come back around \u2014 the fake emergency is the trick. When someone rushes you, slow down on purpose." },
+    { text: "A cereal aimed at kids is placed on the LOW shelf, right at kid eye-level, covered in cartoon characters.",
+      ask: "Why is it down low with cartoons on it? What does the company want to happen \u2014 and to whom?",
+      answer: "They put it where KIDS can see and reach it, so kids will want it and ask their parents to buy it. The cartoons and low shelf are aimed at you on purpose.",
+      why: "Nothing about a store shelf is an accident \u2014 companies pay for eye-level spots and design boxes to grab a specific person. When the target is kids, the plan is to turn YOU into the one who nags. Once you notice the box was engineered to work on you, you get to decide whether it actually should." },
+    { text: "A charity ad shows sad music and a crying child and says \"Call in the next 10 minutes.\"",
+      ask: "Helping people can be good \u2014 but why the sad music and the 10-minute rush? What are they after in that moment?",
+      answer: "They want you to feel a strong emotion and act fast, before you can think or check them out. Even a real cause can use pressure tricks to get money quickly.",
+      why: "This one's important: the cause might be totally real AND the ad might still be using pressure to skip your thinking. Those are two separate questions. \"Feel sad, act in 10 minutes\" is designed to move money before your brain catches up. You can care about the cause and still take an hour to check who they are and where the money goes." },
+    { text: "A politician on a poster promises: \"I'll give EVERYONE free candy!\" and asks people to vote for them.",
+      ask: "What does the person on the poster get if you believe the promise? Why might a big promise be part of the plan?",
+      answer: "They get your vote and the power that comes with winning. A big, exciting promise is a way to get people to like them and choose them \u2014 whether or not it can really happen.",
+      why: "When someone wants your vote, your \"yes,\" or your loyalty, the shiny promise is often bait for the thing THEY actually want (power, the win, being in charge). That doesn't automatically make them bad \u2014 but it means \"can they really do this, and what do they get out of it?\" is a fair question to ask about every promise, especially the sweetest ones." },
+    { text: "A toy ad shows the toy doing amazing things \u2014 flying, glowing, moving by itself \u2014 with tiny words at the bottom: \"batteries not included, actions dramatized.\"",
+      ask: "Why show the toy doing things it can't really do? What's in it for the company \u2014 and what are those tiny words admitting?",
+      answer: "They make the toy look way more exciting so you'll want it \u2014 that sells more toys. The tiny words quietly admit the real toy doesn't actually do all that.",
+      why: "\"Actions dramatized\" is the company telling on itself in the smallest letters they can get away with \u2014 it means \"we made it look better than it is.\" Their reason is obvious: an exciting-looking toy sells, a boring-looking one doesn't. Always hunt for the fine print; it's usually where the truth is hiding from the part that's trying to excite you." }
+  ],
+  // "FREE" ISN'T FREE: find the real price behind something offered as free.
+  freeIsntFree: [
+    { text: "A website says: \"Play 100 games for FREE! Just make an account with your name, birthday, and email.\"",
+      ask: "It costs no money \u2014 so what are you actually paying with instead?",
+      answer: "You're paying with your information \u2014 your name, birthday, and email. That's valuable to them; they can use it, sell it, or send you ads forever.",
+      why: "When something's free but they want your info, YOUR INFORMATION is the price \u2014 that's the trade. Companies collect it, build a picture of you, and use it to sell you things or sell it to others. \"Free\" almost always means you're paying with something that isn't dollars: your data, your attention, or your time." },
+    { text: "The mall gives out \"free\" balloons with the store's name and logo printed all over them.",
+      ask: "The balloon costs you nothing \u2014 but what is the store getting out of giving it away?",
+      answer: "They get free advertising: you carry their name around the whole mall, and everyone who sees the balloon sees their store. You become a walking ad.",
+      why: "A free thing with a logo on it isn't a gift \u2014 it's a billboard you volunteer to hold. The store's reason is that a kid happily carrying their logo is cheaper and friendlier than a paid sign. It's clever, not evil \u2014 but noticing it means you know you're doing a job for them, and you can choose whether you want to." },
+    { text: "A \"free\" phone app keeps popping up: \"Get the FULL version! Or keep watching ads to unlock levels.\"",
+      ask: "If the app is free, how is the company making money off of you?",
+      answer: "They make money from the ads you watch and from people who pay for the \"full version.\" The free app is bait to get you hooked so you'll do one or the other.",
+      why: "\"Free\" is the front door, not the whole house. The plan is: get you in for free, get you hooked, then earn from your attention (ads) or your money (upgrades). Once you see that a free app still has to make money SOMEHOW, you can look for the how \u2014 and it's almost always your attention or your wallet, eventually." },
+    { text: "A kid says: \"I'll do your chores for free!\" \u2014 and later says \"...so now you owe me, do what I say.\"",
+      ask: "Was the favour really free? What was the hidden price that showed up later?",
+      answer: "No \u2014 the hidden price was owing them and having to obey later. The \"free\" favour was really a loan that came with strings attached.",
+      why: "Some \"free\" gifts are actually loans in disguise, designed to make you feel you owe the giver. A true gift comes with no bill later. When someone does you a favour and then cashes it in for control, that wasn't generosity \u2014 it was a setup. You can thank people and still not let a favour become a leash." },
+    { text: "A TV channel is \"free to watch\" \u2014 but it plays a commercial every few minutes.",
+      ask: "You don't pay money to watch \u2014 so what are the commercials taking from you, and who's paying the channel?",
+      answer: "The commercials take your attention and time, and advertisers pay the channel to put their ads in front of you. Your eyeballs are what's being sold.",
+      why: "\"Free TV\" is paid for by advertisers who are buying the chance to reach YOU. That's why the shows stop for commercials \u2014 the ads are the actual business; the show is just the bait that keeps you sitting there. Whenever something entertaining is free, ask \"who's paying to keep me watching, and what do they want back?\"" }
+  ],
+  // SAME FACT, TWO SPINS: who tells a true fact changes how it's framed.
+  sameFactTwoSpins: [
+    { text: "A candy company says its candy is \"a fun burst of fruity energy!\" A dentist says the same candy is \"pure sugar that harms teeth.\"",
+      ask: "Both are talking about the SAME candy. Why do they describe it so differently? What does each one want?",
+      answer: "The company wants you to buy candy, so they make it sound fun and good. The dentist wants healthy teeth, so they warn about the sugar. Same candy, two goals.",
+      why: "The candy didn't change \u2014 only who's talking about it did. Everyone describing a thing usually wants something, and their words bend toward their goal. Neither is lying, exactly \u2014 they're each showing you a different true piece. Your job is to hear BOTH sides and notice what each one is after, then decide for yourself." },
+    { text: "A store selling raincoats says \"Rain is coming ALL week \u2014 stay dry!\" A kid who loves puddles says \"It's going to rain all week \u2014 best week EVER!\"",
+      ask: "Same weather forecast \u2014 why do they say it so differently? What does each one want you to feel?",
+      answer: "The store wants you worried about rain so you'll buy a raincoat. The puddle-loving kid is just excited to splash. Same rain, opposite feelings \u2014 because they want different things.",
+      why: "A plain fact \u2014 \"it will rain\" \u2014 gets painted with feelings depending on who's holding the brush. The store paints it scary to sell; the kid paints it fun for free. When you notice the SAME fact making people feel opposite things, look at what each person gains from the feeling they're selling you." },
+    { text: "About a snowy day off school: one company selling sleds says \"A magical day of family fun!\" A worker who couldn't get paid says \"A rough day \u2014 I lost a day's work.\"",
+      ask: "It's the exact same snow day. Why two totally different stories? What is each person's stake in it?",
+      answer: "The sled company gains from it sounding magical (they sell sleds); the worker actually lost money, so for them it was hard. The same day is good or bad depending on your stake in it.",
+      why: "\"How was it?\" almost always depends on \"how did it affect ME?\" A snow day is fun for a sled seller and painful for someone who missed a paycheque \u2014 both are telling the truth about their own view. Whenever you hear something called \"great\" or \"terrible,\" ask: great or terrible FOR WHOM? The answer often reveals the motive." },
+    { text: "A team wins a close game. Their fans say \"We earned it with skill!\" The other team's fans say \"They just got lucky.\"",
+      ask: "Same final score \u2014 why do the two sides explain it so differently? What is each side protecting?",
+      answer: "The winners want to feel they deserved it (skill); the losers want to feel they weren't really beaten (luck). Each version protects how that side feels about themselves.",
+      why: "People spin the same result to protect their pride or their side \u2014 winners credit skill, losers blame luck. Neither is pure truth; both are bending the story to feel better. Spotting this in a game teaches you to spot it everywhere: when someone explains a result, ask what they're protecting, then look for what actually happened." },
+    { text: "A new rule at school: no phones at recess. The principal says \"It helps kids play together.\" Some kids say \"It's just control \u2014 they want to boss us around.\"",
+      ask: "Same rule, two very different stories about WHY it exists. How would you figure out which reason is really true?",
+      answer: "You'd look at the actual effects and reasons, not just each side's spin \u2014 does it help kids play, or just add control? The honest answer might even be a bit of both.",
+      why: "Both sides here are guessing at a MOTIVE, and each guess fits what that side wants to believe. The sovereign move isn't to pick a side's story \u2014 it's to notice both are spins and go looking at what the rule actually does. Sometimes a rule really does help; sometimes it really is just control; sometimes it's both. Judge by effects, not by whoever's spin sounds best." }
+  ]
+};
+
+/* ---- follow_the_incentive layout (mirrors is_that_true/trade_offs row layout) ---- */
+function ftiRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function ftiRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    whoBenefits: "WHO BENEFITS?", whatsInItForThem: "WHAT'S IN IT FOR THEM?",
+    freeIsntFree: "\"FREE\" ISN'T FREE", sameFactTwoSpins: "SAME FACT, TWO SPINS"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation / message
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
 /* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
