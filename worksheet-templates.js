@@ -10806,6 +10806,290 @@ function ftiRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — WHO TOLD YOU THAT? (grown-up reads aloud)
+   The Gr1-3 library is deep on manipulation/media literacy
+   (spot_the_persuasion, follow_the_incentive, says_who, whose_story)
+   and self-trust (is_that_true). But Oakley (age 4, K) had almost
+   nothing there — wonder_why covers curiosity/logic/observation,
+   not "is this real, and who's trying to get me to want it?"
+   This is the READ-ALOUD SEED of that whole family of skills, sized
+   for a pre-reader: a grown-up reads a tiny scene aloud, the child
+   answers by talking / pointing / drawing. No reading required.
+   It is NOT "don't trust anyone" and NOT "everything is a trick" —
+   it's the sovereign middle: you're ALLOWED to want things and to
+   believe things, you just get to be the one who decides, with your
+   eyes open. Four modes:
+     doYouWant  — separate "I want it" from "someone MADE me want it"
+                  (the checkout-candy / shiny-ad / everyone-has-one seed)
+     isItReal   — real vs. pretend / made-up (cartoons, "does it on TV",
+                  costumes) — the first is-that-true muscle
+     whoSaysSo  — who is telling me this, and how would THEY know?
+                  (earliest source-checking, sized for K)
+     howDoYouFeel — your body/feeling is a signal you're allowed to
+                  trust; the little "no" that keeps you safe & sovereign
+     mixed      — a bit of each
+   Deterministic, never calls AI. Mirrors wonder_why row layout exactly.
+   Young-only (capped at Gr1 below), so it stays Oakley's sheet.
+============================================================ */
+window.TEMPLATES.who_told_you = {
+  id: "who_told_you",
+  label: "Who Told You That? (grown-up reads aloud)",
+  subject: "reading",
+  grades: ["K", "1"],
+  topicHint: "Pre-reader media & self-trust literacy (read-aloud)",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking skill",
+      options: [
+        { value: "doYouWant",    label: "Do you REALLY want it? (who's making you want it?)" },
+        { value: "isItReal",     label: "Is it real, or pretend? (real vs. made-up)" },
+        { value: "whoSaysSo",    label: "Who told you? (who says so, and how would they know?)" },
+        { value: "howDoYouFeel", label: "How does it feel? (trust your own signal)" },
+        { value: "mixed",        label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of questions", default: 6, min: 3, max: 10 },
+    { id: "drawBox", type: "boolean", label: "Give a big box to draw the answer in", default: true },
+    { id: "showScript", type: "boolean", label: "Print the grown-up read-aloud script under each", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(3, Math.min(10, parseInt(m.count, 10) || 6));
+    const modes = m.mode === "mixed"
+      ? ["doYouWant", "isItReal", "whoSaysSo", "howDoYouFeel"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = wtyShuffle(WTY_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return {
+      items,
+      drawBox: m.drawBox !== false,
+      showScript: m.showScript !== false,
+      modifiers: m
+    };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Who Told You That?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "A read-aloud page \u2014 for a grown-up and a thinker who can't read yet. Read the little scene and the question OUT LOUD. Let the child answer however they like: talk, point, or draw. There are no wrong answers here \u2014 the whole game is one quiet question the child learns to ask themselves: \u201cwho told me that, and is it true for ME?\u201d We are NOT teaching \u201cdon't trust anyone.\u201d We're teaching that you're allowed to want things and believe things \u2014 you just get to be the one who decides. Whatever they say, ask \u201chow do you know?\u201d or \u201cwho told you?\u201d and take their reason seriously.",
+      y, pageW, margin
+    );
+
+    content.items.forEach((it, idx) => {
+      const needed = wtyRowHeight(doc, it, pageW - margin * 2, content.drawBox, content.showScript, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = wtyRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.drawBox, content.showScript, opts.showAnswers);
+      y += 14;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- who_told_you content banks ---- */
+function wtyShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { scene, ask, script, think }
+//   scene  = the tiny picture-in-words the grown-up sets up (large print)
+//   ask    = the question to ask the child (large print)
+//   script = grown-up coaching line: how to ask + how to honour a real reason
+//   think  = "answer key" for the grown-up: NOT a right answer, but the KIND
+//            of thinking to listen for + a good follow-up question
+const WTY_BANKS = {
+  doYouWant: [
+    { scene: "A toy on TV has flashing lights and happy music. A kid on the screen is laughing and yelling \u201cI NEED IT!\u201d",
+      ask: "Do YOU want the toy \u2014 or did the TV try to make you want it?",
+      script: "Ask gently, no shaming a \u201cyes.\u201d Follow up: \u201cwould you still want it if the music and the yelling kid were gone?\u201d",
+      think: "You're NOT killing the want \u2014 you're helping them notice the want was nudged. \u201cThe music made it look fun\u201d is the whole lesson: the ad is trying to do a job on you." },
+    { scene: "At the store, all the candy is down low \u2014 right where a little kid can grab it \u2014 next to where you wait to pay.",
+      ask: "Why do you think the candy is put down low, right there?",
+      script: "Let them guess. Then ask \u201cwho put it there, and what do they want to happen?\u201d Real answer: a grown-up chose that spot on purpose.",
+      think: "The seed: someone DECIDED to put it at kid-eye-height so you'd grab it. A kid who says \u201cso I'll want it\u201d has spotted a set-up. That's sovereignty starting." },
+    { scene: "Your friend has a new backpack and says \u201cEVERYBODY has one. You're weird if you don't.\u201d",
+      ask: "Is that a good reason to want one? Do you have to?",
+      script: "Ask calmly. Follow up: \u201cdo YOU like it, or do you just not want to feel left out?\u201d Both are okay to feel \u2014 name which one it is.",
+      think: "The move: separate \u201cI like it\u201d from \u201cI'm scared to be different.\u201d \u201cEverybody has one\u201d is a push, not a reason. Honour a kid who can tell the two apart." },
+    { scene: "A cereal box has a cartoon animal winking at you and a shiny gold star that says \u201cBEST EVER!\u201d",
+      ask: "Does the winking animal make the cereal taste good? Who put him there?",
+      script: "Playful. Let them see the cartoon is a decoration, not the food. Ask \u201ccould a yucky cereal still have a fun animal on it?\u201d",
+      think: "Aim for: the picture and the food are two different things. The box is dressed up to be picked. \u201cThe animal is just a sticker\u201d = they saw through it." },
+    { scene: "A game on a tablet is free, but a happy voice keeps saying \u201cTap here for a SUPER prize! Ask a grown-up to buy coins!\u201d",
+      ask: "Is the game trying to help you \u2014 or trying to get something?",
+      script: "Ask what the game keeps asking for. Follow up: \u201cwho gets the money if you tap?\u201d The game wants your grown-up's money.",
+      think: "The K-sized cui-bono: \u201cfree\u201d has a catch. A kid who notices \u201cit keeps asking to buy stuff\u201d has found the hook. Praise spotting the ask." }
+  ],
+  isItReal: [
+    { scene: "In a cartoon, a character gets squished flat by a rock \u2014 then pops right back up and runs away, totally fine.",
+      ask: "Could that really happen to a real person? How do you know?",
+      script: "Let them explain. Follow up: \u201cwhat's the difference between a cartoon and real life?\u201d No fear \u2014 just real vs. pretend.",
+      think: "You want them naming the line between real and made-up. \u201cIt's just a drawing / it's pretend\u201d is exactly right. This is the first is-that-true muscle." },
+    { scene: "A superhero on the screen jumps off a tall building and flies. A kid puts on a cape and feels super strong.",
+      ask: "Is the cape magic? Can the kid really fly?",
+      script: "Gentle and clear \u2014 this is a safety one too. Ask \u201cwhat's real: the strong feeling, or the flying?\u201d Both can be talked about kindly.",
+      think: "Separate a real FEELING (I feel brave) from a pretend FACT (I can fly). \u201cThe feeling is real but the flying is pretend\u201d is a big, important sort." },
+    { scene: "A TV toy ad shows a little car zooming and flipping and doing tricks all by itself.",
+      ask: "Do you think the real toy in the box does all that by itself?",
+      script: "Ask what might be hidden. Real ads use tricks, editing, hands off-screen. Follow up: \u201cwhat if it's slower and smaller in real life?\u201d",
+      think: "The seed of \u201cads make it look better than it is.\u201d A kid who guesses \u201cmaybe not \u2014 maybe someone was pushing it\u201d has started checking the claim." },
+    { scene: "At Halloween, a grown-up you know is dressed up as a scary monster with a mask.",
+      ask: "Is it a real monster? How can you tell it's still a person?",
+      script: "Reassuring \u2014 this teaches: a costume changes the OUTSIDE, not who's inside. Ask \u201cwhat could you do to check?\u201d (say hi, look at the eyes).",
+      think: "Costume = outside changed, person = still there. \u201cIt's just so-and-so in a mask\u201d shows they can look past appearances \u2014 the root of not being fooled." },
+    { scene: "A picture on a screen shows a puppy as big as a house, standing next to a tiny person.",
+      ask: "Is that a real photo, or did somebody make it up on a computer?",
+      script: "Ask what looks impossible. Pictures can be changed now. Follow up: \u201chow big does a real puppy get?\u201d Check it against what they already know.",
+      think: "Earliest \u201cpictures can be fake\u201d literacy. Checking a picture against real-world knowledge (puppies aren't house-sized) is a real thinking move." }
+  ],
+  whoSaysSo: [
+    { scene: "Your big cousin says \u201cIf you eat your crusts, your hair will grow curly by morning.\u201d",
+      ask: "Who told you that? How would they even KNOW?",
+      script: "Playful, not \u201cwho's right.\u201d Ask \u201chas anyone ever seen that happen?\u201d and \u201chow could we find out?\u201d Curiosity, not obedience.",
+      think: "The K-sized \u201csays who?\u201d Listen for \u201cthey're just teasing\u201d or \u201clet's check.\u201d Wanting to CHECK a fun claim is the whole point." },
+    { scene: "One friend says the playground closes at lunch. Another friend says it stays open all day.",
+      ask: "They can't both be right. How could you find out who really knows?",
+      script: "Ask \u201cwho would actually know for sure?\u201d Guide to: ask a grown-up in charge, or go look at the sign. Check the source.",
+      think: "The move: don't just pick a friend \u2014 go to who'd really know. \u201cAsk the teacher / read the sign\u201d beats \u201cwhoever said it loudest.\u201d" },
+    { scene: "A kid on a video says \u201cThis snack makes you run super fast! Buy it!\u201d and then keeps eating it.",
+      ask: "How does the kid know it makes you fast? Why might they be saying it?",
+      script: "Ask \u201cdid someone maybe pay them to say that?\u201d (real thing!). Follow up: \u201cwho gets something if you believe it?\u201d",
+      think: "Earliest \u201cfollow the reason\u201d: the video might be an ad in disguise. A kid who wonders \u201cmaybe they were told to say it\u201d has found the hidden why." },
+    { scene: "A grown-up says \u201cbecause I said so\u201d when you ask why you have to do something.",
+      ask: "Is \u201cbecause I said so\u201d a reason? What could you ask instead?",
+      script: "This is safe curiosity, not back-talk. Model asking kindly: \u201cI'll do it \u2014 I just want to understand why.\u201d A good grown-up will tell you the real reason.",
+      think: "Sovereign, not defiant: it's fine to obey AND want the real reason. Listen for a calm \u201ccan you tell me why?\u201d \u2014 asking for reasons respectfully is a life skill." },
+    { scene: "Someone says \u201cEVERYBODY knows the tooth fairy leaves TEN dollars now.\u201d",
+      ask: "Does \u201ceverybody knows\u201d make it true? Who is \u201ceverybody\u201d?",
+      script: "Light and fun. Ask \u201cdid you count everybody? Do you even know who told them?\u201d \u201cEverybody knows\u201d is a push, not proof.",
+      think: "The seed of \u201ceverybody knows = check it anyway.\u201d A kid who giggles \u201cthey just made that up\u201d has caught a claim wearing a crowd's costume." }
+  ],
+  howDoYouFeel: [
+    { scene: "A big kid says \u201cCome on, it'll be fun!\u201d but your tummy feels tight and a little scared about it.",
+      ask: "What is your tummy trying to tell you? Is it okay to say \u201cno, thanks\u201d?",
+      script: "The most important one. Say clearly: that tight feeling is a SIGNAL, and \u201cno\u201d is always allowed, even if someone is bigger or older.",
+      think: "You're building the \u201cno\u201d muscle and body-trust. \u201cMy tummy says no, so I can say no\u201d is a safety skill AND sovereignty. Praise it hugely." },
+    { scene: "Everyone at the table is laughing at a joke, but you didn't think it was funny \u2014 it felt a little mean.",
+      ask: "Do you have to laugh too? What does your own feeling say?",
+      script: "Gentle. Name that it's okay to feel different from the group. Ask \u201cwhat did YOU feel, before you looked at everyone else?\u201d",
+      think: "Trusting your own read over the crowd. \u201cIt felt mean so I didn't laugh\u201d = a kid who can hold their own signal against peer pressure. That's gold." },
+    { scene: "You're really tired and cranky, but a fun show is still playing and you want to keep watching.",
+      ask: "What is your body telling you it needs? What does the show want?",
+      script: "No lecture \u2014 just noticing. Ask \u201cwho's on your side, your sleepy body or the show that never ends?\u201d Body needs vs. the endless feed.",
+      think: "Body-signal vs. a thing designed to keep you hooked. A kid who says \u201cI'm tired, the show just keeps going\u201d has spotted the difference. That's real." },
+    { scene: "Someone wants to give you a big hug, but you don't feel like being hugged right now.",
+      ask: "Is it okay to say \u201cnot right now\u201d? Whose body is it?",
+      script: "Clear and warm: your body is YOURS, and \u201cnot right now\u201d is a full sentence. Offer a wave or high-five as another choice.",
+      think: "Body autonomy \u2014 the deepest sovereignty there is. \u201cIt's my body, so I get to choose\u201d is exactly the answer. Never override a real \u201cno\u201d here." },
+    { scene: "A snack looks yummy but the first bite tastes yucky to you. A grown-up says \u201cno it doesn't, it's delicious!\u201d",
+      ask: "Who knows how it tastes in YOUR mouth? You, or them?",
+      script: "Light and respectful. Ask \u201ccan someone else feel your taste for you?\u201d Your own senses are real evidence about your own experience.",
+      think: "Trusting your own senses even when someone insists otherwise. \u201cI'm the one tasting it\u201d is a tiny, mighty stand for first-hand experience." }
+  ]
+};
+
+/* ---- who_told_you layout (mirrors wonder_why) ---- */
+function wtyRowHeight(doc, it, w, drawBox, showScript, showAnswers) {
+  const bw = w - 24;
+  doc.setFontSize(13);
+  const sceneLines = doc.splitTextToSize(it.scene, bw);
+  doc.setFontSize(12);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  let h = 20;                                  // number + top gap
+  h += sceneLines.length * 16 + 6;             // large scene print
+  h += askLines.length * 15 + 8;               // large question print
+  if (showScript) {
+    doc.setFontSize(9);
+    const scriptLines = doc.splitTextToSize("Grown-up: " + it.script, bw);
+    h += scriptLines.length * 11 + 6;
+  }
+  if (showAnswers) {
+    doc.setFontSize(9.5);
+    const thinkLines = doc.splitTextToSize("Listen for: " + it.think, bw);
+    h += thinkLines.length * 12 + 6;
+  } else if (drawBox) {
+    h += 96;                                   // big draw / answer box
+  } else {
+    h += 26;                                   // just a talk-it-out line
+  }
+  return h + 10;
+}
+
+function wtyRenderRow(doc, it, num, x, y, w, drawBox, showScript, showAnswers) {
+  const modeTag = {
+    doYouWant: "DO YOU REALLY WANT IT?", isItReal: "REAL, OR PRETEND?",
+    whoSaysSo: "WHO TOLD YOU?", howDoYouFeel: "TRUST YOUR SIGNAL"
+  }[it.mode] || "";
+
+  // Number dot + mode tag
+  pdfDrawNumberedDot(doc, String(num), x + 9, y + 9, 9);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 24, y + 12);
+  }
+  let cy = y + 28;
+  const bx = x + 24;
+  const bw = w - 24;
+
+  // Scene (large print, the grown-up reads this)
+  doc.setFont("helvetica", "bold"); doc.setFontSize(13); doc.setTextColor(20, 20, 20);
+  const sceneLines = doc.splitTextToSize(it.scene, bw);
+  doc.text(sceneLines, bx, cy);
+  cy += sceneLines.length * 16 + 6;
+
+  // Question (large print)
+  doc.setFont("helvetica", "normal"); doc.setFontSize(12); doc.setTextColor(33, 130, 130);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 15 + 8;
+  doc.setTextColor(20, 20, 20);
+
+  // Grown-up script line
+  if (showScript) {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(120, 120, 120);
+    const scriptLines = doc.splitTextToSize("Grown-up: " + it.script, bw);
+    doc.text(scriptLines, bx, cy);
+    cy += scriptLines.length * 11 + 6;
+    doc.setTextColor(20, 20, 20);
+  }
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const thinkLines = doc.splitTextToSize("Listen for: " + it.think, bw);
+    doc.text(thinkLines, bx, cy);
+    cy += thinkLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else if (drawBox) {
+    const boxH = 90;
+    doc.setDrawColor(170); doc.setLineWidth(0.6);
+    doc.roundedRect(bx, cy, bw, boxH, 6, 6, "S");
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8); doc.setTextColor(180, 180, 180);
+    doc.text("draw or talk about your answer here", bx + 8, cy + 12);
+    doc.setTextColor(20, 20, 20);
+    cy += boxH + 6;
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 12, x + w, cy + 12);
+    cy += 26;
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
@@ -10817,7 +11101,7 @@ const GRADE_SEQ = ["K", "1", "2", "3", "4", "5", "6"];
 function gSeqRank(g) { const i = GRADE_SEQ.indexOf(g); return i < 0 ? 0 : i; }
 const TEMPLATE_MAX_GRADE = {
   count_to_10: "1", ways_to_make: "2",
-  wonder_why: "1",
+  wonder_why: "1", who_told_you: "1",
   tracing_shapes: "1", tracing_letters_numbers: "3", tracing_words: "3",
   sight_words_practice: "2",
   capitalize_questions: "3", story_middle_end: "3", combine_sentences: "3",
