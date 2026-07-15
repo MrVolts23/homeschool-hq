@@ -11089,6 +11089,250 @@ function wtyRenderRow(doc, it, num, x, y, w, drawBox, showScript, showAnswers) {
   return cy;
 }
 
+window.TEMPLATES.spot_the_trick = {
+  id: "spot_the_trick",
+  label: "Wait \u2014 That's Not a Good Reason! (spotting broken arguments)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Argument literacy: spotting the everyday tricks people use INSTEAD of a real reason \u2014 name-calling, \"everyone's doing it,\" false either/or choices, going in circles, changing the subject, and slippery slopes",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking skill",
+      options: [
+        { value: "nameNotReason", label: "Name-calling isn't a reason (attack the point, not the person)" },
+        { value: "everyoneDoesIt", label: "\"Everyone's doing it\" (popular isn't the same as right or true)" },
+        { value: "falseChoice", label: "The fake either/or (\"you're either with me or against me\")" },
+        { value: "sneakyDodge", label: "Circles, dodges & slippery slopes (reasons that go nowhere)" },
+        { value: "mixed", label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["nameNotReason", "everyoneDoesIt", "falseChoice", "sneakyDodge"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = sttShuffle(STT_BANKS[mode].slice());
+      items.push(Object.assign({ mode }, pools[mode].pop()));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Wait \u2014 That's Not a Good Reason!";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "A REAL reason is like a bridge: it actually connects to the thing being argued and holds your weight when you walk on it. But when people can't build a real bridge \u2014 or don't want to \u2014 they roll out a fake one. They call you a name instead of answering. They say \"everyone's doing it\" as if a crowd could make something true. They squeeze you into \"you're either with me or against me\" when there are really ten choices. They go in a circle, or dodge to a different subject, or warn that one tiny step leads straight to disaster. None of those is a reason \u2014 they're TRICKS wearing a reason's coat. Your job here isn't to be rude or to win; it's to notice the coat is empty. For each one, spot the trick, name it, and say what a REAL reason would have to do instead. You can still disagree politely \u2014 you just don't get pushed around by a bridge that isn't there.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "You say: \"I don't think we should leave the little kid out of the game.\" Another kid answers: \"Ugh, you're such a baby. Nobody asked you.\" WHAT'S THE TRICK? They didn't answer your point AT ALL \u2014 they attacked YOU (\"baby\") instead. Calling you a name doesn't make leaving the kid out right or wrong; it's a way to change the subject to you so nobody has to think about the actual question. A REAL reason would talk about the GAME and the kid: \"we can't, because the teams would be uneven,\" or \"sure, they can be on my team.\" Notice the move, stay calm, and bring it back: \"That's about me, not about the game. Should we let them play or not?\"",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 128);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = sttRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = sttRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- spot_the_trick helpers ---- */
+function sttShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Every item: { text, ask, answer, why }
+const STT_BANKS = {
+  // Ad hominem / attacking the person instead of the point.
+  nameNotReason: [
+    { text: "You explain why you think a class rule is unfair. A kid says: \"Whatever, you're just a nerd who loves rules \u2014 sit down.\"",
+      ask: "Did they answer your point about the rule? What did they do instead \u2014 and what would a real reason sound like?",
+      answer: "No \u2014 they never touched the rule. They attacked YOU (\"nerd\") to make you stop talking. A real reason would say WHY the rule is fair or unfair.",
+      why: "Calling you a name is not an argument \u2014 it's a way to dodge one. Whether the rule is fair has nothing to do with whether you're a nerd; those are two completely different subjects. This trick works by making you defend YOURSELF instead of your point. The sovereign move: don't take the bait. \"That's about me. I'm asking about the rule \u2014 is it fair or not?\"" },
+    { text: "Someone shares an idea in class. Another kid whispers: \"Don't listen to him, he still can't tie his own shoes.\"",
+      ask: "Does not being able to tie shoes make his IDEA wrong? What's being attacked \u2014 the idea, or the person?",
+      answer: "No \u2014 shoe-tying has nothing to do with whether the idea is good. The person is being attacked, not the idea.",
+      why: "A good idea is a good idea even if the person who said it is little, messy, or bad at something else. Judging an idea by who said it (instead of by whether it's actually true or helpful) is one of the oldest tricks there is. Ask the real question: forget WHO said it \u2014 is the idea any good?" },
+    { text: "At dinner you disagree with an older cousin. He laughs: \"You're eight. You don't get to have an opinion.\"",
+      ask: "Is \"you're eight\" a reason your point is wrong? What is he really doing?",
+      answer: "No \u2014 your age isn't proof you're wrong. He's dismissing YOU so he doesn't have to answer what you actually said.",
+      why: "\"You're too young/old/new to have an opinion\" attacks the person, not the point. Sometimes younger people are right and older people are wrong \u2014 age doesn't decide truth, reasons do. If your point is actually weak, he could just SHOW that. Reaching for your age instead is a sign he can't. Stay steady: \"My age isn't the question. Is what I said true or not?\"" },
+    { text: "A kid makes a fair point about sharing the ball. You feel annoyed and shoot back: \"Yeah, well, you smell weird.\"",
+      ask: "Catch YOURSELF this time. Did you answer their point? What honest thing could you say instead?",
+      answer: "No \u2014 \"you smell weird\" attacks them and ignores the ball point entirely. Honest options: agree if they're right, or give a real reason you disagree.",
+      why: "This trick is just as easy to DO as to fall for \u2014 when we're losing or embarrassed, our mouth reaches for an insult instead of an answer. Catching it in yourself is the real skill. If they're right, the brave move is \"okay, fair.\" If you truly disagree, say WHY about the ball. Insults feel like winning for a second, but everyone watching can tell you ran out of reasons." },
+    { text: "You point out a mistake in a game's scoring. The other player says: \"You only care because you're a sore loser.\"",
+      ask: "Even IF you were a sore loser \u2014 would that change whether the score was actually counted wrong?",
+      answer: "No \u2014 the score is either counted wrong or it isn't, no matter how you feel about losing. He's talking about your feelings to avoid checking the math.",
+      why: "This is a sneaky version: instead of an insult, he guesses your secret MOTIVE (\"you're just a sore loser\") to wave your point away. But your motive and the actual score are two separate things. Even a genuine sore loser can be right about a miscount! The fix is simple and hard to argue with: \"Let's just recount it and see.\" Check the thing itself." }
+  ],
+  // Bandwagon / appeal to popularity + peer pressure. Popular != true or right.
+  everyoneDoesIt: [
+    { text: "\"You HAVE to get the new game \u2014 literally everyone in the class has it. You're the only one who doesn't.\"",
+      ask: "Does lots of people having it make it good FOR YOU? What real reasons would actually help you decide?",
+      answer: "No \u2014 popular doesn't mean good, needed, or right for you. Real reasons: do you enjoy that kind of game, is it worth the money/time, do your folks agree.",
+      why: "\"Everyone has it\" is a push, not a proof. Even if it were true that everyone has it (it usually isn't \u2014 \"everyone\" is almost always an exaggeration), a crowd liking something doesn't make it a good choice for YOU. Lots of people have been wrong about lots of things at once. Decide by whether the thing is actually good for your life, not by the size of the crowd." },
+    { text: "\"Everybody knows the deep end has sharks in it. All the big kids say so, so it's true.\"",
+      ask: "Does the NUMBER of people saying it make it true? How could you actually find out?",
+      answer: "No \u2014 a hundred people repeating a scary rumour is still just a rumour. You find out by checking: ask a lifeguard, look, or think about whether pools even have sharks.",
+      why: "This is the bandwagon trick aimed at TRUTH instead of shopping. Repeating something loudly and often makes it feel true, but feelings aren't facts. A rumour passed kid-to-kid gets more confident every time it's told, without ever getting checked. \"Everybody knows\" is your signal to slow down and ask: how would anybody actually KNOW that? Truth is decided by checking, not by counting voices." },
+    { text: "Some kids are teasing a classmate and one says to you: \"Come on, everyone's doing it. Don't be weird.\"",
+      ask: "Does 'everyone doing it' make teasing okay? What are they really trying to get you to do?",
+      answer: "No \u2014 lots of people doing something wrong doesn't turn it right; it just makes it a bigger wrong. They're using the crowd to pressure you into joining.",
+      why: "This is the most important version to catch, because it uses \"everyone\" as a leash to pull you somewhere you don't want to go. A crowd can be cruel; being one more in it doesn't share out the wrong until it disappears. The number of people doing a thing has NOTHING to do with whether it's kind or fair. You're allowed to be the one who says \"no thanks\" \u2014 that's not being weird, that's steering your own ship." },
+    { text: "\"This video has a million likes, so what it says must be right.\"",
+      ask: "Can a million people be wrong about the same thing? What actually makes something right \u2014 likes, or evidence?",
+      answer: "Yes, a million people can absolutely be wrong together. Likes measure how POPULAR something is, not whether it's TRUE. Truth needs evidence you can check.",
+      why: "Likes are a popularity score, not a truth score \u2014 and often the wildest, most exciting claims get the most likes exactly because they're exciting, not because they're accurate. History is full of things almost everyone believed that turned out false. So a big number tells you a video spread far; it tells you nothing about whether it's correct. Ask the separate question: what's the actual evidence?" },
+    { text: "\"If you don't like the same band as us, you can't sit here. Everyone at this table likes them.\"",
+      ask: "Is 'everyone here likes it' a reason YOU have to? What does this rule actually protect \u2014 good taste, or the group's power?",
+      answer: "No \u2014 the group liking something isn't a reason you must, or that the band is even good. The rule isn't about music; it's about controlling who belongs.",
+      why: "Watch how \"everyone here agrees\" quietly turns into a rule you have to obey or get pushed out. That's the crowd being used as a fence. Your taste is yours \u2014 liking or not liking a band is not a right-or-wrong you can fail. A group that only lets you belong if you copy them isn't offering friendship, it's offering a costume. Real belonging survives you liking different things." }
+  ],
+  // False dilemma / false choice. Only two options offered when more exist.
+  falseChoice: [
+    { text: "\"You either give me your dessert or you're not really my friend. Pick one.\"",
+      ask: "Are those really the ONLY two choices? Name a third one they left out.",
+      answer: "No \u2014 that's a fake either/or. A third choice: stay friends AND keep your dessert. Real friends don't charge a fee.",
+      why: "This trick jams a whole world of choices down to just two, and rigs it so one is scary (\"not really my friend\"). But friendship and dessert have nothing to do with each other \u2014 someone stapled them together to pressure you. Whenever you hear \"either X or you're a bad person,\" go looking for the door they hid: \"I can keep my dessert and still be your friend. Those aren't opposites.\"" },
+    { text: "\"You're either with our team or you're against us. There's no in-between.\"",
+      ask: "Is 'no in-between' actually true? What are some in-between spots they're pretending don't exist?",
+      answer: "No \u2014 there's tons of in-between: cheering for both, staying neutral, liking some players on each side, not caring about the game at all.",
+      why: "\"You're either with us or against us\" is a famous trick used by tiny kid-arguments AND huge grown-up ones. It works by pretending the whole middle of the road disappeared, so you feel forced to pick a side and defend it. But almost nothing in real life is only two options. Naming the in-between (\"I'm not against you, I just don't want to pick a side\") pops the trap instantly." },
+    { text: "\"Either we watch MY show right now, or you've ruined the whole night.\"",
+      ask: "Are those the only outcomes? What's a fair option they skipped?",
+      answer: "No \u2014 skipped options: take turns, pick a show you both like, do something else together, watch it later. The night isn't ruined by not getting your way.",
+      why: "This one hides a threat inside the fake choice: \"do what I want, OR you're the villain who wrecked everything.\" It loads all the blame onto you for not obeying. But \"my way or disaster\" almost always has a calm middle you can offer instead. When someone gives you exactly two options and one is a catastrophe, that's your cue: they're trying to skip past fairness. Slow down and add the option they erased." },
+    { text: "A kid says: \"Real kids play sports. If you like reading, you're basically a robot.\"",
+      ask: "Are 'plays sports' and 'likes reading' really opposite teams you must choose between?",
+      answer: "No \u2014 tons of people do both, or neither, or one and not the other. There's no rule that you're only allowed to be ONE kind of kid.",
+      why: "This fake choice tries to sort all of humanity into two boxes and shame you into the 'cool' one. But people aren't one-or-the-other \u2014 you can love soccer AND books, or invent a third thing entirely. Any argument that says \"you're either THIS type or THAT type\" is usually selling you a box you don't have to climb into. You get to be a mix, and you get to change." },
+    { text: "\"We can go to the park OR do homework. So if you make me do homework, we can never have fun again.\"",
+      ask: "Catch the leap: does 'homework now' really mean 'no fun EVER'? What choice got skipped?",
+      answer: "No \u2014 homework first and park after is a choice; fun isn't gone forever. \"Never again\" is a huge exaggeration bolted onto a small either/or.",
+      why: "This mixes a fake choice with a giant exaggeration \u2014 two tricks in one. It pretends the only options are \"all fun\" or \"all homework, forever,\" when the obvious real answer is \"do the homework, THEN have fun.\" When someone stretches a small \"not right now\" into \"never ever,\" they're trying to make a reasonable limit feel like a tragedy. Cut it back to true size." }
+  ],
+  // Circular reasoning + red herring (changing the subject) + slippery slope.
+  sneakyDodge: [
+    { text: "You ask WHY you have to do it. The answer: \"Because it's the rule.\" You ask why that's a good rule. \"Because those are the rules.\"",
+      ask: "Did the answer actually give a REASON, or just say the same thing again in a circle?",
+      answer: "Just a circle \u2014 \"it's the rule because it's the rule\" never explains WHY. A real answer would say what the rule is FOR (safety, fairness, etc.).",
+      why: "This is called going in circles: the \"reason\" is just the thing you asked about, said again. It sounds like an answer but it's empty \u2014 like saying \"it's true because it's true.\" Good rules usually have a real WHY behind them (this keeps you safe, this keeps it fair). Asking \"what is this rule FOR?\" is polite and powerful \u2014 and if there's no answer but the circle, that's worth noticing." },
+    { text: "You say: \"I think the story we read was kind of boring.\" A kid fires back: \"Oh yeah? Well YOUR handwriting is terrible!\"",
+      ask: "What were you talking about? What did they switch it to \u2014 and why might someone do that?",
+      answer: "You were talking about the story; they switched to your handwriting. That's a total change of subject to avoid discussing the story.",
+      why: "This trick is called changing the subject (some people call it a \"red herring\" \u2014 a smelly fish dragged across a trail to throw the dogs off). When someone suddenly brings up something unrelated, it's often because they don't have an answer for what you ACTUALLY said. Your handwriting has zero to do with the story. Gently steer back: \"That's a different topic. I was saying the story felt boring \u2014 what did you think of IT?\"" },
+    { text: "\"If we let you stay up ten minutes late tonight, then tomorrow it'll be an hour, then you'll never sleep, then you'll fail school and live in a cave.\"",
+      ask: "Does ten minutes late REALLY lead all the way to living in a cave? Where does the chain get silly?",
+      answer: "No \u2014 that's a wild slide. Ten late minutes doesn't force any of the next steps; each 'then' is just assumed, not shown. The chain gets silly almost immediately.",
+      why: "This is the slippery slope trick: pretend one small step MUST tumble all the way to disaster, so the small step sounds terrifying. But real life has brakes \u2014 you can be up ten minutes late tonight and totally normal tomorrow. The trick skips the part where it PROVES each step causes the next; it just chains scary words together. Ask: does step one really force step two? Usually it doesn't." },
+    { text: "\"I'm right because I'm older, and I know I'm right because older people are just right about things.\"",
+      ask: "Is there any actual EVIDENCE in there, or does the reason just loop back to itself?",
+      answer: "No evidence \u2014 it loops: \"I'm right because I'm older, and older means right.\" It never checks whether the actual claim is true.",
+      why: "Another circle, dressed up with age. \"I'm right because older people are right\" assumes the very thing it's supposed to prove. Being older can mean more experience \u2014 but it doesn't automatically make any single statement true. The way OUT of a circle is always the same: leave the loop and go check the actual thing. \"Okay, but let's look at whether the CLAIM itself holds up, not who said it.\"" },
+    { text: "You catch a friend fibbing. He says: \"Why are you even worried about that? Look, do you want to come to my birthday party or not?\"",
+      ask: "Did he answer about the fib? What did he wave in front of you instead \u2014 and why then?",
+      answer: "No \u2014 he dodged to the birthday party to distract you from the fib. A shiny new topic (especially a nice one) is being used to change the subject.",
+      why: "Changing the subject isn't always an insult \u2014 sometimes it's something PLEASANT dangled to make you forget the point (\"ooh, party!\"). It works the same way: pull your attention somewhere else so the hard question quietly disappears. Notice the swap and hold your ground kindly: \"I'd love the party \u2014 but that's separate. Can we finish talking about what happened first?\" You can be nice AND not get steered." }
+  ]
+};
+
+/* ---- spot_the_trick layout (mirrors is_that_true/trade_offs row layout) ---- */
+function sttRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function sttRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    nameNotReason: "NAME-CALLING \u2260 A REASON", everyoneDoesIt: "\"EVERYONE'S DOING IT\"",
+    falseChoice: "THE FAKE EITHER/OR", sneakyDodge: "CIRCLE / DODGE / SLIPPERY SLOPE"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation / thing someone says
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
 /* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
