@@ -206,8 +206,15 @@ function openReleasesPage() {
   shell.openExternal('https://github.com/MrVolts23/homeschool-hq/releases/latest');
 }
 
+// Auto-update is DISABLED by user preference (2026-07-14): Mike updates manually.
+// The app must never check GitHub, download in the background, or show an update
+// pop-up. Flip this to true to restore the hardened auto-updater below (all of the
+// download + safe-swap machinery is kept intact for that day).
+const AUTO_UPDATE_ENABLED = false;
+
 function setupUpdater() {
   if (!app.isPackaged) return; // only the installed app updates
+  if (!AUTO_UPDATE_ENABLED) { ulog('auto-update disabled — manual updates only'); return; }
   autoUpdater.autoDownload = true;
   // Keep this OFF. For an unsigned mac app the built-in on-quit install is a no-op
   // that fails silently — the app relaunches at the OLD version and re-prompts on
