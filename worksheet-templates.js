@@ -11334,6 +11334,268 @@ function sttRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — FIGURE IT OUT (real-world problem solving & self-reliance)
+   The library reasons brilliantly about IDEAS (fairness, incentives,
+   trade-offs, spin). What it lacked was a sheet for the most sovereign
+   skill of all: when you hit a real, everyday problem, YOU can think
+   your way through it — break it down, decide what matters first, work
+   a fix instead of waiting to be rescued, and see trouble coming before
+   it arrives. Nothing here is "the one right answer to memorize." We
+   want the child's OWN plan and, above all, the reasoning behind it.
+   Modes:
+     breakDown  — a big job feels huge; cut it into first-then-then steps
+     whatFirst  — several things at once; reason the order (what matters most)
+     whenStuck  — something went wrong; think toward a fix, don't freeze
+     bePrepared — think ahead: what might go wrong, and what's your plan?
+     mixed      — a bit of each
+   Deterministic, never calls AI. Mirrors the trade_offs row layout.
+============================================================ */
+window.TEMPLATES.figure_it_out = {
+  id: "figure_it_out",
+  label: "Figure It Out (real-world problem solving)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Practical problem-solving & self-reliance: breaking jobs into steps, ordering what matters, working a fix, and thinking ahead",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking skill",
+      options: [
+        { value: "breakDown",  label: "Break it down (turn a big job into small steps)" },
+        { value: "whatFirst",  label: "What first? (put things in a smart order)" },
+        { value: "whenStuck",  label: "When it goes wrong (work a fix, don't freeze)" },
+        { value: "bePrepared", label: "Think ahead (what might go wrong — and your plan)" },
+        { value: "mixed",      label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["breakDown", "whatFirst", "whenStuck", "bePrepared"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = fioShuffle(FIO_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Figure It Out";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Here's a power nobody can ever take from you: when something goes sideways, YOU can figure it out. You don't have to wait for someone to swoop in and fix it. A problem that feels too big usually just needs breaking into small steps. A pile of things all at once just needs a smart order. When something breaks, the first move is to think, not to panic. And the sharpest move of all is seeing trouble coming before it shows up. For each one, make YOUR plan — there's no single right answer, only good thinking. Say WHY it's your plan.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"You want to make a sandwich but the whole thing feels like a lot.\"  ->  Break it into steps you can actually do: (1) get the bread out, (2) get what goes inside, (3) build it, (4) clean up. Suddenly it's not one huge job — it's four little ones, and you can start step 1 right now. That's the whole trick: a big thing is just small things in a row.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 100);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = fioRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = fioRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- figure_it_out content banks ---- */
+function fioShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the real-world situation the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model plan (answer key only — one good option, not THE answer)
+//   why    = the reasoning, plain kid language, self-reliant/sovereign voice
+const FIO_BANKS = {
+  breakDown: [
+    { text: "Your room is a total mess and cleaning it feels impossible.",
+      ask: "Break it into 3 or 4 small steps. What's step one?",
+      answer: "e.g. (1) books on the shelf, (2) clothes in the hamper, (3) toys in the bin, (4) trash out. Start with one corner.",
+      why: "A big mess isn't one giant job — it's a bunch of tiny jobs stacked up. Name the small steps and the 'impossible' pile turns into 'do this, then that.' You can always start step one, even when the whole thing feels like too much." },
+    { text: "You want to build a fort but you don't know where to begin.",
+      ask: "Break the fort into steps. What has to happen first, second, third?",
+      answer: "e.g. (1) pick the spot, (2) gather blankets/chairs, (3) build the frame, (4) make a door. First things first.",
+      why: "Every build has an order. You can't put the roof on before there's something to hold it up. Figuring out what MUST come first is half the job — then you just follow your own steps." },
+    { text: "You have to pack your own bag for a day trip.",
+      ask: "Break it down: how do you make sure you don't forget anything?",
+      answer: "e.g. picture the whole day in your head, then pack for each part: snack, water, jacket, thing to do.",
+      why: "The trick for 'don't forget stuff' is to walk through the day in your mind, moment by moment, and pack for each moment. Thinking it through beats hoping you'll remember." },
+    { text: "You want to learn to tie your shoes and it seems too hard.",
+      ask: "Break the skill into small pieces. What's the very first piece to practice?",
+      answer: "e.g. (1) make one loop, (2) make the second, (3) cross them, (4) pull. Practice just the loop first.",
+      why: "Hard skills are just easy pieces you haven't split apart yet. Learn one piece at a time and the 'too hard' thing becomes a thing you CAN do. Nobody's born knowing it — they broke it down." },
+    { text: "You're helping make dinner and there's a lot to do.",
+      ask: "Break the job into steps and pick a sensible order. Where do you start?",
+      answer: "e.g. wash hands, get ingredients out, do the slow-cooking thing first, set the table while it cooks.",
+      why: "When there's a lot to do, list the steps and notice which ones take the longest — start those first so they cook while you do the quick stuff. Ordering your steps IS the skill." }
+  ],
+  whatFirst: [
+    { text: "You spill your water AND the phone is ringing AND your little sibling is crying.",
+      ask: "Which do you handle first, and why? Put them in order.",
+      answer: "e.g. check the crying sibling (are they hurt?), then the spill (before it spreads), then the phone. Safety first.",
+      why: "When everything happens at once, ask 'what's most important, and what can't wait?' A person comes before a puddle; a puddle before a ringing phone. You decide the order on purpose instead of freezing." },
+    { text: "It's bedtime soon and you still have to brush teeth, put on pajamas, and put a toy away.",
+      ask: "What order gets it all done best? Why that order?",
+      answer: "e.g. put the toy away first (quick, out of the way), pajamas, then brush teeth last so your mouth stays clean.",
+      why: "Smart order means thinking about which step should come LAST. Teeth last so nothing un-cleans them. There's usually a reason one order beats another — find it, don't just do things randomly." },
+    { text: "You have homework, a chore, and a show you want to watch, but not enough time for all three.",
+      ask: "What comes first, and what might have to wait? Explain your order.",
+      answer: "e.g. the things that MUST happen (homework, chore) before the thing that's just fun (show). Wants wait for needs.",
+      why: "When time is tight, do the must-dos before the want-to-dos. It's not that fun doesn't matter — it's that if you flip the order, the fun eats the time and the important stuff doesn't get done." },
+    { text: "You're leaving for school in ten minutes and you haven't eaten, dressed, or found your shoes.",
+      ask: "In what order do you tackle these? Why?",
+      answer: "e.g. dress + shoes first (can't leave without them), grab food you can eat on the way. Do the can't-skip things first.",
+      why: "When the clock's running, do the things you absolutely CAN'T leave without first, and find the ones you can do 'on the go.' Ordering by 'what can't be skipped' keeps you from getting stuck." },
+    { text: "A friend and your teammate both ask for help at the same time.",
+      ask: "How do you decide who to help first? What matters here?",
+      answer: "e.g. ask what each needs — someone hurt or stuck now comes before someone who can wait a minute.",
+      why: "You can't do two things at once, so you have to choose — and choosing well means asking 'which one really can't wait?' It's okay to tell the other 'one sec, I'll be right there.'" }
+  ],
+  whenStuck: [
+    { text: "Your bike chain slips off while you're riding.",
+      ask: "What's your first move — before asking for help? Think it through.",
+      answer: "e.g. stop safely, look at what happened, try to slip the chain back on the gear, then ask if it won't go.",
+      why: "When something breaks, the first move is to LOOK and think, not to panic or instantly yell for help. Most problems have a next step you can try yourself. Asking for help is fine — after you've had a real look." },
+    { text: "You're building something and a piece won't fit no matter how hard you push.",
+      ask: "Forcing it isn't working. What do you try instead?",
+      answer: "e.g. stop pushing, check if it's the right piece or the right way around, look for what's blocking it.",
+      why: "When forcing something doesn't work, harder-forcing usually just breaks it. Stuck is a signal to STOP and figure out WHY it won't go — wrong piece? backwards? — instead of muscling through blind." },
+    { text: "You're drawing and you make a mistake you can't erase.",
+      ask: "The mistake is there. Now what? Come up with a plan.",
+      answer: "e.g. turn it into part of the drawing, draw over it, or start that bit again — a mistake isn't the end.",
+      why: "A mistake isn't a dead end, it's just where you are now. Sharp problem-solvers ask 'okay, given this, what CAN I do?' instead of getting stuck on 'I wish it hadn't happened.' You work with what's real." },
+    { text: "You're lost in a big store and can't see your grown-up.",
+      ask: "What's your plan? Think it through calmly, step by step.",
+      answer: "e.g. stay put or go to a worker/cashier (a safe helper), say your grown-up's name, don't wander or leave with a stranger.",
+      why: "Even scary problems have a plan. The smart move when lost is usually to STOP wandering and find a safe helper (a worker at a counter). Having a plan in your head beforehand means you don't freeze when it counts." },
+    { text: "Your tower of blocks keeps falling down every time you build it tall.",
+      ask: "It failed the same way twice. What do you change next time?",
+      answer: "e.g. make the bottom wider/sturdier, use the flat blocks low down — change the base, not just try again harder.",
+      why: "If something fails the SAME way twice, doing the exact same thing won't fix it. The clue is in HOW it fell. Change what caused it — a wobbly base — instead of just rebuilding and hoping. That's learning from the fail." }
+  ],
+  bePrepared: [
+    { text: "You're going to ride your bike far from home this afternoon.",
+      ask: "What might go wrong, and what would you bring or plan for it?",
+      answer: "e.g. it could get dark or you could get thirsty/hurt — bring water, tell someone your plan, know the way back.",
+      why: "Thinking ahead is a superpower: you ask 'what could go wrong?' BEFORE it does, so you're ready. A little planning now saves a big problem later. That's not worrying — it's being your own backup." },
+    { text: "There's a big storm coming tonight and the power might go out.",
+      ask: "What could you get ready NOW, before it happens?",
+      answer: "e.g. find a flashlight, know where blankets are, charge things, fill water — set up before the lights go.",
+      why: "The best time to solve a problem is before it starts. Once the power's out it's hard to find a flashlight in the dark — so you find it while you still can. Thinking one step ahead makes the future-you's life way easier." },
+    { text: "You have a big show-and-tell tomorrow and you don't want to forget your thing.",
+      ask: "What can you do tonight so tomorrow goes smoothly?",
+      answer: "e.g. put the item right by the door or in your bag NOW, so morning-you can't forget it.",
+      why: "Don't count on remembering in a rushed morning — set it up tonight so it's impossible to forget. Smart people don't rely on luck or memory; they build a little trap that makes the right thing happen automatically." },
+    { text: "You're about to pour your own cereal and milk for the first time.",
+      ask: "What might spill or go wrong, and how do you set up to avoid it?",
+      answer: "e.g. small pours, bowl over the counter not the edge, don't overfill — go slow the first time.",
+      why: "Before doing something new, run it in your head and spot where it could go wrong. Then set up so it doesn't — pour slow, catch spills early. Thinking through it first is how you do new things without a mess." },
+    { text: "It might rain during your walk to a friend's house.",
+      ask: "What would you check or bring, just in case? Make a plan.",
+      answer: "e.g. look at the sky/check the forecast, bring a jacket or umbrella, or plan to go before the rain.",
+      why: "'Just in case' thinking means preparing for the maybe, not just the sure thing. A little check and a jacket cost you almost nothing — and save you from a soggy walk. Being ready beats being surprised." }
+  ]
+};
+
+/* ---- figure_it_out layout (mirrors trade_offs row layout) ---- */
+function fioRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function fioRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    breakDown: "BREAK IT DOWN", whatFirst: "WHAT FIRST?",
+    whenStuck: "WHEN IT GOES WRONG", bePrepared: "THINK AHEAD"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
