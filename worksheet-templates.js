@@ -11596,6 +11596,265 @@ function fioRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   SEE IT THEIR WAY — perspective-taking / theory-of-mind
+   Given a real situation, work out what each person KNOWS,
+   WANTS and FEELS — and why that makes them act differently.
+   Sovereign framing: read people so nobody can play you;
+   understand motives to think clearly, not to obey or please.
+   Modes:
+     knowGap   — different people KNOW different things
+     wantWhy   — what does each side actually WANT (the real goal)
+     feelRead  — read the feeling under the behaviour
+     playedYou — someone wants something FROM you: name it
+     mixed     — a bit of each
+   Deterministic, never calls AI. Mirrors the figure_it_out layout.
+============================================================ */
+window.TEMPLATES.see_it_their_way = {
+  id: "see_it_their_way",
+  label: "See It Their Way (read people, don't get played)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Perspective-taking & motive-reading: what each person knows, wants and feels — and why they act on it",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking skill",
+      options: [
+        { value: "knowGap",   label: "Who knows what? (people know different things)" },
+        { value: "wantWhy",   label: "What do they really want? (the goal under the words)" },
+        { value: "feelRead",  label: "Read the feeling (what's under the behaviour)" },
+        { value: "playedYou", label: "What do they want FROM you? (spot the pitch)" },
+        { value: "mixed",     label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["knowGap", "wantWhy", "feelRead", "playedYou"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = sitwShuffle(SITW_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "See It Their Way";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Everybody walks around with a different picture in their head. Two people can look at the exact same thing and see something totally different — because they KNOW different stuff, they WANT different stuff, and they FEEL different stuff. This isn't about being nice or agreeing with everyone. It's a power: when you can figure out what someone knows, wants, or feels, you can understand why they're acting the way they are — and nobody can play you, because you can see what they're really after. For each one, work out the other person's picture. There's no single right answer, only good reading of people. Say WHY you think so.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"Your friend is grumpy and snaps at you. You didn't do anything.\"  ->  Before deciding they're mad at YOU, ask what's in THEIR picture that you can't see. Maybe they're tired, hungry, or something went wrong at home that has nothing to do with you. Reading the feeling under the snap ('they're having a rough one') means you don't take it personally AND you know how to handle it. You're not guessing at YOUR feelings — you're reading THEIRS.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 108);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = sitwRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = sitwRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- see_it_their_way content banks ---- */
+function sitwShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the real-world situation the child reads
+//   ask    = the perspective-taking prompt (mode-specific)
+//   answer = short model read (answer key only — one good option, not THE answer)
+//   why    = the reasoning, plain kid language, sovereign/motive-reading voice
+const SITW_BANKS = {
+  knowGap: [
+    { text: "You know a surprise party is planned. Your friend walks in looking confused and a little upset that everyone got quiet.",
+      ask: "What does your friend know right now that's different from what YOU know?",
+      answer: "e.g. they don't know it's a party — from their side, everyone just went weirdly silent, which feels bad.",
+      why: "You've got a piece of the picture they don't have. Their confusion makes total sense from inside THEIR head. Remembering 'they don't know what I know' stops you thinking they're being weird — they're just missing a piece." },
+    { text: "You've read a book three times. Your little sibling has never heard the story and keeps asking what happens next.",
+      ask: "Why do the questions feel obvious to you but not to them?",
+      answer: "e.g. you already know the ending; they're hearing it for the first time, so of course they can't guess.",
+      why: "What's 'obvious' is only obvious once you know it. They're not slow — they just haven't got the same information yet. Nobody's born knowing the ending. When you remember that, you explain instead of getting annoyed." },
+    { text: "A new kid at the park doesn't know the game you all made up, so they keep 'breaking the rules.'",
+      ask: "Are they cheating, or is something else going on? What don't they know?",
+      answer: "e.g. they never learned the rules you invented — you can't break rules nobody told you.",
+      why: "Before you decide someone's doing wrong, ask 'did they even KNOW the rule?' A rule that only lives in your head isn't a rule they broke — it's a rule they never got. Reading the know-gap keeps you from blaming the wrong thing." },
+    { text: "Your grown-up says 'we can't get that toy right now' and you don't understand why not.",
+      ask: "What might your grown-up know about money or plans that you can't see?",
+      answer: "e.g. they might know the money's needed for something else, or there's a plan you don't know about.",
+      why: "Grown-ups often see a bigger picture — bills, plans, what's coming up — that you don't get shown. 'No' isn't always about you. Asking 'what do they know that I don't?' turns a mystery into a fair question you can actually ask." },
+    { text: "You point at something and say 'look at that!' but your friend can't figure out what you mean.",
+      ask: "Why can't they see what you're pointing at as easily as you can?",
+      answer: "e.g. they're standing somewhere else and don't have the thing in your head — you have to say what it is.",
+      why: "You can see the thing AND you know what you meant. They only have your pointing finger. People aren't in your head — if you want them to get it, you have to hand them the missing piece with your words." }
+  ],
+  wantWhy: [
+    { text: "A kid keeps saying your drawing is 'not that good' and offers to 'help' by taking over.",
+      ask: "What do they actually WANT here? (Hint: it might not be to help you.)",
+      answer: "e.g. they might want to be in charge / feel like the better artist — not to help you get better.",
+      why: "Watch what someone DOES, not just what they say. 'I'm helping' plus 'let me take over' plus 'yours isn't good' usually adds up to 'I want control,' not 'I want you to win.' Naming the real want means you can say 'thanks, I've got it.'" },
+    { text: "Your sibling suddenly offers to share their candy with you — right before asking you to do their chore.",
+      ask: "What's the real goal behind the sudden kindness? What do they want?",
+      answer: "e.g. they want you to do their chore; the candy is a trade to make you say yes.",
+      why: "When someone's extra nice right before they ask for something, the niceness might be the price they're paying to get the thing. That's not always bad — but see the deal for what it is, so YOU decide if the trade is fair." },
+    { text: "Two friends both want to play a different game and each says the other is 'being unfair.'",
+      ask: "What does each one really want underneath the argument?",
+      answer: "e.g. each one wants to play their own favourite game — they both want the same thing (their way).",
+      why: "Most fights aren't about who's 'unfair' — they're two people wanting different things at once. When you name what each side actually wants, the fight turns into a problem you can solve, like taking turns, instead of a battle over who's right." },
+    { text: "A grown-up at a store smiles big and says the toy is 'the best one, everybody's getting it!'",
+      ask: "What does the store person WANT to happen? Does that change how you hear it?",
+      answer: "e.g. they want you to buy it — that's their job — so 'best one' is a sales line, not a fact.",
+      why: "Always ask 'what does this person get if I say yes?' The store makes money when you buy. That doesn't make them evil — but it means their glowing words are aimed at YOUR wallet, so you weigh them lightly and decide for yourself." },
+    { text: "Your friend really wants you to pick THEIR seat / THEIR movie and keeps saying 'come onnn, please?'",
+      ask: "What do they want, and what do YOU want? Are those the same?",
+      answer: "e.g. they want their pick; you might want yours or not care — figure out YOUR want before you cave.",
+      why: "When someone pushes hard for what THEY want, it's easy to forget you get a want too. Naming both wants — theirs and yours — lets you choose on purpose instead of just going along because they asked loudest." }
+  ],
+  feelRead: [
+    { text: "Your friend loses the game and goes quiet, then says 'I didn't even want to play anyway.'",
+      ask: "What are they probably really feeling under those words?",
+      answer: "e.g. they're likely disappointed about losing — the 'didn't want to' is covering up feeling bad.",
+      why: "People don't always say the feeling straight. 'I didn't care anyway' after losing usually means 'I cared and it stings.' Reading the feeling under the words means you get it right instead of arguing with the cover story." },
+    { text: "A kid is being loud and bossy, ordering everyone around the playground.",
+      ask: "What might they be feeling that makes them act bossy?",
+      answer: "e.g. maybe they feel unsure or left out and are grabbing control to feel safe or important.",
+      why: "Big loud behaviour often hides a small worried feeling. Bossy can mean 'I'm scared no one will pick me.' You don't have to obey them — but reading the feeling underneath means you understand it instead of just calling them mean." },
+    { text: "Your grown-up seems short and snappy tonight and you can't figure out why.",
+      ask: "What could they be feeling, and is it likely about you?",
+      answer: "e.g. they might be tired or stressed from their day — probably not about you at all.",
+      why: "When someone's off, the first question isn't 'what did I do?' — it's 'what might THEY be carrying?' Grown-ups have whole days you didn't see. Reading their feeling stops you from taking on blame that was never yours." },
+    { text: "A friend keeps making jokes and laughing but their eyes look kind of sad.",
+      ask: "Which do you trust more — the jokes or the eyes? What might they feel?",
+      answer: "e.g. the face can say more than the joke — they might be sad and covering it with laughing.",
+      why: "People can say 'I'm fine' with their mouth while their face says otherwise. When words and body don't match, the body's usually more honest. Reading both means you can gently check in instead of believing the mask." },
+    { text: "Your little sibling breaks something of yours and immediately gets very quiet and small.",
+      ask: "What are they feeling, and how does knowing that change what you do?",
+      answer: "e.g. they probably feel scared or sorry already — yelling won't teach more than they've learned.",
+      why: "Reading that someone already feels bad changes your smartest move. If they're scared and sorry, piling on does nothing useful. You can be upset AND read that the lesson already landed. That's using your head, not just your temper." }
+  ],
+  playedYou: [
+    { text: "An ad shows kids having the BEST time with a toy and says 'you'll be the coolest kid with this!'",
+      ask: "What does the ad want you to DO, and what feeling is it poking to get it?",
+      answer: "e.g. it wants you to buy the toy; it pokes the wish to be cool/fit in so you'll want it more.",
+      why: "Ads aren't your friend — they're a pitch. Ask 'what do they want me to do?' (buy) and 'what feeling are they using?' (wanting to be cool). Once you SEE the trick, it loses its grip. You can still want the toy — but on your terms, not theirs." },
+    { text: "A kid says 'if you were really my friend, you'd give me your snack.'",
+      ask: "What do they want, and what feeling are they using to get it?",
+      answer: "e.g. they want your snack; they're using the fear of not being a 'real friend' to pressure you.",
+      why: "'If you were really my friend, you'd...' is a squeeze — it uses your feelings to get a thing. A real friend doesn't charge you snacks to stay friends. Spotting the move means you can say no without feeling tricked into yes." },
+    { text: "Someone says 'everybody's doing it, don't be the only one who won't.'",
+      ask: "What are they after, and why bring up 'everybody'? Does 'everybody' make it right?",
+      answer: "e.g. they want you to go along; 'everybody' is a push to make you scared of standing out — not a reason.",
+      why: "'Everybody's doing it' isn't a reason, it's a lever — it uses the fear of being left out. Whether lots of people do a thing has nothing to do with whether it's good for YOU. Seeing the lever lets you decide on the actual question." },
+    { text: "A grown-up you don't know well offers you something and says 'it'll be our little secret.'",
+      ask: "What do they want, and what should the word 'secret' make you notice?",
+      answer: "e.g. a 'secret' between you and a grown-up you don't know is a red flag — tell a grown-up you DO trust.",
+      why: "Anyone asking a kid to keep a secret FROM their safe grown-ups is doing something a good person wouldn't need to hide. That's not a trick to solve alone — it's a signal to walk away and tell someone you trust. Reading the ask keeps you safe." },
+    { text: "A video keeps saying 'don't skip! watch till the end!' and 'smash that button now!'",
+      ask: "What does the video want from you, and why is it pushing so hard?",
+      answer: "e.g. it wants your time and clicks (that's how it wins) — the pushing is to keep YOU, for THEM.",
+      why: "Anything begging you to 'keep watching' or 'click now' wins something when you do — usually your attention, which is worth money to them. It's fine to watch what you like — but YOU decide when you're done, not the voice trying to keep you." }
+  ]
+};
+
+/* ---- see_it_their_way layout (mirrors figure_it_out row layout) ---- */
+function sitwRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function sitwRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    knowGap: "WHO KNOWS WHAT?", wantWhy: "WHAT DO THEY WANT?",
+    feelRead: "READ THE FEELING", playedYou: "WHAT DO THEY WANT FROM YOU?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
