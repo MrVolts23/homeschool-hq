@@ -11855,6 +11855,259 @@ function sitwRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   SPIN DETECTOR — "Same Fact, Different Spin"
+   Media/manipulation literacy: separate the bare EVENT from the
+   STORY someone tells about it. The same true thing can be dressed
+   in words that make you feel proud, scared, or angry — the facts
+   didn't change, the framing did. Sovereign voice: strip the spin,
+   look at what actually happened, decide for yourself.
+============================================================ */
+window.TEMPLATES.spin_detector = {
+  id: "spin_detector",
+  label: "Same Fact, Different Spin (strip the spin, see what happened)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Media literacy: separating the bare event from the framing / loaded language used to steer your feelings",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking skill",
+      options: [
+        { value: "sameFact",     label: "Same fact, two spins (what actually happened?)" },
+        { value: "loadedWords",  label: "Spot the feeling-word (which word is pushing you?)" },
+        { value: "whatsLeftOut", label: "What did they leave out? (the missing piece)" },
+        { value: "nameIt",       label: "Spin or straight? (is this a report or a sell?)" },
+        { value: "mixed",        label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["sameFact", "loadedWords", "whatsLeftOut", "nameIt"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = spinShuffle(SPIN_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Same Fact, Different Spin";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Here's a secret about how people talk: the SAME true thing can be told in words that make you feel totally different. \"Spin\" is when someone dresses up a plain fact to steer your feelings — to make you proud, scared, excited, or mad — so you'll think what they want. The fact didn't change. The costume did. This isn't about calling people liars; a lot of spin is technically true. It's about a power: when you can strip off the fancy words and look at what ACTUALLY happened, nobody can push your feelings around, and YOU decide what to think. For each one, do the job it asks. Say WHY.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "Spin A: \"Our team CRUSHED them in an EPIC comeback!\"   Spin B: \"They lost the first half and won by one point.\"  ->  What actually happened? They were behind, then won by 1. That's it. \"Crushed\" and \"epic\" are feeling-words glued on to make it sound huge. Both can be 'true' — but B lets you see the real event, and A is trying to make you cheer. Strip the costume, keep the fact.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 112);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = spinRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = spinRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- spin_detector content banks ---- */
+function spinShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the situation / the two spins / the statement to examine
+//   ask    = the thinking prompt (mode-specific)
+//   answer = one good model read (answer key only — a good option, not THE answer)
+//   why    = the reasoning in plain kid language, sovereign/spin-stripping voice
+const SPIN_BANKS = {
+  sameFact: [
+    { text: "Spin A: \"This cereal is PACKED with the energy champions need!\"   Spin B: \"This cereal has a lot of sugar in it.\"",
+      ask: "Both might be true. What ACTUALLY happened / what's the plain fact?",
+      answer: "e.g. it's a sugary cereal. \"Packed with energy for champions\" is a fancy way of saying \"lots of sugar.\"",
+      why: "Sugar IS energy, so the ad isn't exactly lying — it just picked the word that makes sugar sound like a superpower. Strip the costume ('champions,' 'packed') and you get the plain fact you can actually decide about." },
+    { text: "Spin A: \"We had a HUGE turnout — the park was buzzing!\"   Spin B: \"About twelve people came to the park cleanup.\"",
+      ask: "What's the bare fact under both? Which words are doing the puffing-up?",
+      answer: "e.g. twelve people showed up. \"Huge,\" \"buzzing,\" and \"turnout\" make twelve sound like a crowd.",
+      why: "\"Huge\" only means something next to a number. Once you know it's twelve, you can decide for yourself if that's a lot. Spin hides the number and hands you a feeling instead — so ask for the number." },
+    { text: "Spin A: \"Our new slime is FINALLY here — you've been WAITING for this!\"   Spin B: \"A store is selling a new kind of slime.\"",
+      ask: "Strip it down: what actually happened?",
+      answer: "e.g. a store made a new slime to sell. Nobody was actually 'waiting' — the ad just says you were.",
+      why: "\"You've been waiting for this\" is a trick that tells you how you feel BEFORE you've decided. You weren't waiting — you didn't even know it existed. Notice when words try to hand you a feeling you didn't have." },
+    { text: "Spin A: \"He BRAVELY refused to clean his room, standing up for his rights!\"   Spin B: \"He didn't clean his room when he was asked.\"",
+      ask: "What actually happened, without the hero words?",
+      answer: "e.g. he didn't clean his room. \"Bravely,\" \"standing up for his rights\" make not-cleaning sound heroic.",
+      why: "Big noble words ('brave,' 'rights') can be pasted onto almost anything to make it sound good. Peel them off and check the plain action first — THEN decide if it was actually brave or just skipping a chore." },
+    { text: "Spin A: \"The team SUFFERED a crushing, humiliating defeat.\"   Spin B: \"The team lost the game 3 to 2.\"",
+      ask: "What's the plain fact? Which words were added to make it feel worse?",
+      answer: "e.g. they lost 3–2, a close game. \"Crushing,\" \"humiliating,\" \"suffered\" make a 1-point loss sound like a disaster.",
+      why: "3–2 is a close game — but 'crushing' and 'humiliating' make it feel like the end of the world. Feeling-words can make a small thing sound huge OR a big thing sound tiny. The score is the fact; the drama is the spin." }
+  ],
+  loadedWords: [
+    { text: "\"Only a baby would be scared of that ride.\"",
+      ask: "Which word is doing the pushing? What's it trying to make you do?",
+      answer: "e.g. the word \"baby\" — it's there to make you feel embarrassed so you'll go on the ride to prove you're not one.",
+      why: "The word 'baby' isn't a reason the ride is safe — it's a poke at your feelings. It changes the subject from 'is this ride okay for me?' to 'are you a baby?' Spot the poke and you can answer the real question calmly." },
+    { text: "\"Everyone smart already knows this is the best game.\"",
+      ask: "Which word is the lever? Does it actually prove the game is best?",
+      answer: "e.g. the word \"smart\" — it hints you're not smart if you disagree. It's pressure, not proof.",
+      why: "Gluing 'smart people agree' onto an opinion doesn't make it a fact — it just makes you scared to disagree. A real reason would say WHAT'S good about the game. When a word is aimed at YOU instead of the thing, it's a lever." },
+    { text: "\"This is a GENEROUS offer — you'd be crazy to say no.\"",
+      ask: "Point to the feeling-words. What are they steering you away from?",
+      answer: "e.g. \"generous\" and \"crazy to say no\" — they steer you away from actually checking if the offer is good.",
+      why: "'Generous' and 'you'd be crazy' are there to rush you past thinking. A truly good deal survives you looking at it slowly. Any word pushing you to decide FAST is usually protecting a deal that can't survive a slow look." },
+    { text: "\"He wolfed down his food like an animal.\"  vs.  \"He was hungry and ate quickly.\"",
+      ask: "Same action. Which words make it sound bad? What actually happened?",
+      answer: "e.g. he ate fast because he was hungry. \"Wolfed,\" \"like an animal\" paint the same thing as gross.",
+      why: "The action — eating quickly — is neutral. 'Wolfed down like an animal' adds a judgment on top and hopes you won't notice it's an opinion, not the fact. Separate the doing from the name-calling stuck to it." },
+    { text: "\"She refused to share\"  vs.  \"She kept the toy she was already playing with.\"",
+      ask: "Which telling makes her sound selfish? What's the plain fact?",
+      answer: "e.g. she kept a toy she was using. \"Refused to share\" makes the same thing sound mean.",
+      why: "'Refused to share' sounds selfish; 'kept the toy she was using' sounds fair — but it's the SAME event. Whoever's telling it picked the words that fit their side. When a story makes someone sound bad, ask what the plain action was." }
+  ],
+  whatsLeftOut: [
+    { text: "\"9 out of 10 kids said they LOVED this snack!\"",
+      ask: "What might they NOT be telling you? What would you want to know?",
+      answer: "e.g. how many kids were asked? Who picked them? Were they given free candy first? '9 out of 10' hides the rest.",
+      why: "A number sounds solid, but the missing pieces change everything. If they only asked 10 kids, or paid them, '9 out of 10' means nothing. Spin often works by what it LEAVES OUT, not by lying. Ask 'what's not here?'" },
+    { text: "\"Our team won the championship!\" (on a poster for a league with only two teams)",
+      ask: "What's left out that changes how impressive this is?",
+      answer: "e.g. there were only two teams, so 'champion' means they beat one other team. That's left out.",
+      why: "'Champion' sounds huge until you learn there were two teams. The claim is true AND misleading, because the important piece (how many teams?) is missing. The trick isn't the lie — it's the hole where the fact should be." },
+    { text: "\"This medicine made people feel better in just 3 days!\"",
+      ask: "What did they leave out that you'd want to know?",
+      answer: "e.g. most colds go away in about 3 days on their own — so the medicine might have done nothing.",
+      why: "They left out what would've happened WITHOUT the medicine. If you'd feel better in 3 days anyway, the medicine gets credit it didn't earn. Always ask 'compared to what?' — the missing comparison is where spin hides." },
+    { text: "\"Buy now — this price won't last!\"",
+      ask: "What are they NOT telling you, and why the rush?",
+      answer: "e.g. they don't say the price will probably come back, or that other stores sell it cheaper. The rush stops you checking.",
+      why: "'Won't last!' is designed so you buy before you can look around. What's left out is: is this actually a good price? A real bargain doesn't need to panic you. The hurry is the tell that something's missing." },
+    { text: "A kid says: \"He started it! He pushed me!\" (and stops there)",
+      ask: "What part of the story might be missing?",
+      answer: "e.g. what happened right before the push — maybe something the teller did first. One side is left out.",
+      why: "'He started it' is a favourite because it starts the clock exactly where it makes the teller look best. The missing piece is 'and what happened just before that?' One side of a story is half the facts." }
+  ],
+  nameIt: [
+    { text: "\"The library is open from 9 to 5 on Saturdays.\"",
+      ask: "Is this a straight report (just facts) or a sell (trying to steer you)? How can you tell?",
+      answer: "e.g. straight report — it just states hours, no feeling-words, nothing trying to make you feel a certain way.",
+      why: "A straight report hands you facts and lets you decide. No 'amazing,' no 'you'd be crazy not to.' When you can't find any word aimed at your feelings, you're probably looking at information, not a pitch." },
+    { text: "\"Don't miss out! This is the MOST AMAZING toy of the year — everyone wants one!\"",
+      ask: "Report or sell? Name the words that give it away.",
+      answer: "e.g. a sell — \"don't miss out,\" \"most amazing,\" \"everyone wants one\" are all pushing feelings, not giving facts.",
+      why: "Count the feeling-words: 'don't miss out,' 'most amazing,' 'everyone.' A report tells you what a toy IS; a sell tells you how to FEEL about it. Stack up three feeling-pushes and you've found a pitch." },
+    { text: "\"It rained today, so the soccer game was moved to next week.\"",
+      ask: "Report or sell? What tells you?",
+      answer: "e.g. straight report — it says what happened and why, with no words trying to steer your feelings.",
+      why: "Cause and effect, plainly stated, no drama. Nobody's trying to make you buy, cheer, or panic. That calm, fact-first flavour is what a real report tastes like — worth noticing so you can spot the difference." },
+    { text: "\"Smart families choose our school — give your child the future they DESERVE!\"",
+      ask: "Report or sell? Which words are working on you?",
+      answer: "e.g. a sell — \"smart families,\" \"deserve,\" \"the future\" push guilt and pride instead of telling you facts about the school.",
+      why: "Notice it says nothing you could check — no facts about the school, just 'smart families' (be smart!) and 'deserve' (feel guilty!). When a message is all feelings and no checkable facts, it's selling, not reporting." },
+    { text: "\"Three kids signed up for the art club so far.\"",
+      ask: "Report or sell? How do you know?",
+      answer: "e.g. straight report — a plain number, no puffing, nothing making three sound like more than three.",
+      why: "It could've spun this ('interest is GROWING!') but it just gave the number. A report trusts you with the plain fact. When someone hands you the number instead of hiding it behind excitement, that's the honest move." }
+  ]
+};
+
+/* ---- spin_detector layout (mirrors see_it_their_way row layout) ---- */
+function spinRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function spinRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    sameFact: "WHAT ACTUALLY HAPPENED?", loadedWords: "SPOT THE FEELING-WORD",
+    whatsLeftOut: "WHAT'S LEFT OUT?", nameIt: "REPORT OR SELL?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The statement / the two spins
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
