@@ -12108,6 +12108,284 @@ function spinRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — WHAT DOES THAT NUMBER REALLY MEAN? (read_the_number)
+   The library is deep on LANGUAGE manipulation (spin_detector,
+   says_who, follow_the_incentive, spot_the_persuasion...) but had
+   nothing on NUMBER / statistic manipulation — the other half of how
+   people get pushed around. Kids meet loaded numbers everywhere:
+   "9 out of 10 dentists," "50% OFF!", scary big totals with nothing
+   to compare them to, a survey of 5 friends sold as "everyone,"
+   percentages with no "percent of what." This is a MATH sheet (they
+   already do place value, estimation, fractions) that teaches them to
+   slow a number down and ask the sovereign questions: out of how many?
+   compared to what? who counted, and who wanted this answer?
+
+   Four deterministic modes — all with real kid-scale scenarios:
+     outOfWhat   — a number/percent means nothing without its whole:
+                   "half off" of what price, "3 out of 4" vs "3,"
+                   a big total vs a fair share, "twice as much" of tiny.
+     comparedTo  — a lone number can't scare or impress until you set it
+                   beside something: "a MILLION germs" (so does a clean
+                   hand), "$500!" (over how long?), "5 left!" fake
+                   scarcity, "grew 100%" from 1 to 2.
+     whoCounted  — where did the number come from & who wanted it:
+                   "9 out of 10 dentists" (paid? how many asked?),
+                   "everyone says" (a survey of 3?), a rounded-up
+                   "almost 1000," a graph that starts at 90 not 0.
+     doTheMath   — just work it out yourself and the trick pops:
+                   "buy 2 get 1 free" vs a plain sale, "only $1 a day"
+                   (=$365/yr), a "record" that's cherry-picked, a
+                   probability sold as a sure thing.
+   Deterministic, never calls AI. Mirrors trade_offs row layout exactly.
+   Sovereign voice: a number is just a fact wearing a costume until YOU
+   ask "out of what, compared to what, who counted?" — then you decide.
+============================================================ */
+window.TEMPLATES.read_the_number = {
+  id: "read_the_number",
+  label: "What does that number REALLY mean?",
+  subject: "math",
+  grades: ["1", "2", "3"],
+  topicHint: "Number & statistic literacy — reading quantities honestly",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "outOfWhat",  label: "Out of what? (a number needs its whole)" },
+        { value: "comparedTo", label: "Compared to what? (set it beside something)" },
+        { value: "whoCounted", label: "Who counted? (where did the number come from)" },
+        { value: "doTheMath",  label: "Do the math (work it out & the trick pops)" },
+        { value: "mixed",      label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["outOfWhat", "comparedTo", "whoCounted", "doTheMath"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = rnShuffle(RN_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "What does that number REALLY mean?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Numbers act like they can't lie — but a number all by itself doesn't tell you much yet. \"Half off!\" Off of what? \"A MILLION germs!\" Compared to what? \"9 out of 10 people agree!\" Who counted, and who wanted that answer? A number is just a fact wearing a costume until you ask a few questions and see what's underneath. You don't have to be scared of it or impressed by it — you get to slow it down and check. For each one, ask the question, work out what the number REALLY means, then decide for yourself.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"9 out of 10 kids LOVE this cereal!\"  ->  Out of how many kids did they ask? If they asked 10, that's a tiny group. WHO asked them — the cereal company? Did they only keep the answers they liked? \"9 out of 10\" sounds huge, but until you know how many were asked and who counted, it's just a costume. Ask 'out of what, and who counted?' and the big number gets a lot smaller.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 100);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = rnRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = rnRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- read_the_number content banks ---- */
+function rnShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }
+//   text   = the numbered claim / situation the child reads
+//   ask    = the thinking prompt (mode-specific)
+//   answer = short model answer (answer key only)
+//   why    = the reasoning, plain kid language, sovereign voice
+const RN_BANKS = {
+  outOfWhat: [
+    { text: "A sign shouts: \"HALF OFF!\"",
+      ask: "Half off of WHAT? Why do you need to know the first price before you get excited?",
+      answer: "Half off a made-up-high price can still be expensive. You need the real starting price to know if it's a deal.",
+      why: "\"Half\" is only half of SOMETHING. Half off a $2 toy is $1; half off a $200 toy is still $100. A store can even mark the price way up first, then take 'half off' back to normal. The percent means nothing until you know 'half of what?'" },
+    { text: "\"3 out of 4 kids in the class picked pizza!\"",
+      ask: "Out of how many kids total? Does '3 out of 4' mean a lot of kids?",
+      answer: "If the class has 4 kids, that's tiny. '3 out of 4' is a ratio — you still need the real size.",
+      why: "A fraction tells you the SHARE, not the amount. '3 out of 4' could be 3 kids or 3,000 kids. Always ask 'out of how many?' — the whole is the part of the story they left out." },
+    { text: "\"This snack has TWICE as much fruit as the other one!\"",
+      ask: "Twice as much as WHAT amount? Could 'twice' still be almost nothing?",
+      answer: "Twice a tiny amount is still tiny — twice one raisin is two raisins. You need the starting amount.",
+      why: "'Twice' and 'double' sound big, but they multiply whatever you start with. Double a crumb is two crumbs. Before you're impressed by 'twice as much,' ask 'twice as much as HOW much?'" },
+    { text: "A jar is labelled \"BIGGEST SIZE — 500 grams!\"",
+      ask: "Is 500 grams a lot? What would you compare it to before deciding?",
+      answer: "You can't tell yet — compare it to a normal jar. 'Biggest' might just mean bigger than their small one.",
+      why: "A number with no comparison is just a costume for the word 'big.' 500 could be huge or normal. 'Biggest' only means biggest of THEIR sizes — ask what a regular one holds and judge for yourself." },
+    { text: "\"You'll get 20% MORE cereal, free!\"",
+      ask: "20% more than what amount — and does that mean it's a good deal for YOU?",
+      answer: "20% more of a small box isn't much, and it doesn't tell you the price per gram vs. other boxes.",
+      why: "Percent is always 'percent OF something.' 20% more of a little is a little. And 'more free' doesn't mean 'cheapest' — do the math on price for the amount, not the shiny number." }
+  ],
+  comparedTo: [
+    { text: "An ad warns: \"Your hands have MILLIONS of germs!\"",
+      ask: "Is a million germs scary by itself? What would you compare it to?",
+      answer: "Almost everything has millions of germs, including clean things. Big-sounding, but normal.",
+      why: "A number can't scare you until you set it beside something. Millions of germs sounds huge — but a freshly washed hand still has plenty, and most do nothing. Ask 'compared to what's normal?' before the number gets to scare you." },
+    { text: "\"This class costs $500!\"",
+      ask: "$500 over how long — one day, or a whole year? Why does that change everything?",
+      answer: "$500 for a year is very different from $500 for one hour. You need the time it covers.",
+      why: "A price with no time attached is half a fact. $500 a year is cheap; $500 an hour is a lot. Always ask 'over what time?' — squishing a long-time cost into one scary number is a common trick." },
+    { text: "A game screen flashes: \"Only 5 LEFT — hurry!\"",
+      ask: "5 left out of how many, and left for how long? Is this a real shortage?",
+      answer: "Online there are often endless copies. '5 left' is usually a countdown to rush you, not a real limit.",
+      why: "'Only 5 left' works by comparing to nothing and adding a clock. Compared to how many they can make (often unlimited), 5 'left' is just pressure. When a number is there to make you hurry, slow down on purpose." },
+    { text: "\"This channel GREW 100% this month!\"",
+      ask: "Grew from what to what? Could '100% growth' still be tiny?",
+      answer: "100% growth from 1 follower to 2 is 'doubling' — technically true, basically nothing.",
+      why: "Percent-growth hides the starting size. Going from 1 to 2 is '+100%' and sounds amazing; it's two people. Ask 'from what number to what number?' A big percent of a tiny thing is still a tiny thing." },
+    { text: "\"Our team scored the MOST goals ever — 40!\"",
+      ask: "40 goals over how many games? Compared to what, is 40 a lot?",
+      answer: "40 over 40 games is 1 a game — pretty normal. Spread out, a 'record' can be ordinary.",
+      why: "A total with no 'per what' can be dressed up as amazing. 40 goals in one game is wild; 40 across a season is average. Always find the 'per game / per day' hiding inside a big total." }
+  ],
+  whoCounted: [
+    { text: "\"9 out of 10 DENTISTS recommend this toothpaste!\"",
+      ask: "Who asked the dentists, how many did they ask, and were the dentists paid?",
+      answer: "The toothpaste company likely asked, maybe only a few, maybe let dentists pick more than one brand.",
+      why: "Numbers come from somewhere, and whoever pays for the count usually likes the answer. '9 out of 10' could be 9 out of 10 they hand-picked. Ask WHO counted and WHY before you trust the score." },
+    { text: "\"EVERYONE at school has this shoe!\"",
+      ask: "Did someone really count everyone? How many did they actually see?",
+      answer: "Almost never 'everyone' — usually a few loud kids. 'Everyone' is a feeling, not a count.",
+      why: "'Everyone' is a number in disguise, and it's almost always wrong. Nobody counted the whole school. It's a push to make you feel left out. Ask 'how many, really?' and 'everyone' shrinks fast." },
+    { text: "A box says \"ALMOST 1,000 pieces!\"",
+      ask: "'Almost 1000' — could that really be 700? Why round it up so high?",
+      answer: "'Almost 1000' might be 720. They round toward the impressive number, not the honest one.",
+      why: "People round in the direction that helps them. 'Almost 1000' leans on the big number even if it's really 720. When a number is fuzzy ('almost,' 'up to,' 'as many as'), the true one is usually less exciting." },
+    { text: "A graph shows a HUGE jump in sales — but the bottom of the graph starts at 90, not 0.",
+      ask: "Why does starting the graph at 90 make a small change LOOK giant?",
+      answer: "Cutting off the bottom stretches a tiny difference into a tall-looking cliff. It's the same small change.",
+      why: "Even a picture of numbers can trick you. Start the bar at 90 instead of 0 and going 92 to 95 looks like a mountain. Always check where the bottom of a graph starts — that's where the honesty lives." },
+    { text: "\"Reviewers gave it 5 STARS!\" — but there are only 2 reviews.",
+      ask: "5 stars from how many people? Is 2 reviews enough to trust?",
+      answer: "2 reviews is almost nothing, and they could be from friends or the seller. Too few to mean much.",
+      why: "A perfect score from a tiny group tells you almost nothing — and the few voices might be the seller's own friends. Ask 'how many counted?' A great average of 2 is weaker than an okay average of 500." }
+  ],
+  doTheMath: [
+    { text: "\"BUY 2, GET 1 FREE!\" Each toy is $6.",
+      ask: "Work it out: 3 toys for $12. What's that per toy? Is it really a big deal?",
+      answer: "$12 for 3 = $4 each. It's a 1/3 discount — okay, but only if you actually wanted 3.",
+      why: "Do the math and the magic word 'FREE' calms down. $12 for 3 is $4 each instead of $6 — fine, but you had to buy 3. A deal that makes you buy more than you wanted isn't always a deal. Count it yourself." },
+    { text: "\"Just $1 a DAY!\" for a subscription.",
+      ask: "Work it out: how much is $1 a day for a whole year?",
+      answer: "$1 x 365 = $365 a year. 'A dollar a day' is a way to make a big yearly price feel small.",
+      why: "Splitting a price into tiny daily bites hides the total. $1 a day is $365 a year. Whenever you hear 'only ___ a day,' multiply it out to a year before you decide — the small number is doing a big job." },
+    { text: "\"Our winners have made HUGE money!\" (Only 1 out of 1,000 players ever wins.)",
+      ask: "If 1 in 1,000 wins, what happens to the other 999? Who do they show you?",
+      answer: "999 lose. They only show the 1 winner, so you never see the 999 who didn't.",
+      why: "They cherry-pick the one lucky story and hide the crowd who lost. 1 in 1,000 means it almost surely won't be you. Count the losers they DON'T show — that's the number that tells the truth." },
+    { text: "\"90% chance to win the prize!\" says the game, so a kid keeps paying to play.",
+      ask: "If it's 90% each try, is winning a SURE thing? What about the 10%?",
+      answer: "No — 10% means about 1 in 10 tries loses, and losses can pile up. 90% is not 100%.",
+      why: "A high chance is not a promise. 90% still loses 1 in 10 — and if you keep paying, those losses add up real money. 'Almost sure' is a costume for 'not sure.' Do the math on what it costs to keep trying." },
+    { text: "\"Save $3 by buying the BIG pack!\" Big pack is $10 for 5; small is $2.20 each.",
+      ask: "Work it out: 5 smalls = ? Is the big pack really cheaper, and do you need 5?",
+      answer: "5 x $2.20 = $11, so the big pack ($10) saves $1 — not $3 — and only if you'd use all 5.",
+      why: "Check their math; it's often bent. Here the real save is $1, not $3, and only if you actually want 5. 'Saving' by spending more on things you don't need isn't saving. Your pencil beats their sign." }
+  ]
+};
+
+/* ---- read_the_number layout (mirrors trade_offs row layout) ---- */
+function rnRowHeight(doc, it, w, explain, showAnswers) {
+  doc.setFontSize(11);
+  const textLines = doc.splitTextToSize(it.text, w - 24);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 16;
+  h += textLines.length * 13 + 6;
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;            // one writing line
+    if (explain) h += 22; // a "because..." line
+  }
+  return h + 8;
+}
+
+function rnRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    outOfWhat: "OUT OF WHAT?", comparedTo: "COMPARED TO WHAT?",
+    whoCounted: "WHO COUNTED?", doTheMath: "DO THE MATH"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The claim / situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
