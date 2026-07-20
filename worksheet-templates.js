@@ -12386,6 +12386,248 @@ function rnRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   RIPPLE EFFECT — "And then what happens AFTER that?"
+   Systems-thinking / second-order-consequences literacy. The
+   cause_effect_chains template trains the FIRST link (A -> B) and
+   catches the coincidence trap. This trains the harder, more
+   sovereign skill: the world is CONNECTED, so almost nothing stops
+   at its first effect. Chase the ripple — the effect of the effect,
+   who ELSE it touches, the "quick fix" that quietly makes a new
+   problem, and the loop that feeds itself. Voice: don't be sold a
+   simple answer; ask "and then what?" one more time than they want
+   you to, and you'll see the whole picture instead of the slice
+   someone's showing you. Deterministic, never calls AI; mirrors
+   cause_effect_chains / trade_offs row layout exactly.
+============================================================ */
+window.TEMPLATES.ripple_effect = {
+  id: "ripple_effect",
+  label: "Ripple effect (and then what happens AFTER that?)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Systems thinking: second-order consequences, ripple effects, feedback loops, and the hidden cost of a quick fix",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "andThenWhat", label: "And then what? (chase the effect of the effect)" },
+        { value: "whoElse",     label: "Who else does it touch? (the ripple spreads out)" },
+        { value: "quickFix",    label: "The quick fix that made a new problem" },
+        { value: "loop",        label: "The loop that feeds itself (more -> more, or more -> less)" },
+        { value: "mixed",       label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["andThenWhat", "whoElse", "quickFix", "loop"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = ripShuffle(RIPPLE_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Ripple Effect";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Drop a rock in a pond and you don't get one splash \u2014 you get rings that spread out and out. The world works the same way: almost nothing stops at its first effect. One thing changes, that changes the next thing, and that changes something else \u2014 sometimes far away, sometimes to people you weren't even thinking about, and sometimes it circles back around to you. Most people (and most ads, and most \"simple answers\") only show you the FIRST ring, because that's the one that looks good. Your power is to ask \"and then what happens AFTER that?\" one more time than they want you to. Do the job each one asks. Say WHY.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"To stop being late, I'll just sleep in my clothes.\"  ->  First ring: yes, you save time getting dressed. And then what? Your clothes get wrinkled and slept-in, so you look messy and maybe change anyway. And then what? You're uncomfortable all night and sleep worse, so you're MORE tired and even harder to wake up. The 'fix' quietly made the real problem (waking up) worse. Chasing it two more rings out shows the whole picture, not the slice that sounded clever.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 124);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ceRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = ripRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- ripple_effect content banks ---- */
+function ripShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why } (same shape as cause_effect_chains)
+//   text   = the situation / the first-ring change
+//   ask    = the thinking prompt (mode-specific)
+//   answer = one good model read (a good option, not THE only answer)
+//   why    = reasoning in plain kid language, sovereign systems-thinking voice
+const RIPPLE_BANKS = {
+  andThenWhat: [
+    { text: "A town wants fewer wolves, so they remove all the wolves.",
+      ask: "First ring: fewer wolves. And then what? And then what after THAT? Chase it two more rings.",
+      answer: "e.g. fewer wolves -> more deer (nothing eats them) -> deer eat all the young trees -> fewer trees -> riverbanks wash away and other animals lose homes.",
+      why: "The wolves weren't just 'a problem' \u2014 they were doing a job in a connected system. Pull one thread and the whole web shifts. 'And then what?' keeps going long after the first, obvious ring." },
+    { text: "A kid eats candy every day after school because it feels great in the moment.",
+      ask: "First ring feels good. And then what happens later that day? And the next week?",
+      answer: "e.g. sugar rush -> crash and cranky before dinner -> not hungry for real food -> more tired next day -> harder to focus, wants more candy to feel good again.",
+      why: "The good feeling is the first ring \u2014 the one candy shows you. The tired, cranky, hungry-for-junk rings come later, so they're easy to miss. Asking 'and then what?' pulls the hidden rings into the light BEFORE you decide." },
+    { text: "Everyone in class rushes to line up first, so they start shoving to the front.",
+      ask: "First ring: someone gets to the front. And then what happens to the whole line?",
+      answer: "e.g. shoving -> someone falls or gets mad -> teacher makes everyone sit back down -> nobody leaves, everyone's slower than if they'd just waited.",
+      why: "Each kid only saw their own first ring ('I get ahead'). Nobody chased the ring where EVERYBODY shoves at once \u2014 which makes the whole line slower for all of them, including the shovers. The system's result is the opposite of what each person wanted." },
+    { text: "A store gives out free samples of a new cookie at the front door.",
+      ask: "First ring: you get a free cookie. And then what is the store hoping happens next?",
+      answer: "e.g. free taste -> you like it -> you feel a little like you 'owe' them -> you buy a box -> you come back -> the free cookie earns them way more than it cost.",
+      why: "The free cookie is a real gift AND a first move. Chasing the ripple shows why they'd 'give away' something: the later rings (you buying, coming back) are the whole point. Seeing that doesn't mean don't take the cookie \u2014 it means take it with your eyes open." },
+    { text: "A river gets a big dam built across it to make power.",
+      ask: "First ring: more electricity. And then what happens upstream and downstream? Chase two rings.",
+      answer: "e.g. power made -> water backs up and floods land behind the dam (homes/forests underwater) -> less water and fewer fish get downstream -> people who fished downstream lose food.",
+      why: "A dam does exactly what it promises \u2014 that's the loud first ring. But water is connected up AND down the river, so the change ripples both directions to people who never got asked. Big fixes almost always have rings the poster didn't mention." }
+  ],
+  whoElse: [
+    { text: "You leave your bike lying across the whole sidewalk.",
+      ask: "It's just your bike. Who ELSE does this touch? Name at least two.",
+      answer: "e.g. a person in a wheelchair can't get past; someone pushing a stroller has to go on the road; a blind person could trip; a neighbour gets annoyed.",
+      why: "It feels like 'just my bike, my business' \u2014 but a sidewalk is shared, so your one choice ripples out to everyone who needs to use it. Asking 'who else does this touch?' turns a private choice into an honest one." },
+    { text: "A factory dumps its waste in the river because it's the cheapest way.",
+      ask: "It saves the factory money. Who else does it touch, near and far?",
+      answer: "e.g. fish downstream die; families who fish lose food; a town that drinks the water gets sick; kids can't swim; the next factory copies them.",
+      why: "The factory only counted its OWN ring (cheaper). But a river carries the cost downstream to people who never agreed to pay it. When someone says a choice is 'cheap,' ask: cheap for WHOM \u2014 and who's quietly paying for it?" },
+    { text: "You promise to help your friend build a fort, then bail to play a game instead.",
+      ask: "You changed your mind \u2014 no big deal for you. Who else does the ripple reach?",
+      answer: "e.g. your friend waited and can't build it alone; they feel let down; they trust your promises less next time; other kids hear you bailed.",
+      why: "A broken plan doesn't stop at you \u2014 it lands on the person counting on you, and it ripples into whether people trust your word later. 'It's fine for me' and 'it's fine for everyone I touched' are two very different questions." },
+    { text: "One kid starts a rumour that a game is 'for babies.'",
+      ask: "Who all gets touched by that one sentence as it spreads?",
+      answer: "e.g. kids who love the game hide it and stop playing; the kid who said it feels powerful and does it again; someone who wanted to try it now won't; a fun thing gets smaller for everyone.",
+      why: "Words ripple person to person like the pond rings. One sentence can quietly shrink what a whole group feels okay liking. Tracing who it touches shows a 'harmless' comment isn't so harmless \u2014 and reminds you your own words ripple too." },
+    { text: "A new highway is built straight through the middle of a quiet neighbourhood.",
+      ask: "Drivers get there faster. Who else does the highway touch \u2014 and how?",
+      answer: "e.g. people whose homes were torn down; neighbours who now hear traffic all night; kids who can't cross safely; a park cut in half; nearby air gets dirtier.",
+      why: "The benefit (faster driving) goes to one group; the costs ripple onto a different group who mostly didn't get a vote. Almost every big choice helps some rings and hurts others \u2014 ask WHO'S in each ring before you call it a good idea." }
+  ],
+  quickFix: [
+    { text: "Your room's a mess, so you shove everything under the bed to clean it fast.",
+      ask: "It looks clean now. What new problem did the quick fix quietly make?",
+      answer: "e.g. the mess is still there, now hidden and squished; you can't find your stuff; it's worse to clean later; things get broken or lost under there.",
+      why: "A quick fix that hides a problem instead of solving it doesn't remove the problem \u2014 it just moves it to later-you, usually bigger. Ask: did this actually SOLVE it, or just push it out of sight?" },
+    { text: "A town has too many mice, so they bring in tons of cats to eat them.",
+      ask: "The mice go down. What new problem might the 'fix' create?",
+      answer: "e.g. now there are way too many cats; cats eat the birds too; stray cats everywhere; when mice run low, hungry cats become the next problem to solve.",
+      why: "Fixing one thing by adding a lot of another thing usually trades your old problem for a new one. The real question isn't 'does this beat the mice?' \u2014 it's 'what will I have to fix AFTER this fix?'" },
+    { text: "To win the argument fast, a kid just yells louder than everyone else.",
+      ask: "It ends the argument in the moment. What new problem did yelling make?",
+      answer: "e.g. nobody actually agreed \u2014 they just gave up; they're mad and trust him less; next time they yell too; the real disagreement never got solved.",
+      why: "Yelling 'works' on the first ring (it ends the noise) but fails on every ring after (nothing's settled, and it teaches everyone to yell). A fix that only works right-now and makes later worse isn't really a fix \u2014 it's a delay." },
+    { text: "A game gives kids gems for logging in every single day, so kids feel they can't skip a day.",
+      ask: "It keeps kids playing \u2014 that's the fix (for the game). What problem did it make for the kids?",
+      answer: "e.g. kids feel stressed/trapped, log in even when they don't want to, play out of fear of losing a streak instead of fun; it stops being a choice.",
+      why: "The 'fix' solves the game-maker's problem (keep you coming back) by creating YOUR problem (you can't freely choose). When something is designed so you feel you 'can't skip,' notice whose problem it's really fixing \u2014 and that you're allowed to skip." },
+    { text: "It's cold, so a town cuts down the nearby forest for firewood to stay warm this winter.",
+      ask: "Warm this winter \u2014 good. What new problem shows up in the winters AFTER?",
+      answer: "e.g. no trees means no firewood next year; no roots means mudslides and floods; no shade or windbreak; animals gone; colder and more exposed than before.",
+      why: "The fix borrows from the future to solve today. It's warm THIS winter and worse every winter after \u2014 a classic 'quick fix' shape. Ask of any fast solution: am I solving this, or borrowing from later-me at a bad price?" }
+  ],
+  loop: [
+    { text: "The more nervous you feel about a test, the worse you sleep. The worse you sleep, the more tired and nervous you feel.",
+      ask: "This is a LOOP \u2014 it feeds itself and grows. Which way is it spinning, and where could you cut in to stop it?",
+      answer: "e.g. it spins downward (nervous -> bad sleep -> more nervous). Cut in by breaking one link: a calming routine so you sleep, or reminding yourself one test isn't your whole life so you're less nervous.",
+      why: "Some things loop: the effect circles back and becomes a bigger cause. Once you SEE the loop, you don't have to fix all of it \u2014 snipping one link (better sleep OR less worry) slows the whole spin. Spotting the loop is the power." },
+    { text: "The more you practice a hard song, the better you get. The better you get, the more fun it is, so the more you want to practice.",
+      ask: "This loop spins UP. Name the circle, and say what starts it turning.",
+      answer: "e.g. practice -> better -> more fun -> more practice -> even better. It starts turning when you push through the boring, not-fun-yet beginning long enough to feel a little progress.",
+      why: "Not all loops are bad \u2014 this is a GOOD one (a virtuous circle). The catch is the start: the first bit isn't fun yet, so the loop hasn't 'caught' yet. Knowing a good loop is waiting on the other side is a reason to push through the dull beginning." },
+    { text: "A video app shows you a video. You watch it, so it shows you a more exciting one. You watch that, so it shows an even more exciting one...",
+      ask: "What's the loop, and who is it built to help \u2014 you, or the app?",
+      answer: "e.g. watch -> app learns -> shows you something even harder to stop watching -> you watch longer. It's built to keep you watching (good for the app's ad money), not to help you.",
+      why: "This loop is designed on purpose to feed itself, using YOUR attention as the fuel. Seeing that it's a loop \u2014 and whose loop \u2014 is how you step out of it: you can decide when to stop instead of letting the circle decide for you." },
+    { text: "The messier the shared toy bin gets, the less anyone bothers to put toys away. The less they put away, the messier it gets.",
+      ask: "Which way is this loop spinning? Where's the smallest place to cut in?",
+      answer: "e.g. it spins toward messier ('why bother, it's already a disaster'). Cut in by resetting it clean once \u2014 then a tidy bin makes people MORE likely to keep it tidy, flipping the loop the other way.",
+      why: "Loops can flip direction. A messy bin invites mess; a clean bin invites care. You don't have to nag everyone \u2014 one reset can flip which way the loop spins. Find the small cut-in point instead of fighting the whole circle." },
+    { text: "The more two friends brag to each other, the more each one feels he has to brag back even bigger to keep up.",
+      ask: "Name the loop and where it's heading. How does someone step out of it?",
+      answer: "e.g. brag -> other brags bigger -> first brags bigger still -> it escalates into lies or a fight. Step out by simply not matching it: 'that's cool' instead of topping it.",
+      why: "An 'arms race' is a loop where each side reacts to the other and it spirals up. Nobody's really choosing \u2014 they're just reacting. The way out isn't to win the loop, it's to refuse to play the next round. Seeing the loop lets you stop feeding it." }
+  ]
+};
+
+/* ---- ripple_effect layout (mirrors cause_effect_chains row layout) ---- */
+function ripRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    andThenWhat: "AND THEN WHAT?", whoElse: "WHO ELSE DOES IT TOUCH?",
+    quickFix: "THE QUICK-FIX TRAP", loop: "THE LOOP THAT FEEDS ITSELF"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
