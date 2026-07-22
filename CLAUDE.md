@@ -96,6 +96,19 @@ Reference photos uploaded per subject get sent along to Claude so it can mimic t
 
 Mike uploads a photo of a completed worksheet → `callClaudeForGrading()` sends image + the original worksheet to Claude → response includes `score` (0–100), per-question feedback, weak spots, and a `recommendation` of `"harder" | "same" | "easier" | "reteach"`. The difficulty arrow on the dashboard reflects this.
 
+## Reading Game (kid-facing phonics module)
+
+The **Reading Game** tab (`reading-game.js` + `reading-game-data.js`, section "Play") is a fullscreen flashcard game teaching Makena & Oakley to read. Design is research-locked — don't casually change these rules:
+
+- **Sequence**: UFLI Foundations order encoded in `RG_LESSONS` (a,m,s,t,p,f,i,n,o… → digraphs → blends → VCe → r-controlled → vowel teams). Word lists are **cumulative-decodable** — a word may only use graphemes taught in earlier lessons. Never add a word without checking.
+- **Cards are decoding events**: word shown first, picture/audio confirms AFTER the attempt (never picture-first — that trains guessing). Distractors differ by one grapheme. Sound cards play the **phoneme, never the letter name** (name said once on the intro card).
+- **Scheduler**: Leitner boxes 0–5 (`BOX_DAYS` spacing); in-session requeue on miss (+2 then +4); box <3 climbs freely in-session, box ≥3 promotes only when the item was DUE (spaced across days) + fast (silent latency, `FAST_MS`). Mastered = box ≥4.
+- **No fail states**: wrong tap dims, correct answer glows, sound replays, card requeues. No red X.
+- **Rewards are surprise-based**: critter eggs hatch on lesson mastery (`critter` per lesson). Never add "do N cards get a prize" contingencies (overjustification research).
+- **Heart words** (`RG_HEART_WORDS`): ♥ only under the irregular grapheme; rest is decoded.
+- **Audio**: Electron renders clips offline via `hs-tts` IPC in main.js (`say` → `afconvert` → userData/tts-cache → served at `/_tts/`). Pure phonemes use `[[inpt PHON]]` codes on Samantha (premium voices ignore PHON); whole words auto-pick the best installed voice (Premium > Enhanced > Samantha). Browser fallback = speechSynthesis.
+- **State**: `state.readingGame[kidId]` (self-healing via `ensureRG`, no loadState migration needed). Mastery feeds BC standards upgrade-only: K → EK.7/EK.8, Gr1 → E1.10/E1.4 (`RG_STANDARDS_MAP`).
+
 ## Curriculum source
 
 BC curriculum from https://curriculum.gov.bc.ca/, structured per BC's Know-Do-Understand model:

@@ -610,3 +610,158 @@ textarea { min-height: 80px; resize: vertical; }
 }
 .tag.tag-accent { background: var(--kid-accent-soft); color: var(--kid-accent); }
 .stack > * + * { margin-top: 0.5rem; }
+
+/* ============================================================
+   READING GAME — kid-facing fullscreen overlay + parent tab
+============================================================ */
+body.rg-lock { overflow: hidden; }
+
+#rgOverlay {
+  display: none;
+  position: fixed; inset: 0; z-index: 2000;
+  background: linear-gradient(160deg, #fdf6e3 0%, #fceecf 55%, #f8e2b8 100%);
+  flex-direction: column;
+}
+#rgOverlay.rg-open { display: flex; }
+
+.rg-top {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0.9rem 1.2rem;
+}
+.rg-exit {
+  border: none; background: rgba(0,0,0,0.08); color: #7a6a4f;
+  width: 44px; height: 44px; border-radius: 50%; font-size: 1.1rem;
+  cursor: pointer; flex-shrink: 0;
+}
+.rg-kid { margin-left: auto; font-weight: 800; font-size: 1.1rem; }
+.rg-dots { display: flex; gap: 6px; flex-wrap: wrap; }
+.rg-dot {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: rgba(0,0,0,0.12); transition: all 0.25s;
+}
+.rg-dot.done { background: #58b26a; }
+.rg-dot.now  { background: #f4a83c; transform: scale(1.35); }
+
+.rg-stage {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  padding: 1rem;
+}
+.rg-stage > div { text-align: center; max-width: 760px; width: 100%; }
+
+.rg-prompt { font-size: 1.25rem; color: #7a6a4f; font-weight: 600; margin: 1rem 0; }
+
+/* big tappables */
+.rg-bigletter {
+  font-size: clamp(7rem, 24vw, 13rem); font-weight: 800; line-height: 1;
+  color: #3d3426; cursor: pointer; user-select: none;
+  text-shadow: 0 6px 0 rgba(0,0,0,0.07);
+}
+.rg-word {
+  font-size: clamp(3.4rem, 12vw, 6.5rem); font-weight: 800; letter-spacing: 0.06em;
+  color: #3d3426; cursor: pointer; user-select: none; line-height: 1.15;
+}
+.rg-wl { transition: color 0.2s, transform 0.2s; display: inline-block; }
+.rg-wl.lit { color: #e8842c; transform: translateY(-6px) scale(1.08); }
+
+.rg-word-heart .rg-seg { position: relative; margin: 0 0.02em; }
+.rg-seg.rg-heart { color: #c2436b; }
+.rg-heart-mark {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: -0.55em; font-size: 0.3em; color: #c2436b;
+}
+
+.rg-earbtn {
+  width: 96px; height: 96px; border-radius: 50%; border: none; cursor: pointer;
+  background: #fff; box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  font-size: 2.6rem; margin-bottom: 0.5rem; transition: transform 0.15s;
+}
+.rg-earbtn:active { transform: scale(0.92); }
+
+.rg-choices {
+  display: flex; gap: 1.1rem; justify-content: center; flex-wrap: wrap; margin-top: 1.2rem;
+}
+.rg-choice {
+  min-width: 130px; min-height: 130px; border-radius: 26px; border: none; cursor: pointer;
+  background: #fff; box-shadow: 0 8px 0 rgba(0,0,0,0.10);
+  font-size: 3.4rem; font-weight: 800; color: #3d3426;
+  transition: transform 0.12s, box-shadow 0.12s, opacity 0.3s;
+  padding: 0.6rem 1.2rem;
+}
+.rg-choice:active { transform: translateY(4px); box-shadow: 0 4px 0 rgba(0,0,0,0.10); }
+.rg-choice-word { font-size: 2.2rem; letter-spacing: 0.04em; }
+.rg-choice-pic { font-size: 4.2rem; }
+.rg-choice.rg-right { background: #d9f2de; box-shadow: 0 8px 0 #58b26a; animation: rg-pop 0.4s; }
+.rg-choice.rg-dim { opacity: 0.35; }
+.rg-choice.rg-glow { animation: rg-glowpulse 1s infinite; }
+
+@keyframes rg-pop { 40% { transform: scale(1.12); } }
+@keyframes rg-glowpulse {
+  0%, 100% { box-shadow: 0 8px 0 rgba(0,0,0,0.10), 0 0 0 0 rgba(244,168,60,0.7); }
+  50%      { box-shadow: 0 8px 0 rgba(0,0,0,0.10), 0 0 0 14px rgba(244,168,60,0); }
+}
+
+.rg-btn {
+  border: none; cursor: pointer; border-radius: 999px;
+  padding: 0.9rem 1.8rem; font-size: 1.15rem; font-weight: 700;
+  background: #fff; color: #7a6a4f; box-shadow: 0 4px 0 rgba(0,0,0,0.10);
+  margin: 0.4rem;
+}
+.rg-btn-go { background: #58b26a; color: #fff; box-shadow: 0 4px 0 #3d8a4e; }
+.rg-btn-hear { background: #fff; }
+
+.rg-teach-line { font-size: 1.3rem; color: #7a6a4f; font-weight: 700; }
+
+/* win screen */
+.rg-win { text-align: center; margin: auto; padding: 2rem 1rem; position: relative; }
+.rg-win-title { font-size: 2.4rem; color: #3d3426; margin: 0.5rem 0; }
+.rg-win-stats { font-size: 1.6rem; font-weight: 800; color: #e8842c; margin: 0.6rem 0 1rem; }
+.rg-win-btns { margin-top: 1.4rem; }
+
+.rg-confetti { position: absolute; inset: -2rem 0 auto; pointer-events: none; }
+.rg-confetti span {
+  position: absolute; top: -1rem; left: var(--x); font-size: 1.4rem;
+  animation: rg-fall 2.6s ease-in var(--d) 2 both;
+}
+@keyframes rg-fall {
+  0% { transform: translateY(-20px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(65vh) rotate(340deg); opacity: 0; }
+}
+
+/* egg + critter */
+.rg-eggzone { margin: 1rem 0; }
+.rg-egg {
+  font-size: 5rem; display: inline-block; cursor: pointer;
+  animation: rg-wiggle 0.8s ease-in-out infinite;
+}
+@keyframes rg-wiggle {
+  0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); }
+}
+.rg-egg-hint { color: #7a6a4f; font-weight: 600; }
+.rg-critter-pop { font-size: 6rem; animation: rg-pop 0.6s; }
+.rg-critter-name { font-size: 1.3rem; font-weight: 800; color: #3d3426; }
+
+/* parent tab */
+.rg-tab .rg-hero {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;
+}
+.btn-lg { font-size: 1.05rem; padding: 0.75rem 1.4rem; }
+.rg-statrow {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.8rem; margin-bottom: 1rem;
+}
+.rg-stat { text-align: center; padding: 1rem 0.5rem; }
+.rg-stat-num { font-size: 2rem; font-weight: 800; color: var(--kid-accent, #2c5b8a); }
+.rg-stat-label { font-size: 0.8rem; color: var(--text-muted); }
+.rg-stuck {
+  display: inline-block; background: #fdecec; color: #b3423a;
+  border-radius: 999px; padding: 0.15rem 0.6rem; font-weight: 700; font-size: 0.85rem;
+  margin: 0.1rem;
+}
+.rg-shelf { display: flex; flex-wrap: wrap; gap: 0.9rem; }
+.rg-shelf-critter {
+  text-align: center; background: var(--surface-2, #f4f0e6);
+  border-radius: 16px; padding: 0.7rem 0.9rem; min-width: 82px;
+}
+.rg-shelf-critter span { font-size: 2.2rem; display: block; }
+.rg-shelf-critter small { color: var(--text-muted); font-weight: 700; }

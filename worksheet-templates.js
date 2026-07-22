@@ -12628,6 +12628,238 @@ function ripRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   hold_your_ground — say no, ask for what's fair, don't get pushed
+   The ACTIVE companion to the detection library: once you've spotted a
+   push (follow_the_incentive), read the person (see_it_their_way), and
+   felt the "no" muscle (who_told_you), THIS is what you DO about it —
+   turn detection into agency. Reading, Gr1-3, deterministic, no AI.
+   Mirrors ripple_effect/cause_effect_chains row layout (reuses ceRowHeight).
+============================================================ */
+window.TEMPLATES.hold_your_ground = {
+  id: "hold_your_ground",
+  label: "Hold Your Ground (say no, ask for fair, don't get pushed)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Self-advocacy & negotiation: saying no without being rude, asking for what's fair, proposing an alternative, and holding a boundary under pressure",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "justSayNo",   label: "Say no clearly (no reasons owed, no fight)" },
+        { value: "askFair",     label: "Ask for what's fair (name your worth / your yes)" },
+        { value: "thirdOption", label: "Find the third option (propose a trade, don't just fold)" },
+        { value: "holdTheLine", label: "Hold the line (they push again — now what?)" },
+        { value: "mixed",       label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["justSayNo", "askFair", "thirdOption", "holdTheLine"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = hygShuffle(HYG_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Hold Your Ground";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Spotting a push is only half of it. The other half is what you DO about it \u2014 without turning into a doormat OR a jerk. There's a calm middle: you get to say no, you get to ask for what's fair, and you get to keep your answer even when someone pushes back. You don't owe anyone a long list of reasons for your own 'no,' and 'because everyone else is' is not a reason YOU have to accept. Being sovereign isn't about winning every argument \u2014 it's about not getting talked out of your own answer. Do the job each one asks. Say WHY.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "A bigger kid says, \"Give me your snack or I won't be your friend.\"  ->  Weak move: hand it over so they'll like you (you paid, they learned it works, they'll ask again). Doormat-or-jerk trap: yell and grab it back. The calm middle: \"No \u2014 it's my snack.\" You don't owe a reason, and a 'friend' who's really a toll booth isn't a friend. If you WANT to share, that's a gift you chose, not a fee you got charged. Notice: a real friend doesn't put a price on being your friend.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 118);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ceRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = hygRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- hold_your_ground content banks ---- */
+function hygShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why } (same shape as cause_effect_chains / ripple_effect)
+const HYG_BANKS = {
+  justSayNo: [
+    { text: "A friend keeps begging you to trade your favourite marble for three of theirs. You don't want to.",
+      ask: "You don't want the trade. What can you say \u2014 in a few calm words, no long argument?",
+      answer: "e.g. \"No thanks, I'm keeping it.\" That's the whole sentence. If they keep pushing: \"I already said no.\" Repeat it, don't debate it.",
+      why: "\"No thanks\" is a complete answer. You don't owe a reason for keeping your own stuff, and the more reasons you give, the more they'll argue with each one. A calm 'no' you repeat beats a clever 'no' you defend." },
+    { text: "Someone dares you to do something that feels wrong or unsafe, and adds, \"What, are you scared?\"",
+      ask: "\"Are you scared?\" is bait to make you do it. How do you say no and NOT take the bait?",
+      answer: "e.g. \"Nope, I just don't want to.\" You can even agree: \"Sure, call it scared \u2014 I'm still not doing it.\" Then walk.",
+      why: "The dare only works if you need to prove you're not scared. When you stop needing to prove it, the bait has nothing to grab. Your 'no' doesn't need their permission or their approval to be a real answer." },
+    { text: "A grown-up you barely know says, \"Come here and give me a hug.\" You don't want to.",
+      ask: "It's your body. What can you say, and what can you do instead if a hug feels wrong?",
+      answer: "e.g. \"No thank you\" and offer a wave or high-five instead \u2014 or nothing at all. Then tell a grown-up you DO trust.",
+      why: "Your body is yours, and 'no' to touch is always allowed \u2014 even to adults, even if it seems rude to them. Politeness never outranks your gut. A safe grown-up will respect a no; someone who won't is exactly who to tell." },
+    { text: "Kids are chanting \"do it, do it, do it\" to get you to jump off something too high.",
+      ask: "A crowd is pushing. Does 'everyone wants me to' make it a good idea? What do you do?",
+      answer: "e.g. \"Not doing it\" and step back \u2014 you don't have to explain to a chanting crowd. Loud isn't the same as right.",
+      why: "A crowd chanting feels like pressure, but a hundred voices saying 'do it' add up to exactly zero reasons. 'Everyone wants me to' is the push \u2014 not proof it's smart. Your body's on the line, so your vote is the only one that counts." },
+    { text: "Your friend says, \"If you were really my friend, you'd let me copy your homework.\"",
+      ask: "They're using your friendship as a lever. How do you say no to the copying but not the friendship?",
+      answer: "e.g. \"I am your friend \u2014 and no. I'll help you figure it out, but I'm not giving you the answers.\" Say no to the ask, not the person.",
+      why: "\"If you were really my friend\" is a trick that treats your 'no' as proof you don't care. Flip it: a real friend wouldn't put you on the hook to break a rule. You can love the friend and still refuse the favour." }
+  ],
+  askFair: [
+    { text: "You spend all Saturday morning weeding the neighbour's whole garden. They hand you a single cookie.",
+      ask: "That doesn't feel fair for a morning of work. What can you say instead of just taking it quietly?",
+      answer: "e.g. \"Thanks, but that was a big job \u2014 I was hoping for a few dollars. Can we agree on a price for next time?\" Name the work AND a fair number.",
+      why: "Staying quiet teaches them (and you) that your morning is worth one cookie. Naming your worth calmly isn't greedy \u2014 it's honest. The person who never asks always gets the cookie; the one who asks kindly usually gets the fair deal." },
+    { text: "Your little sibling wants to play your game, and you'd actually be okay with it \u2014 for a turn.",
+      ask: "Your yes can have a shape. How do you say yes AND set the terms so it's fair to you too?",
+      answer: "e.g. \"Yes \u2014 you can have it for ten minutes, then it's back to me.\" A yes with a clear edge, agreed up front.",
+      why: "A 'yes' isn't all-or-nothing. You can give a real yes and still keep a fair limit on it. Setting the terms up front (how long, how many) prevents the fight later \u2014 and teaches that generous doesn't have to mean endless." },
+    { text: "A kid offers to trade you their old, chewed-up eraser for your brand-new full pack of markers.",
+      ask: "They called it 'a trade.' Is it a fair one? What do you say?",
+      answer: "e.g. \"That's not an even swap \u2014 my markers are worth way more than one old eraser.\" Say no, or counter with what WOULD be fair.",
+      why: "Someone calling it 'a trade' doesn't make it a fair trade. You get to weigh both sides yourself before you agree. Naming that it's uneven \u2014 out loud, calmly \u2014 is how you avoid getting talked into a bad deal by a fast talker." },
+    { text: "You always end up being the one who cleans up after the whole group's game.",
+      ask: "It's become 'your job' by habit, not by fair. How do you ask for that to change?",
+      answer: "e.g. \"I've cleaned up the last few times. Let's take turns \u2014 whose turn is it today?\" Name the pattern, propose fair.",
+      why: "Unfair things often become 'just how it is' because nobody names them. Pointing at the pattern without blaming anyone ('let's take turns') is how you fix it. Asking for fair isn't complaining \u2014 it's refusing to be the default doormat." },
+    { text: "You did most of the work on a shared project, but a louder kid is about to take all the credit.",
+      ask: "Staying quiet feels 'nice.' Is it fair to you? What can you say?",
+      answer: "e.g. \"We worked on it together \u2014 I did the drawing and the counting part.\" State your part plainly, no bragging, no shrinking.",
+      why: "Quietly letting someone take your credit isn't being nice \u2014 it's paying a tax for their loudness. Saying what you actually did, in a flat honest voice, isn't showing off. If you don't tell your own truth, the loudest person writes it for you." }
+  ],
+  thirdOption: [
+    { text: "A friend wants to play only their game all recess. You want to play yours. You're about to just give in.",
+      ask: "It feels like 'their way OR a fight.' What's a THIRD option nobody said yet?",
+      answer: "e.g. \"Half recess your game, half mine.\" Or \"Yours today, mine tomorrow.\" A trade, not a surrender.",
+      why: "'Give in or fight' is a false choice \u2014 it hides all the middle options. When you feel boxed into two bad doors, the sovereign move is to look for the door nobody mentioned. A fair trade usually beats both winning-ugly and folding." },
+    { text: "Someone wants to borrow your bike. You don't fully trust them with it, but you don't want to seem mean.",
+      ask: "Instead of a flat yes or a flat no, what's a middle deal that protects your bike AND keeps the peace?",
+      answer: "e.g. \"You can ride it here in front of me,\" or \"Not the bike, but you can borrow my scooter.\" A smaller yes, on your terms.",
+      why: "You don't have to choose between 'lose your bike' and 'be the mean kid.' A partial yes \u2014 a limit, a swap, a where/when \u2014 lets you be generous AND careful at once. The middle option is where most fair deals actually live." },
+    { text: "Your parent says no more screen time; you're desperate for 'just five more minutes' and about to whine.",
+      ask: "Whining rarely works. What's a calmer offer you could make that a grown-up might actually say yes to?",
+      answer: "e.g. \"Can I finish this one level and then I'll turn it off myself, no reminders?\" Offer a fair deal, not a tantrum.",
+      why: "Whining asks them to give in; a proposal invites them to agree. Offering something in return (I'll turn it off myself, no fuss) treats it like a deal between two people. You won't always get the yes \u2014 but a calm offer beats a meltdown every time." },
+    { text: "Two friends both want you on their team, and picking one will hurt the other's feelings.",
+      ask: "'Pick one, hurt the other' isn't the only path. What third idea could you offer the group?",
+      answer: "e.g. \"Let's mix up the teams so it's not always the same,\" or \"I'll switch sides at halftime.\" Solve it for everyone, not just you.",
+      why: "When both choices feel bad, that's your cue that the choices are too small. Widening the question ('how do we ALL have fun?') often dissolves the trap. The best third option makes the whole thing fair, not just less awkward for you." },
+    { text: "A store clerk says, \"This toy or nothing \u2014 it's the last one and someone else wants it.\"",
+      ask: "That's a rushed 'buy now or lose it' push. What's a calmer third move than panic-buying?",
+      answer: "e.g. \"I'll think about it,\" and walk away. If it's really gone, another will come. Refuse the fake rush.",
+      why: "'Now or never' is almost always a push, not a fact \u2014 it's built to skip your thinking. The third option to 'grab it' or 'lose forever' is simply 'not on your schedule.' Slowing down is a move, and usually the strongest one." }
+  ],
+  holdTheLine: [
+    { text: "You said no to lending your toy. Your friend asks again... and again... and again.",
+      ask: "Your first no was clear. They keep asking. Does asking more times change your answer? What do you say now?",
+      answer: "e.g. Same words every time: \"My answer's still no.\" Don't add new reasons \u2014 that just gives them more to argue.",
+      why: "Asking ten times isn't ten reasons \u2014 it's the same push wearing you down, hoping you'll cave from tiredness. A calm, repeated 'still no' can't be argued with. The only thing that changes your answer is a better reason, not more nagging." },
+    { text: "You told a kid you won't help them cheat. They switch to, \"Wow, you're being SO uptight and boring.\"",
+      ask: "They stopped asking and started name-calling. Is that a reason to change your mind? What do you do?",
+      answer: "e.g. \"Maybe \u2014 still not doing it.\" Don't defend against the insult; it's just the push in a new costume.",
+      why: "When the asking fails, people often switch to poking your feelings ('boring,' 'baby,' 'uptight'). That's not a new argument \u2014 it's the same no getting nagged from a different angle. An insult isn't a reason. Let it bounce, keep your line." },
+    { text: "You set a boundary: no going in your room without asking. A sibling does it anyway, then says \"it's no big deal.\"",
+      ask: "They crossed the line and are shrinking it. Do you let it slide, or hold it? How?",
+      answer: "e.g. \"It IS a big deal to me \u2014 ask first, like we agreed.\" Restate the line calmly, don't get talked out of it.",
+      why: "'It's no big deal' is someone else deciding how big YOUR boundary is allowed to be \u2014 that's not their call. A line you don't hold isn't a line, it's a suggestion. Restating it plainly, without a fight, is how a boundary stays real." },
+    { text: "A friend guilt-trips you: \"Fine, I guess I'll just play alone forever then,\" after you said no once.",
+      ask: "That's guilt used as a crowbar. Is their sad face your fault? How do you stay kind but not cave?",
+      answer: "e.g. \"I still can't today, but let's play tomorrow.\" You can care about their feelings AND keep your no.",
+      why: "Guilt-tripping tries to make their disappointment YOUR emergency so you'll fold. You're allowed to feel bad for someone and still not change your answer. Kindness doesn't mean saying yes to everything \u2014 it means being warm while you hold your line." },
+    { text: "You returned a broken toy for a refund. The shopkeeper keeps saying \"policy is policy\" and won't budge.",
+      ask: "They're hiding behind a rule. It arrived broken \u2014 that's not fair. How do you hold your ground, politely and firmly?",
+      answer: "e.g. \"I understand there's a policy, but this was broken when I got it. I'd like it fixed or my money back.\" Calm, repeated, specific.",
+      why: "'Policy is policy' is often a wall people put up hoping you'll walk away. Staying polite but not leaving \u2014 restating the actual unfairness \u2014 is your power. You can respect a person and still not accept an answer that isn't fair. Firm isn't the same as rude." }
+  ]
+};
+
+/* ---- hold_your_ground layout (mirrors ripple_effect / cause_effect_chains) ---- */
+function hygRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    justSayNo: "SAY NO CLEARLY", askFair: "ASK FOR WHAT'S FAIR",
+    thirdOption: "FIND THE THIRD OPTION", holdTheLine: "HOLD THE LINE"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);

@@ -148,6 +148,7 @@ const TABS = [
   { id: "reading",     label: "Reading",     icon: "📖", section: "" },
   { id: "writing",     label: "Writing",     icon: "✏️", section: "" },
   { id: "geography",   label: "Geography",   icon: "🌍", section: "" },
+  { id: "reading-game", label: "Reading Game", icon: "🎮", section: "Play" },
   { id: "standards",   label: "Standards",   icon: "📚", section: "Track" },
   { id: "grading",     label: "Grading",     icon: "✅", section: "" },
   { id: "plan",        label: "Daily Plan",  icon: "📅", section: "" },
@@ -295,6 +296,7 @@ function renderContent() {
     case "reading":     c.innerHTML = renderSubject(kid, "reading"); attachSubjectListeners(kid, "reading"); break;
     case "writing":     c.innerHTML = renderSubject(kid, "writing"); attachSubjectListeners(kid, "writing"); break;
     case "geography":   c.innerHTML = renderSubject(kid, "geography"); attachSubjectListeners(kid, "geography"); break;
+    case "reading-game": c.innerHTML = window.ReadingGame.renderTab(kid); window.ReadingGame.attachTab(kid); break;
     case "standards":   c.innerHTML = renderStandards(kid); attachStandardsListeners(kid); break;
     case "grading":     c.innerHTML = renderGrading(kid); attachGradingListeners(kid); break;
     case "plan":        c.innerHTML = renderDailyPlan(kid); attachPlanListeners(kid); break;

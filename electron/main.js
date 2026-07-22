@@ -53,6 +53,17 @@ function startServer() {
           });
           return;
         }
+        // Serve reading-game TTS clips rendered by `say` (see hs-tts below).
+        if (urlPath.startsWith('/_tts/')) {
+          const name = path.basename(urlPath);
+          const clipPath = path.join(ttsCacheDir(), name);
+          fs.readFile(clipPath, (err, data) => {
+            if (err) { res.writeHead(404); res.end('Not found'); return; }
+            res.writeHead(200, { 'Content-Type': 'audio/mp4' });
+            res.end(data);
+          });
+          return;
+        }
         // Resolve safely inside APP_ROOT (no path traversal)
         const filePath = path.normalize(path.join(APP_ROOT, urlPath));
         if (!filePath.startsWith(APP_ROOT)) { res.writeHead(403); res.end('Forbidden'); return; }
@@ -175,10 +186,141 @@ function heicToJpeg(srcPath) {
   });
 }
 
+// ── Reading-game TTS ─────────────────────────────────────────────────────────
+// Renders speech offline via /usr/bin/say, converts to .m4a with afconvert
+// (both ship with macOS), caches in userData/tts-cache, and serves at /_tts/.
+// Pure phonemes use Apple's [[inpt PHON]] mode on a classic voice (Samantha) —
+// premium/neural voices ignore PHON input, but they ARE preferred for whole
+// words/sentences when installed (Settings → Accessibility → Spoken Content).
+function ttsCacheDir() { return path.join(app.getPath('userData'), 'tts-cache'); }
+
+let _bestVoice = null; // resolved once per launch
+function pickVoice() {
+  return new Promise((resolve) => {
+    if (_bestVoice) return resolve(_bestVoice);
+    execFile('/usr/bin/say', ['-v', '?'], (err, stdout) => {
+      let best = 'Samantha';
+      if (!err && stdout) {
+        const lines = stdout.split('\n').filter(l => /en_(US|CA)/.test(l));
+        const premium = lines.find(l => /\(Premium\)/.test(l));
+        const enhanced = lines.find(l => /\(Enhanced\)/.test(l));
+        const pickFrom = premium || enhanced;
+        if (pickFrom) best = pickFrom.split(/\s{2,}|\ben_/)[0].trim();
+      }
+      _bestVoice = best;
+      resolve(best);
+    });
+  });
+}
+
+// `say`'s phoneme mode pads isolated sounds with LONG dead air (a lone /b/
+// renders as ~2.6s of near-silence with one tiny burst — heard as "silence";
+// stretched vowels come out as robotic drones — heard as "wrong"). So every
+// phoneme clip gets auto-trimmed: decode to PCM, find where the sound energy
+// actually lives, keep just that window, cap the length, re-encode.
+const TTS_CACHE_VER = 'v2'; // salt: bump to invalidate previously rendered clips
+
+function trimWavToEnergy(wavPath, maxSeconds) {
+  const buf = fs.readFileSync(wavPath);
+  // find the 'data' chunk (afconvert writes canonical little-endian RIFF)
+  let i = 12, dataOff = -1, dataLen = 0;
+  while (i < buf.length - 8) {
+    const id = buf.toString('ascii', i, i + 4);
+    const sz = buf.readUInt32LE(i + 4);
+    if (id === 'data') { dataOff = i + 8; dataLen = sz; break; }
+    i += 8 + sz + (sz & 1);
+  }
+  if (dataOff < 0) return false;
+  const sampleRate = buf.readUInt32LE(24);
+  const n = Math.floor(dataLen / 2);
+  const THRESH = 400; // 16-bit amplitude floor that counts as "sound"
+  let first = -1, last = -1;
+  for (let s = 0; s < n; s++) {
+    const v = Math.abs(buf.readInt16LE(dataOff + s * 2));
+    if (v > THRESH) { if (first < 0) first = s; last = s; }
+  }
+  if (first < 0) return false; // nothing audible at all — leave as-is
+  const pre = Math.floor(sampleRate * 0.03), post = Math.floor(sampleRate * 0.09);
+  let start = Math.max(0, first - pre);
+  let end = Math.min(n, last + post);
+  const cap = Math.floor(sampleRate * maxSeconds);
+  if (end - start > cap) end = start + cap;
+  const slice = buf.subarray(dataOff + start * 2, dataOff + end * 2);
+  const out = Buffer.alloc(44 + slice.length);
+  buf.copy(out, 0, 0, 44);                    // reuse original fmt header
+  out.writeUInt32LE(36 + slice.length, 4);    // RIFF size
+  out.write('data', 36, 'ascii');
+  out.writeUInt32LE(slice.length, 40);
+  slice.copy(out, 44);
+  fs.writeFileSync(wavPath, out);
+  return true;
+}
+
+async function renderTTS(req) {
+  try {
+    if (!req || (!req.text && !req.phon)) return { ok: false, error: 'empty' };
+    const kind = req.kind || 'word';
+    const dir = ttsCacheDir();
+    fs.mkdirSync(dir, { recursive: true });
+
+    let voice, rate, input;
+    if (kind === 'phon' && req.phon) {
+      voice = 'Samantha'; rate = req.rate || 90;
+      input = `[[inpt PHON]]${req.phon}[[inpt TEXT]]`;
+    } else if (kind === 'blend') {
+      voice = 'Samantha'; rate = req.rate || 95;      // slow connected blend
+      input = String(req.text || '');
+    } else {
+      voice = await pickVoice(); rate = req.rate || 150;
+      input = String(req.text || '');
+    }
+
+    const hash = require('crypto').createHash('sha1')
+      .update([TTS_CACHE_VER, kind, voice, rate, input].join('|')).digest('hex').slice(0, 24);
+    const outFile = `${hash}.m4a`;
+    const outPath = path.join(dir, outFile);
+    if (fs.existsSync(outPath)) return { ok: true, url: `/_tts/${outFile}` };
+
+    const tmpBase = path.join(app.getPath('temp'), `hs-tts-${hash}`);
+    const aiff = tmpBase + '.aiff';
+    await new Promise((res2, rej2) => {
+      execFile('/usr/bin/say', ['-v', voice, '-r', String(rate), '-o', aiff, input],
+        (e) => e ? rej2(e) : res2());
+    });
+
+    if (kind === 'phon') {
+      // aiff → wav → trim to the audible window → wav → m4a
+      const wav = tmpBase + '.wav';
+      await new Promise((res2, rej2) => {
+        execFile('/usr/bin/afconvert', ['-f', 'WAVE', '-d', 'LEI16', aiff, wav],
+          (e) => e ? rej2(e) : res2());
+      });
+      // continuous sounds (hums/hisses) may keep ~1.1s; stops collapse to their burst
+      trimWavToEnergy(wav, req.maxSec || 1.1);
+      await new Promise((res2, rej2) => {
+        execFile('/usr/bin/afconvert', ['-f', 'm4af', '-d', 'aac', wav, outPath],
+          (e) => e ? rej2(e) : res2());
+      });
+      try { fs.unlinkSync(wav); } catch (_) {}
+    } else {
+      await new Promise((res2, rej2) => {
+        execFile('/usr/bin/afconvert', ['-f', 'm4af', '-d', 'aac', aiff, outPath],
+          (e) => e ? rej2(e) : res2());
+      });
+    }
+    try { fs.unlinkSync(aiff); } catch (_) {}
+    return { ok: true, url: `/_tts/${outFile}` };
+  } catch (e) {
+    console.error('[tts]', e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
 function registerBackupHandlers() {
   // Synchronous version lookup so the renderer can show the running build at load.
   ipcMain.on('hs-app-version', (e) => { e.returnValue = app.getVersion(); });
   ipcMain.handle('hs-heic-to-jpeg', (_e, srcPath) => heicToJpeg(srcPath));
+  ipcMain.handle('hs-tts', (_e, req) => renderTTS(req));
   ipcMain.handle('hs-backup-save', (_e, json) => writeBackup(json));
   ipcMain.handle('hs-backup-open', () => {
     const d = backupsDir();

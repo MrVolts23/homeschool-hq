@@ -5,7 +5,8 @@ contextBridge.exposeInMainWorld('hsBackup', {
   save: (json) => ipcRenderer.invoke('hs-backup-save', json),
   openFolder: () => ipcRenderer.invoke('hs-backup-open'),
   saveGradeImage: (id, dataUrl) => ipcRenderer.invoke('hs-gradeimg-save', id, dataUrl),
-  heicToJpeg: (srcPath) => ipcRenderer.invoke('hs-heic-to-jpeg', srcPath)
+  heicToJpeg: (srcPath) => ipcRenderer.invoke('hs-heic-to-jpeg', srcPath),
+  tts: (req) => ipcRenderer.invoke('hs-tts', req)
 });
 
 // Expose the running app version (read synchronously at load) so the UI can show
