@@ -12860,6 +12860,248 @@ function hygRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   prove_me_wrong — "How Would I Know If I'm WRONG?"
+   Teaches falsification / testing beliefs like a scientist:
+   deciding in advance what evidence would change your mind,
+   hunting for what disproves you, and spotting claims built to
+   be un-disprovable. Deterministic; never calls AI.
+============================================================ */
+window.TEMPLATES.prove_me_wrong = {
+  id: "prove_me_wrong",
+  label: "How Would I Know If I'm WRONG? (test it like a scientist)",
+  subject: "reading",
+  grades: ["2", "3"],
+  topicHint: "Falsification & testing beliefs: deciding ahead of time what would change your mind, hunting for evidence AGAINST your own idea, and spotting claims rigged so nothing could ever prove them wrong",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Testing skill",
+      options: [
+        { value: "changeMyMind", label: "What would change my mind? (name it first)" },
+        { value: "testIt",       label: "Design the test (how could we check?)" },
+        { value: "cantLose",     label: "The can't-lose claim (nothing could disprove it)" },
+        { value: "onlyMyReasons", label: "Only hunting for 'I'm right' clues (find the other side)" },
+        { value: "mixed",        label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["changeMyMind", "testIt", "cantLose", "onlyMyReasons"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = pmwShuffle(PMW_BANKS[mode].slice());
+      items.push(Object.assign({ mode }, pools[mode].pop()));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "How Would I Know If I'm WRONG?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Anybody can pile up reasons they're right \u2014 that's the easy part, and your brain does it for free. The REAL test of an idea is the opposite question: \"What would show me I'm WRONG?\" A scientist doesn't just look for proof they're right; they go hunting for the thing that could knock their idea down. If they hunt hard and nothing knocks it down, THEN the idea is strong. Two sovereign moves live here. First: before you dig in, name out loud what evidence WOULD change your mind \u2014 if you can't think of anything that could, you're not really thinking, you're just cheering. Second: watch out for a \"can't-lose\" claim \u2014 one built so cleverly that nothing could ever prove it wrong. That's not a strong idea; it's a trick. For each one, do the thinking the question asks.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "Claim: \"My lucky socks make our team win.\" Instead of listing the games we won in them, ask the wrong-hunting question: what would show this is FALSE? Easy \u2014 wear them and LOSE, or take them off and still WIN. So the test is simple: play some games without the socks and see what happens. If we win plenty without them, the socks weren't doing it. Naming in advance what would change your mind (\"if we win without them, I was wrong\") is the whole move. A claim you'd never let ANY result disprove isn't strong \u2014 it's just a feeling wearing a science costume.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 118);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = pmwRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = pmwRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- prove_me_wrong helpers ---- */
+function pmwShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why } (same shape as cause_effect_chains / ripple_effect)
+//   text   = the claim / belief on the table
+//   ask    = the wrong-hunting prompt (mode-specific)
+//   answer = one good model read (a good option, not THE only answer)
+//   why    = reasoning in plain kid language, sovereign falsification voice
+const PMW_BANKS = {
+  // Name, in advance, what evidence WOULD change your mind. If nothing could, you're cheering, not thinking.
+  changeMyMind: [
+    { text: "\"I think our new puppy learns tricks faster than most dogs.\"",
+      ask: "Before you argue it, name it: what would you have to SEE to admit you were wrong?",
+      answer: "e.g. \"If we timed other puppies learning 'sit' and lots of them learned it as fast or faster, I'd be wrong.\" That's a real test you could actually run.",
+      why: "Saying what would change your mind FIRST keeps you honest \u2014 now you're looking for the truth, not just for wins. If you can't name a single thing that could prove you wrong, you don't really have an idea yet, just a feeling you like." },
+    { text: "\"This bridge in my building game is strong enough to hold the heavy truck.\"",
+      ask: "What result would prove you wrong \u2014 and how could you check it on purpose?",
+      answer: "e.g. \"If I drive the heavy truck across and it collapses, I'm wrong.\" Test it: actually send the truck across before you trust it with everything.",
+      why: "A guess becomes knowledge only after you try the thing that could break it. Deciding ahead of time ('collapse = wrong') means the test gives you a real answer instead of an argument." },
+    { text: "\"Reading before bed helps ME fall asleep faster.\"",
+      ask: "Name what would show it's NOT helping. How could you find out for real?",
+      answer: "e.g. \"If I fall asleep just as fast on nights I DON'T read, then reading isn't what's doing it.\" Try some nights with reading and some without, and notice.",
+      why: "The honest test compares WITH the thing to WITHOUT the thing. If you only ever read before bed, you can never tell if the reading is the cause or if you'd fall asleep anyway. Name the failing result, then go check." },
+    { text: "\"I'm sure the red team is better than the blue team at our game.\"",
+      ask: "What would you accept as proof you were wrong? Say it before the next game.",
+      answer: "e.g. \"If blue beats red in the next three games, I was wrong.\" Now the games actually settle it.",
+      why: "If you'd explain away EVERY blue win ('they got lucky') and count EVERY red win as proof, you never really tested anything. Setting the bar in advance ('three losses = I was wrong') stops you from moving the goalposts to stay right." },
+    { text: "\"My plant grows better because I talk to it every morning.\"",
+      ask: "What would change your mind? Design it so the talking is the ONLY difference.",
+      answer: "e.g. grow two same plants, same sun and water, talk to one and not the other. \"If the quiet one grows just as well, I'm wrong.\"",
+      why: "To test if talking is the cause, everything ELSE has to match, so the talking is the only thing that could explain a difference. Naming the losing result up front ('quiet one does just as well = I was wrong') is what makes it a test and not a wish." }
+  ],
+  // Turn a belief into something you could actually check. What test would settle it?
+  testIt: [
+    { text: "\"Warm water freezes faster than cold water.\" (some people really believe this!)",
+      ask: "Don't argue it \u2014 design a fair test. What would you do, and what result decides it?",
+      answer: "e.g. two same cups, same freezer, one warm one cold, start the timer, see which turns to ice first. Whichever wins, wins \u2014 you let the test decide, not your hunch.",
+      why: "A fair test changes ONE thing (warm vs cold) and keeps everything else the same. Then you don't have to win the argument with your mouth \u2014 the freezer answers it. That's the whole power of a test: it can prove YOU wrong, and that's a good thing." },
+    { text: "\"You can tell what someone's like just by the colour shirt they picked today.\"",
+      ask: "How could you actually check if that's true instead of just believing it?",
+      answer: "e.g. guess people's personality from their shirt colour, write it down FIRST, then get to know them and see how often you were right. If it's about as often as random guessing, the shirt told you nothing.",
+      why: "Writing your guess down BEFORE you learn the truth stops your brain from quietly saying 'yeah I knew that' afterward. A claim that sounds cool but does no better than random guessing when you actually test it isn't knowledge \u2014 it's a story." },
+    { text: "\"Chewing gum helps you concentrate on hard problems.\"",
+      ask: "What's a fair way to test this on yourself? What would count as it working?",
+      answer: "e.g. do a set of hard problems with gum and a matched set without, same time of day, and compare your scores and how focused you felt. Working = clearly better with gum, more than once.",
+      why: "One try proves nothing \u2014 you could've just had a good day. A fair test repeats it and compares with-vs-without. Deciding 'working = clearly better, more than once' keeps you from calling a lucky day proof." },
+    { text: "\"The line at the LEFT checkout is always faster than the right one.\"",
+      ask: "How would you check this instead of just feeling it? What result would settle it?",
+      answer: "e.g. over many shopping trips, mark down which side you picked and whether it was actually faster. If left wins about half the time, it was never really faster \u2014 you just remembered the annoying times.",
+      why: "Feelings keep a lopsided score: the times the OTHER line was faster sting, so you remember them and forget the rest. Counting it fairly across many tries replaces the feeling with a real number \u2014 which can prove your hunch wrong." },
+    { text: "\"Our team plays better when the coach wears his blue hat.\"",
+      ask: "Design the test. What would show the hat has nothing to do with it?",
+      answer: "e.g. keep track of wins with the blue hat AND with any other hat / no hat. If the team wins about the same either way, the hat isn't doing it.",
+      why: "Superstitions survive because nobody tests the OTHER side \u2014 the games without the blue hat. Once you count both, the hat usually turns out to be along for the ride, not steering. The test is willing to embarrass the belief; that's why it's trustworthy." }
+  ],
+  // The "can't-lose" claim: built so nothing could ever prove it wrong. That's a trick, not a strong idea.
+  cantLose: [
+    { text: "\"There's an invisible dragon in my garage \u2014 but it's silent, you can't touch it, and it leaves no marks.\"",
+      ask: "What test could ever prove this WRONG? If none can, what does that tell you?",
+      answer: "e.g. nothing could \u2014 every check is answered with 'oh, it's invisible/silent/leaves no marks.' A claim you can never test or disprove isn't a strong claim; it's built to dodge every test.",
+      why: "When someone adds a new excuse for every way you try to check ('you just can't detect it'), the claim isn't winning \u2014 it's hiding. A real idea sticks its neck out and says 'here's how you could catch me being wrong.' One that can't lose was never really playing." },
+    { text: "\"This bracelet protects you from bad luck.\" When someone wearing it has a bad day: \"Imagine how much worse it would've been without it!\"",
+      ask: "Is there ANY result that would count against the bracelet? What's the trick here?",
+      answer: "e.g. no \u2014 good day = bracelet worked, bad day = 'would've been worse.' Every possible result gets counted as proof. That's the can't-lose trick.",
+      why: "If good days AND bad days both 'prove' it works, the bracelet is un-disprovable \u2014 and un-disprovable means untested. Notice the move: they turned the one result that should count AGAINST it ('a bad day') into more proof FOR it. That's how a trick protects itself." },
+    { text: "\"This vitamin makes you healthier.\" \"But I still got a cold.\" \"You'd have gotten TWO colds without it.\"",
+      ask: "What outcome would the seller ever admit means the vitamin failed?",
+      answer: "e.g. none \u2014 healthy = vitamin worked, sick = 'would've been sicker.' If no result is allowed to mean 'it failed,' the claim can't be tested and shouldn't be trusted just because it sounds sciency.",
+      why: "A claim earns trust by SURVIVING tests that could have killed it. If the seller has an answer that turns every bad result into a good one, they've made sure it can never fail a test \u2014 which means it never passed one either." },
+    { text: "\"My plan is guaranteed to work. And if it doesn't work, that just proves you didn't believe in it hard enough.\"",
+      ask: "Spot the trap: what happens to every possible outcome in this claim?",
+      answer: "e.g. it works = plan's great; it fails = your fault for not believing. The claim can never be wrong because failure gets blamed on YOU. That's a can't-lose claim wearing a motivational costume.",
+      why: "Watch for claims that quietly make failure impossible to pin on the claim itself. 'It only fails if you doubt it' means it's rigged \u2014 there's no result that could ever count against it. Sovereign move: notice that a claim that can't fail also can't be trusted." },
+    { text: "\"Everyone secretly agrees with me. The ones who say they don't are just too scared to admit it.\"",
+      ask: "How could anyone EVER show this is false? What's sneaky about it?",
+      answer: "e.g. they can't \u2014 agree = 'see, everyone agrees'; disagree = 'you're just scared to admit it.' Disagreement itself gets counted as secret agreement, so no answer can ever prove it wrong.",
+      why: "This one flips the strongest evidence AGAINST it ('people telling you no') into evidence FOR it. When 'you disagree' is treated as proof you actually agree, there's no honest test left. A claim that eats all disagreement isn't strong \u2014 it's sealed shut." }
+  ],
+  // Confirmation hunt: you only looked for clues you're right. Go find the other side.
+  onlyMyReasons: [
+    { text: "A kid is SURE a new game is boring, so he lists 5 boring things about it \u2014 and never asks anyone who loves it why they do.",
+      ask: "He only hunted for 'it's boring' clues. What would an honest look ALSO go find?",
+      answer: "e.g. go ask two kids who love it what's fun about it, and actually try the parts he skipped. Hunt just as hard for 'why someone likes it' as for 'why I don't.'",
+      why: "Your brain hands you 'I'm right' clues for free and hides the rest. If you only collect evidence for the side you already picked, of COURSE you'll feel sure \u2014 but sure isn't the same as right. The honest move is to hunt for the OTHER side just as hard." },
+    { text: "Someone believes a rumour, so they remember every time it seemed true and forget every time it didn't.",
+      ask: "They're only counting the hits. What are they NOT counting \u2014 and why does it matter?",
+      answer: "e.g. all the times the rumour was flat-out wrong, which they skipped right past. To judge it fairly you have to count the misses too, not just the times it 'worked.'",
+      why: "Remembering only the hits is like calling yourself a great free-throw shooter while ignoring every miss. A fair score needs the misses IN it. Counting only the clues that fit is the most common way smart people fool themselves." },
+    { text: "You think your friend is being mean to you today, so every little thing they do starts to look mean.",
+      ask: "You're hunting for 'they're mean' clues. What would checking the OTHER idea look like?",
+      answer: "e.g. ask yourself 'what if they're just having a rough day / didn't notice me?' \u2014 then look for clues that fit THAT, or just ask them straight.",
+      why: "Once you pick a story ('they're mean'), your eyes start finding it everywhere \u2014 even in stuff that isn't. Deliberately trying on the opposite story, or just asking, breaks the spell. Hunting only for clues that fit your first guess turns a maybe into a 'fact' that isn't one." },
+    { text: "A store shows you 20 five-star reviews of a toy on its own website and none of the bad ones.",
+      ask: "They only showed the 'it's great' clues. What are you missing, and how do you get it?",
+      answer: "e.g. the 1- and 2-star reviews, which the store hid. Go look somewhere the store doesn't control \u2014 you need the complaints too before you decide.",
+      why: "Whoever's selling you something will only show you the clues that help THEM. That's a one-sided hunt done on purpose. To judge fairly you have to go get the side they left out \u2014 the reviews they'd rather you never see." },
+    { text: "A kid says 'I'm just bad at math,' then only notices the questions he gets wrong and ignores every one he gets right.",
+      ask: "He's collecting only the 'I'm bad' clues. What's the fairer way to look?",
+      answer: "e.g. count the ones he gets RIGHT too, and notice which kinds he's actually good at. The full picture is almost never 'all bad' \u2014 that's just the clues he chose to keep.",
+      why: "A belief about yourself can run the same one-sided hunt: keep every failure, toss every success, and 'I'm bad at this' starts to feel true. Counting BOTH sides is fairer to the world \u2014 and a lot fairer to yourself." }
+  ]
+};
+
+/* ---- prove_me_wrong layout (mirrors ripple_effect / cause_effect_chains row layout) ---- */
+function pmwRowHeight(doc, it, w, explain, showAnswers) {
+  return ceRowHeight(doc, it, w, explain, showAnswers);
+}
+
+function pmwRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    changeMyMind: "WHAT WOULD CHANGE MY MIND?", testIt: "DESIGN THE TEST",
+    cantLose: "THE CAN'T-LOSE CLAIM", onlyMyReasons: "HUNT THE OTHER SIDE"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The claim
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The wrong-hunting question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
