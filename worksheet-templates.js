@@ -13102,6 +13102,286 @@ function pmwRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   some_all_none — "Some, All, or None? (and beware 'everybody')"
+   Quantifier literacy: the logic of the words all / every / most /
+   some / a few / none / nobody / always / never. This is one of the
+   deepest sovereign-thinking foundations AND the #1 manipulation
+   lever ("EVERYONE has this," "ALL the cool kids," "NOBODY likes
+   that") — a sweeping word makes a huge claim, and a huge claim is
+   easy to knock over. Four deterministic modes span the whole span:
+     picture     — K on-ramp: look at a row of shapes and decide if
+                   ALL / SOME / NONE fit (verify by looking, not by
+                   being told). Reuses window.SHAPES.
+     oneBreaksAll— Gr1-3: a sweeping "ALL ___" claim; find the ONE
+                   counterexample that breaks it. Core logic move:
+                   it takes just one exception to defeat an "all."
+     swept       — Gr1-3: catch the hidden quantity-word in an
+                   everyday pushy line ("everyone / nobody / always")
+                   and rewrite it honestly (some / a few / I don't
+                   actually know).
+     pickTheWord — Gr1-3: given a true situation, choose the HONEST
+                   quantity word instead of the exaggerated one.
+   Voice: a big word is a big claim; check how much it's really
+   claiming before you believe it. Deterministic, never calls AI.
+   Mirrors cause_effect_chains row layout (reuses ceRowHeight /
+   ceRenderRow for the text modes); picture mode draws shapes.
+============================================================ */
+window.TEMPLATES.some_all_none = {
+  id: "some_all_none",
+  label: "Some, All, or None? (beware \"everybody\")",
+  subject: "reading",
+  grades: ["K", "1", "2", "3"],
+  topicHint: "Quantifier logic & sweeping-claim literacy (all / most / some / none)",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "picture",      label: "Look & decide: all / some / none? (K on-ramp, shapes)" },
+        { value: "oneBreaksAll", label: "One breaks \"all\" (find the exception)" },
+        { value: "swept",        label: "Sweeping word! (everyone / nobody / always \u2014 rewrite it honest)" },
+        { value: "pickTheWord",  label: "Pick the honest word (all / most / some / a few / none)" },
+        { value: "mixed",        label: "Mixed (a bit of each \u2014 skips the shapes)" }
+      ], default: "picture" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking (text modes)", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    let modes;
+    if (m.mode === "mixed") {
+      modes = ["oneBreaksAll", "swept", "pickTheWord"]; // mixed skips shapes (needs an adult/K)
+    } else {
+      modes = [m.mode];
+    }
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = sanShuffle(SAN_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Some, All, or None?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Some little words make BIG claims: all, every, most, some, a few, none, nobody, always, never. \"ALL\" and \"EVERY\" say there are ZERO exceptions \u2014 so it only takes ONE that doesn't fit to knock the whole claim over. That's why \"everybody has one\" and \"nobody likes it\" are the easiest tricks to fall for: they sound huge but they're usually not true. Before you believe a big word, ask: how much is it REALLY claiming \u2014 and is that even true?",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"EVERYBODY has these shoes!\"  ->  Everybody? All 8 billion people? I don't have them. Neither does my grandma. That's already two exceptions, so \"everybody\" is false. The honest version is \"SOME kids at my school have them.\" I didn't argue \u2014 I just checked how big the word was and found one that broke it.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 92);
+    }
+
+    content.items.forEach((it, idx) => {
+      if (it.mode === "picture") {
+        const needed = sanPicRowHeight(doc, it, pageW - margin * 2, opts.showAnswers);
+        if (pdfNeedNewPage(doc, y, needed, margin)) {
+          y = pdfAddPageWithHeader(doc, title, pageW, margin);
+        }
+        y = sanPicRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, opts.showAnswers);
+      } else {
+        const needed = ceRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+        if (pdfNeedNewPage(doc, y, needed, margin)) {
+          y = pdfAddPageWithHeader(doc, title, pageW, margin);
+        }
+        y = ceRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      }
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- some_all_none content banks ---- */
+function sanShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// picture items: { shapes:[ids], target:"circle"|..., targetLabel, answer:"all|some|none", why }
+// text items (oneBreaksAll/swept/pickTheWord): { text, ask, answer, why }  (reuses ceRenderRow)
+const SAN_BANKS = {
+  picture: [
+    { shapes: ["circle", "circle", "circle", "circle"], target: "circle", targetLabel: "circles",
+      answer: "ALL", why: "Every single one is a circle \u2014 zero exceptions \u2014 so \"all\" fits. You didn't guess; you looked and counted." },
+    { shapes: ["circle", "square", "circle", "triangle"], target: "circle", targetLabel: "circles",
+      answer: "SOME", why: "Two are circles and two are not, so it's \"some\" \u2014 not all (a square breaks that) and not none (there ARE circles)." },
+    { shapes: ["square", "triangle", "diamond", "square"], target: "circle", targetLabel: "circles",
+      answer: "NONE", why: "Not one circle in the row, so \"none\" is the honest word. \"Some\" would be a lie \u2014 you can check by looking." },
+    { shapes: ["triangle", "triangle", "triangle"], target: "triangle", targetLabel: "triangles",
+      answer: "ALL", why: "Three out of three are triangles \u2014 no exception hiding \u2014 so \"all\" is true here." },
+    { shapes: ["square", "square", "circle", "square"], target: "square", targetLabel: "squares",
+      answer: "SOME", why: "Most are squares but one circle sneaked in, so it's \"some,\" not \"all.\" One exception is enough to drop \"all.\"" },
+    { shapes: ["circle", "diamond", "circle", "diamond"], target: "triangle", targetLabel: "triangles",
+      answer: "NONE", why: "There are circles and diamonds but zero triangles \u2014 so \"none.\" Honest, and easy to prove by looking." },
+    { shapes: ["diamond", "diamond", "diamond", "diamond"], target: "diamond", targetLabel: "diamonds",
+      answer: "ALL", why: "Every one is a diamond, so \"all\" is true. Big word, and this time it actually holds up." },
+    { shapes: ["triangle", "circle", "square", "diamond"], target: "square", targetLabel: "squares",
+      answer: "SOME", why: "Exactly one square in the group \u2014 that's still \"some\" (at least one), but nowhere near \"all.\"" }
+  ],
+  oneBreaksAll: [
+    { text: "Someone says: \"ALL birds can fly.\"",
+      ask: "Is that true for EVERY bird? Name one bird that breaks it.",
+      answer: "No. A penguin (or an ostrich, or a chicken) can't fly. One flightless bird breaks \"all.\"",
+      why: "\"All\" leaves no room for exceptions, so it only takes ONE non-flying bird to knock it down. Big claims are the easiest to break \u2014 you just need a single example." },
+    { text: "\"EVERY kid loves ice cream.\"",
+      ask: "Could there be even one kid who doesn't? What does that do to \"every\"?",
+      answer: "Yes \u2014 some kids can't have dairy or just don't like it. One kid breaks \"every.\"",
+      why: "\"Every\" is a promise about literally all of them. Find one who doesn't fit and the promise is broken. You don't have to argue \u2014 one counterexample does the work." },
+    { text: "\"ALL spiders are dangerous.\"",
+      ask: "Is that true of every spider? Give one that isn't.",
+      answer: "No \u2014 most house spiders are harmless. One safe spider breaks the \"all.\"",
+      why: "A scary \"all\" wants you to fear the whole group. But one harmless spider proves the word is too big. Shrink the claim to what's actually true: SOME spiders are dangerous." },
+    { text: "\"You ALWAYS forget your homework.\"",
+      ask: "Is \"always\" fair? What's one time it wasn't true?",
+      answer: "No \u2014 you remembered it most days last week. One remembered day breaks \"always.\"",
+      why: "\"Always\" and \"never\" are \"all\" in disguise. One exception makes them false. When someone uses \"always\" about you, it's usually feelings talking, not counting." },
+    { text: "\"EVERYONE in class already finished, so hurry up.\"",
+      ask: "Is that literally everyone? How could you break the \"everyone\"?",
+      answer: "Probably not \u2014 if you're not finished, then \"everyone\" is already false (you're the exception).",
+      why: "The word \"everyone\" is being used to rush you. But if even one person (you!) isn't done, \"everyone\" is wrong. Notice the pressure, then check the word." },
+    { text: "\"ALL the good players are on the other team.\"",
+      ask: "Does one good player on YOUR team break this claim?",
+      answer: "Yes \u2014 name one solid player on your side and \"all\" collapses.",
+      why: "\"All the good ones are over there\" is meant to make you feel small. One good player on your team is a live counterexample \u2014 the sweeping word was never true." }
+  ],
+  swept: [
+    { text: "An ad says: \"EVERYBODY is switching to SparkPhone!\"",
+      ask: "What big word is doing the work here? Rewrite it honestly.",
+      answer: "\"Everybody\" is the trick. Honest version: \"SOME people bought a SparkPhone\" \u2014 which tells you almost nothing.",
+      why: "\"Everybody\" makes you feel left out so you'll join in. Swap it for the true amount (\"some\") and the pressure vanishes \u2014 you can decide on your own, not because of a crowd that may not exist." },
+    { text: "\"NOBODY wears that brand anymore.\"",
+      ask: "Which sweeping word is that? Say what's really being claimed \u2014 and is it likely true?",
+      answer: "\"Nobody\" = zero people. Almost certainly false \u2014 lots of people still wear it. Honest: \"a few of my friends stopped.\"",
+      why: "\"Nobody\" is \"none,\" the strongest claim there is, and it breaks the instant one person still does it. It's really an opinion (\"I think it's uncool\") wearing a giant word." },
+    { text: "\"You ALWAYS get to pick the game. It's MY turn forever now.\"",
+      ask: "Spot the two sweeping words. Rewrite the sentence fair.",
+      answer: "\"Always\" and \"forever\" are the tricks. Fair version: \"You picked last time, so I'd like a turn today.\"",
+      why: "Sweeping words turn one event into a giant unfair pattern to win the argument. Strip them out and you're left with the real, fixable thing: whose turn is it THIS time." },
+    { text: "\"EVERYONE knows that video game rots your brain.\"",
+      ask: "What's the sweeping word, and does \"everyone knowing\" make it true?",
+      answer: "\"Everyone.\" No \u2014 lots of people saying something doesn't make it a fact. Honest: \"some grown-ups worry about it.\"",
+      why: "\"Everyone knows\" is a way to skip proof \u2014 it dares you not to argue with the whole world. But a crowd repeating a thing isn't evidence. Ask for the actual reason instead of the crowd." },
+    { text: "\"You NEVER share. That's why nobody wants to play with you.\"",
+      ask: "Find the sweeping words. Are they fair? Rewrite it honestly.",
+      answer: "\"Never\" and \"nobody\" are exaggerations. Honest: \"You didn't share the ball just now, and that bugged me.\"",
+      why: "\"Never\" and \"nobody\" pile on to make a small thing feel like your whole character. Shrink them to the one real moment \u2014 that's the part you can actually talk about and fix." },
+    { text: "\"ALL the reviews say this toy is the best ever.\"",
+      ask: "Is \"all\" likely? What would you want to check?",
+      answer: "Unlikely \u2014 real products get mixed reviews. Check for LOW reviews too; \"all\" usually means they hid the bad ones.",
+      why: "When someone says every review is glowing, they've probably only shown you the good ones. \"All positive\" is a flag, not proof. Go look for the ones they didn't put up front." }
+  ],
+  pickTheWord: [
+    { text: "In your class of 20 kids, 20 out of 20 brought a water bottle today.",
+      ask: "Which is honest: all / most / some / a few / none? Why?",
+      answer: "ALL \u2014 20 out of 20 means zero exceptions.",
+      why: "\"All\" is only honest when there are truly no exceptions. Here every kid did it, so the big word actually fits. Match the word to the real count." },
+    { text: "18 out of 20 kids in your class like recess. 2 don't.",
+      ask: "Pick the honest word: all / most / some / none. Why not \"all\"?",
+      answer: "MOST \u2014 almost everyone, but not all. Those 2 kids make \"all\" false.",
+      why: "\"Most\" tells the truth: a big majority, with a few exceptions. \"All\" would erase the 2 kids who don't. The honest word never pretends the exceptions aren't there." },
+    { text: "3 out of 20 kids in your class have a pet snake.",
+      ask: "Honest word: all / most / some / a few? Explain.",
+      answer: "A FEW (or SOME) \u2014 3 out of 20 is a small number, not most.",
+      why: "\"A few\" or \"some\" fit a small handful. If an ad said \"kids LOVE pet snakes\" it'd be stretching 3 kids into a crowd. Say the real size." },
+    { text: "0 out of 20 kids in your class have been to the moon.",
+      ask: "Which word is honest: all / some / none? Why?",
+      answer: "NONE \u2014 zero kids, so \"none\" is exactly right.",
+      why: "\"None\" is honest when the count is truly zero. It's a strong word, but here it's simply true. Strong words are fine when the facts back them \u2014 the skill is checking first." },
+    { text: "You saw 4 dogs at the park today and 3 of them were friendly.",
+      ask: "Honest word for the friendly ones: all / most / some? Why?",
+      answer: "MOST \u2014 3 of 4 is most, but the 4th wasn't friendly, so not \"all.\"",
+      why: "You only saw 4 dogs, so you can't say anything about ALL dogs everywhere \u2014 just these 4. \"Most of the dogs I saw\" is honest; \"all dogs are friendly\" would be a huge overclaim from tiny evidence." },
+    { text: "Every apple you have tried from one tree has been sour. You've tried 3.",
+      ask: "Honest claim: \"ALL apples from this tree are sour,\" or something smaller? Why?",
+      answer: "Something smaller \u2014 \"the 3 I tried were sour, so PROBABLY most are.\" You haven't tried all of them.",
+      why: "Three sour apples is good evidence, but it isn't every apple. Honest thinkers say what they actually checked and add \"probably\" for the rest \u2014 they don't upgrade 3 into \"all.\"" }
+  ]
+};
+
+/* ---- some_all_none PICTURE layout (K on-ramp; draws window.SHAPES) ---- */
+function sanPicRowHeight(doc, it, w, showAnswers) {
+  let h = 16;          // number + tag line
+  h += 16;             // question line
+  h += 34;             // shape row band
+  if (showAnswers) {
+    doc.setFontSize(9.5);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + " are " + it.targetLabel + ".  " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 24;           // the ALL / SOME / NONE choose line
+  }
+  return h + 10;
+}
+
+function sanPicRenderRow(doc, it, num, x, y, w, showAnswers) {
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+  doc.text("LOOK & DECIDE", x + 20, y + 4);
+
+  let cy = y + 20;
+  const bx = x + 20;
+
+  // The question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  doc.text("How many are " + it.targetLabel + "?", bx, cy);
+  cy += 8;
+
+  // The shape row
+  let scx = bx + 6;
+  const scy = cy + 16, sz = 18;
+  it.shapes.forEach(tok => {
+    const sh = window.SHAPES[tok];
+    if (sh) {
+      doc.setDrawColor(30, 30, 30); doc.setLineWidth(1.4);
+      sh.drawPDF(doc, { cx: scx + sz / 2, cy: scy, size: sz, mode: "solid" });
+    }
+    scx += sz + 12;
+  });
+  cy = scy + sz / 2 + 12;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + " are " + it.targetLabel + ".  " + it.why, w - 24);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    // circle-one choice line
+    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(60, 60, 60);
+    doc.text("Circle one:", bx, cy + 4);
+    doc.setFont("helvetica", "normal"); doc.setTextColor(20, 20, 20);
+    doc.text("ALL", bx + 78, cy + 4);
+    doc.text("SOME", bx + 138, cy + 4);
+    doc.text("NONE", bx + 208, cy + 4);
+    doc.setTextColor(20, 20, 20);
+    cy += 22;
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
