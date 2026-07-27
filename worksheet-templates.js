@@ -13382,6 +13382,247 @@ function sanPicRenderRow(doc, it, num, x, y, w, showAnswers) {
 }
 
 /* ============================================================
+   compare_it_fair — comparison literacy: is this an APPLES-TO-APPLES
+   comparison, or is it rigged? The library is deep on spotting external
+   pushes (follow_the_incentive, spot_the_persuasion, says_who) and broken
+   arguments (wait_thats_not_a_good_reason), and read_the_number touches
+   "compared to WHAT" numerically — but nothing trains the general reasoning
+   skill of a FAIR comparison: the #1 everyday trick shape after "who
+   benefits." "Better / bigger / cheaper / faster than ___" means nothing
+   until you check WHAT it's being measured against and whether the two
+   things are even the same kind of thing. Reading, Gr1-3, deterministic,
+   no AI. Mirrors ripple_effect/cause_effect_chains row layout exactly
+   (reuses ceRowHeight).
+============================================================ */
+window.TEMPLATES.compare_it_fair = {
+  id: "compare_it_fair",
+  label: "Compare It Fair (is this really apples-to-apples?)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Comparison literacy: apples-to-oranges mismatches, hidden or cherry-picked baselines (\"better than WHAT?\"), moved goalposts, and building your own fair, one-thing-at-a-time test",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "applesOranges", label: "Apples to oranges? (are these even the same kind of thing?)" },
+        { value: "comparedTo",    label: "Better than WHAT? (find the hidden or cherry-picked baseline)" },
+        { value: "movedGoalpost", label: "They moved the goalposts (changed what we were comparing)" },
+        { value: "fairTest",      label: "Make it fair (change only ONE thing, hold the rest the same)" },
+        { value: "mixed",         label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["applesOranges", "comparedTo", "movedGoalpost", "fairTest"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = cifShuffle(COMPARE_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Compare It Fair";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "\"Better!\" \"Bigger!\" \"Faster!\" \"Way cheaper!\" \u2014 every one of those words is only half a sentence. Better than WHAT? Cheaper than WHEN? A comparison is only honest if the two things are the SAME KIND of thing and everything except the one thing you're checking is held the same. That's called apples-to-apples. The oldest trick in the book is to sneak in an apples-to-oranges match, or compare their new thing to the worst possible thing so it looks amazing, or quietly change what you're even comparing halfway through so they can't lose. Your job on each one: decide if the comparison is FAIR, and if it isn't, say exactly what's crooked about it. Say WHY.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"Our cookie has HALF the sugar of a whole chocolate cake!\"  ->  Not fair. A cookie and a whole cake aren't the same kind of thing \u2014 of course one cookie has less sugar than an entire cake. They picked a huge, silly thing to measure against so their cookie looks healthy. Apples-to-apples would be: how much sugar vs OTHER cookies? Fix it by comparing same-to-same, and the 'half the sugar' brag mostly disappears.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 118);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ceRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = cifRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- compare_it_fair content banks ---- */
+function cifShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why } (same shape as cause_effect_chains / ripple_effect)
+//   text   = the claim / situation containing a comparison
+//   ask    = the mode-specific thinking prompt
+//   answer = one good model read (a good option, not THE only answer)
+//   why    = reasoning in plain kid language, sovereign comparison-literacy voice
+const COMPARE_BANKS = {
+  applesOranges: [
+    { text: "\"This new phone is way better \u2014 it's bigger than a candy bar!\"",
+      ask: "Are these two things even the same KIND of thing? Is the comparison fair, and if not, what's crooked about it?",
+      answer: "e.g. not fair \u2014 a phone and a candy bar aren't the same kind of thing, so 'bigger than a candy bar' tells you nothing useful about whether the phone is good.",
+      why: "A fair comparison matches like with like: phone vs OTHER phones. Comparing it to a candy bar is apples-to-oranges \u2014 it sounds like a fact but it's just a distraction dressed up as a measurement." },
+    { text: "\"I'm the best player \u2014 I scored more goals today than my little sister did learning to walk.\"",
+      ask: "Same kind of thing? Is this a fair way to call yourself the best?",
+      answer: "e.g. not fair \u2014 scoring goals and learning to walk aren't the same activity, and comparing yourself to a baby is rigged to make you look great.",
+      why: "You picked someone who couldn't possibly compete, on a task that isn't even the same. 'Best' only means something measured against real, same-kind rivals \u2014 otherwise it's just a mismatch that flatters you." },
+    { text: "\"Reading is dumb \u2014 a movie of the book is faster, so it's better.\"",
+      ask: "Faster at WHAT? Are 'faster' and 'better' the same thing here? Is the comparison fair?",
+      answer: "e.g. not fair \u2014 a movie IS faster to finish, but 'faster' and 'better' are two different measuring sticks; they do different jobs (a book lets you imagine and slow down).",
+      why: "Swapping one measuring stick (speed) for another (quality) mid-sentence is an apples-to-oranges move. Ask 'better at WHICH job?' \u2014 a thing can win on speed and lose on everything you actually cared about." },
+    { text: "\"My dog is smarter than your goldfish, so dogs are the smartest animals.\"",
+      ask: "Is beating a goldfish a fair test of 'smartest animal'? What's the mismatch?",
+      answer: "e.g. not fair \u2014 a goldfish is one of the least fair rivals to pick; beating it proves almost nothing about 'smartest of ALL animals.'",
+      why: "Comparing your favourite against a deliberately weak opponent is a rigged apples-to-oranges match. A real test compares against strong same-league rivals \u2014 crows, dolphins, octopuses \u2014 not the easiest thing in the tank." },
+    { text: "\"This cereal is healthier \u2014 it has more vitamins than a glass of water!\"",
+      ask: "Is water a fair thing to measure a cereal against? Spot the mismatch.",
+      answer: "e.g. not fair \u2014 water isn't a food you'd eat for vitamins, so 'more vitamins than water' is a silly bar that almost any food clears.",
+      why: "They picked something that was never trying to give you vitamins, so their product looks impressive against it. Fair would be: more vitamins than OTHER cereals \u2014 and that brag usually shrinks fast." }
+  ],
+  comparedTo: [
+    { text: "A sign screams: \"50% BIGGER!\" in huge letters. In tiny letters underneath: \"than our old mini size.\"",
+      ask: "Bigger than WHAT? Find the hidden baseline. Once you know it, is the brag as impressive?",
+      answer: "e.g. bigger than their own smallest, tiniest version \u2014 not bigger than a normal one. Compared to a regular size it might even be smaller.",
+      why: "'Bigger' is meaningless until you know bigger-than-what. They chose the smallest possible thing to measure against so 50% sounds huge. Always hunt for the baseline hiding in the fine print." },
+    { text: "\"Our team is doing SO much better this year!\" (Last year they lost every single game.)",
+      ask: "Better than what? Is 'better than our worst-ever year' actually good?",
+      answer: "e.g. better than a year where they lost everything \u2014 so 'better' could still mean pretty bad. Compared to a normal year, we don't know.",
+      why: "When someone compares only to their worst moment, almost anything looks like 'better.' The honest question is 'better compared to a fair, normal year?' \u2014 not 'better than rock bottom?'" },
+    { text: "\"This game is the #1 fastest-growing game!\" It came out last week with only a handful of players.",
+      ask: "Fastest-GROWING compared to what starting point? Does #1 fastest-growing mean it's actually big or good?",
+      answer: "e.g. growing fast from almost zero is easy \u2014 going from 5 players to 50 is '900% growth' but it's still tiny. Fastest-growing isn't the same as biggest or best.",
+      why: "A percentage of a tiny number sounds giant but is small. They picked the measuring stick (growth rate) that flatters a brand-new thing, hoping you won't ask how big it actually is." },
+    { text: "\"I did GREAT \u2014 I got more questions right than the kid who was home sick and didn't take the test!\"",
+      ask: "You're comparing to whom? Is that a fair baseline for 'great'?",
+      answer: "e.g. not fair \u2014 comparing to someone who scored zero because they weren't even there. Beating a no-score tells you nothing about how you actually did.",
+      why: "Picking the lowest possible baseline (someone who scored nothing) makes any result look like a win. 'Great' should be measured against a real, fair mark \u2014 like your own goal, or how you usually do." },
+    { text: "\"Buy now \u2014 it's cheaper than EVER!\" The store quietly raised the price last month, then dropped it back.",
+      ask: "Cheaper than when? What baseline are they comparing today's price to?",
+      answer: "e.g. cheaper than the price THEY just bumped up on purpose last month \u2014 so today's 'sale' might just be the normal price with a fake before-price.",
+      why: "A 'sale' compares today's price to a baseline they get to pick \u2014 and they can pick a fake-high one they invented last week. Check what the price was BEFORE they started playing with it." }
+  ],
+  movedGoalpost: [
+    { text: "You: \"You said the fastest kid wins the race.\" Them (after losing): \"Well, I meant fastest AND with the best form. So I win.\"",
+      ask: "Did they change what we were comparing? Point to the exact moment the goalposts moved.",
+      answer: "e.g. yes \u2014 the deal was 'fastest,' and you were fastest. After losing, they added 'best form' so the new rule happens to make them the winner.",
+      why: "Changing the measuring stick AFTER you see who won isn't comparing, it's cheating with words. A fair comparison names the one thing being measured BEFORE the race \u2014 and doesn't get to change once it's over." },
+    { text: "\"Cats are better pets than dogs \u2014 they're cleaner.\" You: \"But dogs protect the house.\" Them: \"I never said anything about protecting.\"",
+      ask: "What was being compared at the start? Did they quietly swap it? Is that fair?",
+      answer: "e.g. they started on 'better pet' (everything), then shrank it to just 'cleaner' when dogs won a point \u2014 moving the goalposts to only the stick where cats win.",
+      why: "'Better pet' means comparing on lots of things. Narrowing it to only the one measure where your side wins, right when you're losing another, is moving the goalposts. Hold them to the WHOLE comparison they started with." },
+    { text: "\"My tower is the tallest!\" You measure \u2014 yours is taller. Them: \"Yeah, but mine's the tallest that ONLY uses blue blocks.\"",
+      ask: "Did the thing being compared change? Name the new, smaller box they drew around themselves.",
+      answer: "e.g. yes \u2014 it went from 'tallest tower' to 'tallest blue-only tower,' a special little category invented so they win it.",
+      why: "Adding a random extra rule ('...that only uses blue blocks') shrinks the contest down to one you happen to win. That's not being tallest \u2014 it's redrawing the finish line around your own foot." },
+    { text: "\"This medicine is proven to work!\" You: \"But the test showed no difference.\" Them: \"It works for people who really BELIEVE in it.\"",
+      ask: "What claim did they start with? What did it quietly turn into? Fair or not?",
+      answer: "e.g. it went from 'proven to work' (for anyone) to 'works if you believe' \u2014 a new claim you can never check, rigged so nothing can prove it wrong.",
+      why: "When a claim loses a fair test, moving the goalposts to 'it only works if you believe' makes it un-losable \u2014 which means it was never really a comparison to a fair test at all. A claim that can dodge every test isn't proven, it's slippery." },
+    { text: "\"I'm the best at the game \u2014 highest score!\" You beat their score. Them: \"On EASY mode that doesn't count. Best means best on HARD.\"",
+      ask: "Were the goalposts in that spot before you won? Is it fair to move them now?",
+      answer: "e.g. no \u2014 'best = highest score' was the rule until you beat it; then 'must be on hard mode' appeared. The bar moved the second you cleared it.",
+      why: "If the rule for winning keeps sliding just past wherever you land, you can never win \u2014 and that's the point of the trick. Nail down what counts BEFORE the contest, and don't let it slide after." }
+  ],
+  fairTest: [
+    { text: "Two friends argue whose paper airplane flies farther. One throws hard from up on a chair; the other throws gently from the floor.",
+      ask: "Is this a fair test of the PLANES? What would you have to hold the same to make it fair?",
+      answer: "e.g. not fair \u2014 too many things are different (throw strength, height). To test the planes, same thrower, same spot, same push \u2014 change ONLY the plane.",
+      why: "A fair test changes just ONE thing (the planes) and holds everything else the same. If two things differ, you can't tell which one caused the result. One-thing-at-a-time is how you actually find out." },
+    { text: "You want to know if a plant grows better with music. You put one plant in a sunny window with music, the other in a dark closet with no music.",
+      ask: "What's wrong with this test? What must stay the same for it to be fair?",
+      answer: "e.g. not fair \u2014 you changed music AND sunlight, so if one grows better you won't know if it was the music or the sun. Give both the same light, water, and pot; change only the music.",
+      why: "You're testing music, so music is the ONLY thing that's allowed to be different. Everything else \u2014 light, water, soil \u2014 must match. Otherwise the sunlight could steal the credit and you'd blame the music." },
+    { text: "\"Cereal A made me faster at running than Cereal B!\" But you ate A on race day and B on a lazy day when you were tired.",
+      ask: "Was that a fair head-to-head between the cereals? What got mixed in?",
+      answer: "e.g. not fair \u2014 the days were different (rested vs tired), so being tired might be why you were slower, not the cereal. Same kind of day, same everything, change only the cereal.",
+      why: "Two things changed at once (cereal AND how rested you were), so you can't hand the trophy to the cereal. A fair test lines everything up identical and lets only the one thing you're testing differ." },
+    { text: "Two stores. You want to know which sells cheaper apples. Store 1 you check the big bag price; Store 2 you check the single-apple price.",
+      ask: "Are you comparing the same thing? How do you make it a fair, same-to-same check?",
+      answer: "e.g. not same \u2014 a whole bag vs one apple aren't comparable. Fair way: price per one apple at both, or price of the same-size bag at both.",
+      why: "To compare prices fairly you need the same unit at both places (per apple, or per same bag). Comparing a bag to a single apple is apples-to-oranges with actual apples \u2014 the numbers don't line up." },
+    { text: "\"My reading got way better this year!\" says a kid who this year was tested on much easier books than last year.",
+      ask: "Is that a fair before-and-after comparison? What changed besides the kid?",
+      answer: "e.g. not fair \u2014 the books got easier too, so a higher score might be the easier books, not better reading. Test on the same-level books both times to tell.",
+      why: "To measure if YOU changed, the test has to stay the same. If the books got easier at the same time, you can't tell if it was you or the easier books. Hold the test steady; change only the year." }
+  ]
+};
+
+/* ---- compare_it_fair layout (mirrors ripple_effect/cause_effect_chains row layout) ---- */
+function cifRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    applesOranges: "APPLES TO ORANGES?", comparedTo: "BETTER THAN WHAT?",
+    movedGoalpost: "THEY MOVED THE GOALPOSTS", fairTest: "MAKE IT A FAIR TEST"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation / claim
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
