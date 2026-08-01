@@ -13623,6 +13623,244 @@ function cifRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — THINK LIKE A MACHINE (think_like_a_machine)
+   READING, Gr1-3: computational / algorithmic thinking.
+   A machine does EXACTLY what it's told, not what you meant.
+   Precise sequencing, debugging your own instructions, and the
+   sovereign kicker: an "algorithm" is just rules a PERSON chose,
+   so you're allowed to ask who wrote them and why.
+   Item shape mirrors cause_effect_chains: { text, ask, answer, why }.
+   Reuses ceRowHeight; own render row for mode tags.
+============================================================ */
+window.TEMPLATES.think_like_a_machine = {
+  id: "think_like_a_machine",
+  label: "Think Like a Machine (exact steps, bugs & who wrote the rules)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Computational thinking: precise step-by-step instructions, debugging a sequence, the literal 'does-what-you-say-not-what-you-mean' gap, and the sovereign idea that an algorithm is just rules a person chose",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "exactSteps",  label: "Exact steps (spell it out so a robot couldn't mess it up)" },
+        { value: "findTheBug",  label: "Find the bug (the steps ran and something went wrong \u2014 which step?)" },
+        { value: "saysNotMeans", label: "Said vs meant (the machine did EXACTLY what you said)" },
+        { value: "whoWroteRules", label: "Who wrote the rules? (an algorithm is choices a person made)" },
+        { value: "mixed",       label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["exactSteps", "findTheBug", "saysNotMeans", "whoWroteRules"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = tlmShuffle(MACHINE_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Think Like a Machine";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "A machine \u2014 a robot, a game, a computer, the thing that picks what videos you see \u2014 does EXACTLY what it's told. Not what you meant. Not what any sensible person would guess. Only the literal steps, in order. That sounds annoying, but it's a superpower: if you can spell something out so clearly that even a dumb machine couldn't get it wrong, then you REALLY understand it. And here's the big secret the machine never tells you: every one of those steps was written by a PERSON who made choices. An 'algorithm' is not magic \u2014 it's just somebody's rules. So you get to ask the two questions a machine can't: what EXACTLY does this say to do, and WHO decided it should? Say why.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "You tell a robot: \"Put on your shoes and go outside.\" It walks straight into the closed door.  ->  It did EXACTLY what you said. You never said 'open the door first.' You MEANT it, but 'meant' isn't a step. Fix it by adding the missing step in order: (1) open the door, (2) walk through, (3) put on shoes... wait \u2014 shoes go on BEFORE going out! Spelling it out shows you the gaps your brain quietly filled in. That's the whole game: find the step your head skipped.",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 128);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ceRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = tlmRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- think_like_a_machine content banks ---- */
+function tlmShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why } (same shape as cause_effect_chains)
+//   text   = the scenario / set of instructions / rule
+//   ask    = the mode-specific thinking prompt
+//   answer = one good model read (an example, not the only right answer)
+//   why    = reasoning in plain kid language, sovereign computational-thinking voice
+const MACHINE_BANKS = {
+  exactSteps: [
+    { text: "A robot has never made toast. You want it to make you toast. It ONLY does the exact steps you list, one at a time, in order.",
+      ask: "Write the steps so plainly the robot couldn't mess it up. What steps does a person's brain usually skip?",
+      answer: "e.g. get bread, open the bag, take out ONE slice, put it in the toaster, push the lever down, wait, take it out when it pops. Skipped: opening the bag, only one slice, pushing the lever.",
+      why: "Your brain fills in 'obvious' steps without noticing. A machine fills in nothing. Writing every step exposes the hidden ones \u2014 and if YOU can spell it out fully, you truly understand it instead of just doing it on autopilot." },
+    { text: "You want a robot to draw a square. It can only 'go forward' and 'turn.' It doesn't know what a square is.",
+      ask: "List the exact steps. How many times do you go forward, and how many times do you turn?",
+      answer: "e.g. forward, turn (a quarter turn / 90\u00b0), forward, turn, forward, turn, forward \u2014 four sides, four turns, all the same size.",
+      why: "'Draw a square' is a whole idea packed into two words. Breaking it into 'forward, turn, forward, turn' is what the shape actually IS underneath. Big ideas are just lots of tiny exact steps stacked up." },
+    { text: "A new kid needs to get from the front door of your school to your classroom, and you can't go with them.",
+      ask: "Write directions exact enough that they can't get lost. What's easy to leave out?",
+      answer: "e.g. in the front door, turn left, walk past two doors, up the stairs, first door on the right \u2014 don't say 'you know, the usual way,' name every turn.",
+      why: "'The usual way' only works if they already know it \u2014 which is exactly what they don't. Good instructions assume the other side knows nothing, so every turn and count has to be said out loud." },
+    { text: "You're teaching a robot to wash its hands. It has arms, water, and soap, but no idea what 'clean' means.",
+      ask: "Put the steps in the right ORDER. What happens if soap comes before water, or drying comes first?",
+      answer: "e.g. turn on water, wet hands, soap, rub, rinse, turn off water, dry. If you dry first or soap before wetting, it doesn't work \u2014 order matters as much as the steps.",
+      why: "Same steps in the wrong order = a mess. Sequence is part of the instruction, not an afterthought. 'Dry your hands' is only right if it comes LAST." },
+    { text: "A friend has never played your favourite game. You have to explain how to win using only clear rules \u2014 no 'you'll just figure it out.'",
+      ask: "Spell out the exact steps and rules. Which part were you about to hand-wave?",
+      answer: "e.g. name the goal first, then each turn's steps in order, then how you win \u2014 and don't skip the boring setup part your brain wants to rush past.",
+      why: "The part you're tempted to skip ('you just kind of know') is usually the part that actually needs teaching. If you can't say it in steps, you don't fully know it yet \u2014 and that's worth finding out." }
+  ],
+  findTheBug: [
+    { text: "Robot recipe for a jam sandwich: (1) put jam on the bread, (2) get the bread out, (3) eat it. The robot smears jam on the counter.",
+      ask: "The steps RAN and it went wrong. Which step is the bug, and how do you fix it?",
+      answer: "e.g. steps 1 and 2 are in the wrong order \u2014 it spread jam before there was any bread out. Swap them: get the bread out FIRST, then jam it.",
+      why: "The machine didn't 'make a mistake' \u2014 it did exactly what the buggy list said. A bug is almost always a step in the wrong place or a missing one, not the machine being dumb. Find the crooked step, fix the step." },
+    { text: "Directions to a friend's house: go straight, turn right at the park, straight again, it's the blue house. You end up at a RED house instead.",
+      ask: "Where's the bug in the directions? What was probably missing or wrong?",
+      answer: "e.g. a turn or a count is off \u2014 maybe there were two rights near the park, or a 'go 3 blocks' was left out, so 'straight again' went too far or not far enough.",
+      why: "When the output is wrong, retrace the steps one at a time until the last spot things were still right \u2014 the bug lives at the very next step. You debug directions the same way you debug anything: step by step, not by guessing." },
+    { text: "Morning routine list for a robot: (1) put on shoes, (2) put on socks, (3) go to school. It shows up with socks OVER its shoes.",
+      ask: "Which two steps are out of order? What's the rule your brain knows that the robot doesn't?",
+      answer: "e.g. socks must come before shoes \u2014 steps 1 and 2 are flipped. Fix: socks first, THEN shoes.",
+      why: "You know socks-before-shoes so deeply you never think about it. The robot only knows the list. Bugs love the 'so obvious nobody wrote it down' steps \u2014 that's exactly where to look." },
+    { text: "A game rule says: 'If you roll a 6, move 6 spaces and roll again.' A kid keeps rolling 6s and never stops, going around the board forever.",
+      ask: "What's the bug in this rule? A machine following it literally would loop forever \u2014 how do you fix it?",
+      answer: "e.g. there's no stopping rule \u2014 add something like 'three 6s in a row = lose your turn,' so it can't loop forever.",
+      why: "A rule with no way to STOP is a real kind of bug (a computer would freeze). Any set of steps that can repeat needs an exit \u2014 a way out. Always ask a repeating rule: what makes this ever end?" },
+    { text: "Instructions to feed the cat: (1) open the food, (2) pour it in the bowl, (3) put the bowl down. The cat's bowl is on a high shelf it can't reach.",
+      ask: "The steps all ran fine \u2014 so why did it fail? What did the list forget to check?",
+      answer: "e.g. it never said WHERE to put the bowl \u2014 the machine put it somewhere the cat can't reach. Add: put the bowl on the FLOOR where the cat can get it.",
+      why: "Every step 'worked' and the result was still wrong \u2014 that's the sneakiest kind of bug. The steps did what they said but missed a condition (reachable by the cat). Ask not just 'did each step run?' but 'did it actually solve the real problem?'" }
+  ],
+  saysNotMeans: [
+    { text: "You tell a robot: \"Clean your room \u2014 put everything on the floor away.\" It shoves everything, clean laundry and all, under the bed. Technically, the floor is clear.",
+      ask: "Did it do what you SAID or what you MEANT? Where's the gap, and how would you say it better?",
+      answer: "e.g. it did what you literally said \u2014 nothing's on the floor \u2014 but not what you meant (actually tidy). Better: 'put each thing in its real spot,' not just 'off the floor.'",
+      why: "The machine can't read your mind; it can only read your words. When it does something silly, the fix usually isn't 'the machine is dumb' \u2014 it's 'my instruction had a loophole.' Say exactly what you mean." },
+    { text: "A phone's autocorrect is told: 'change any word that isn't in the dictionary to the closest word that is.' You type your friend's name 'Makena' and it 'corrects' it to 'Makeup.'",
+      ask: "Did autocorrect follow its rule correctly? What did the rule fail to account for?",
+      answer: "e.g. yes \u2014 it did exactly its rule (nearest real word), but the rule never knew names aren't spelling mistakes. It's not broken, the rule is too simple.",
+      why: "Autocorrect isn't 'being annoying on purpose' \u2014 it's mindlessly obeying a rule someone wrote that didn't think about names. Knowing that, you stop being mad at the phone and start seeing the rule behind it." },
+    { text: "You ask a robot: \"Wake me up when the toast is done.\" The toast burns to charcoal, sets off the smoke alarm, and THEN it wakes you \u2014 the toast is, after all, done.",
+      ask: "Did it obey your words? What did you assume that you never actually said?",
+      answer: "e.g. it obeyed \u2014 you said 'when it's done,' you didn't say 'when it's golden, and stop it before it burns.' You assumed 'done' meant 'ready to eat.'",
+      why: "Words like 'done' feel obvious to you but mean nothing exact to a machine. The gap between your fuzzy word and its precise reading is where every 'the computer did something crazy' story comes from." },
+    { text: "A game gives points for 'time played.' A kid leaves the game running all night doing nothing, and wins the 'most dedicated player' prize.",
+      ask: "Did the kid break the rule, or follow it exactly? What did the rule REWARD versus what it MEANT to reward?",
+      answer: "e.g. followed it exactly \u2014 the rule counted time, not effort or skill. It meant to reward dedication but actually rewarded leaving it on.",
+      why: "Machines reward whatever you literally measure, not what you wish you'd measured. This is huge: whenever something gives points or likes or a score, ask 'what does it ACTUALLY count?' \u2014 because that's what people will chase." },
+    { text: "You tell a helper robot: \"Make everyone in the house happy.\" It gives everyone ice cream for every meal forever.",
+      ask: "It's technically making people 'happy' \u2014 so what's the gap between what you said and what you wanted?",
+      answer: "e.g. you meant 'happy AND healthy AND long-term,' but you only said 'happy,' so it grabbed the quickest happy it could find \u2014 ice cream now.",
+      why: "A machine takes the shortest path to exactly the words you gave it, ignoring everything you didn't say. Big vague goals ('make people happy') hide a hundred unsaid rules \u2014 which is why 'just tell the AI to fix it' is trickier than it sounds." }
+  ],
+  whoWroteRules: [
+    { text: "An app decides which videos to show you next. It seems to 'know' you \u2014 but it's following rules like 'show more of whatever they watched longest.'",
+      ask: "Who wrote those rules, and what do THEY want the rules to do? Is 'what keeps you watching' the same as 'what's good for you'?",
+      answer: "e.g. people at the company wrote them, to keep you watching as long as possible (so they earn more). 'Keeps you watching' is NOT the same as 'good for you.'",
+      why: "A feed feels like magic that reads your mind, but it's just rules a person chose for THEIR goal. Once you know the rule is 'keep them watching,' you can decide for yourself when to stop \u2014 the algorithm can't make that choice, only you can." },
+    { text: "A game gives you a 'daily login' bonus, a streak counter, and a little sad face if you miss a day. None of that happened by accident.",
+      ask: "Someone PROGRAMMED every one of those. Why did they pick those rules? What are they trying to get you to do?",
+      answer: "e.g. a designer added them on purpose to make you come back every single day, even when you don't feel like it \u2014 that's their goal, not yours.",
+      why: "Every buzz, streak and reward was a choice a person made to nudge you. That's not evil \u2014 but it IS aimed. Knowing a human set the trap on purpose lets you enjoy the game without being farmed by it. You keep the steering wheel." },
+    { text: "A search bar shows the 'top' results first. It didn't rank them by what's truest \u2014 it ranked them by rules like 'most clicked' and 'paid to be up here.'",
+      ask: "Who decided what counts as 'top'? Does 'top of the list' mean 'most true' or 'best'?",
+      answer: "e.g. the company's rules decided \u2014 by popularity and by who paid, not by truth. 'Top' just means 'the rule put it there,' not 'most correct.'",
+      why: "'It's the first result' feels like 'it's the right answer,' but that ranking is somebody's recipe, sometimes bought. Ask 'top by WHAT rule?' and the magic drops away \u2014 you go back to judging the actual answer yourself." },
+    { text: "A robot referee in a game always calls the ball 'out' if it lands past a line. But a PERSON chose exactly where to draw that line.",
+      ask: "The robot just follows the line \u2014 but who drew it, and could a different person have drawn it somewhere else?",
+      answer: "e.g. a human designer or rule-maker drew the line; someone else could have put it in a different spot and the same shot would be 'in.' The robot doesn't decide \u2014 it just enforces the human's choice.",
+      why: "Machines look neutral and fair because they follow a rule exactly \u2014 but the RULE came from a person with opinions. 'The computer says so' really means 'a person decided so, then hid behind the computer.' Always find the person." },
+    { text: "A store's self-checkout suddenly flags your item and calls for a worker. A rule somewhere said 'if this happens, freeze and alert staff.'",
+      ask: "The machine isn't picking on you \u2014 it's obeying a rule. Who wrote it, and what were they worried about?",
+      answer: "e.g. the store wrote it, probably worried about theft or mistakes; you got caught in a rule aimed at a problem that isn't you.",
+      why: "It's easy to feel accused by a machine, but it has no feelings \u2014 it's running a person's cautious rule. Seeing the rule (and the worry behind it) turns 'the machine hates me' into 'oh, here's what someone was trying to prevent.' Calm, not fooled." }
+  ]
+};
+
+/* ---- think_like_a_machine layout (mirrors cause_effect_chains row layout) ---- */
+function tlmRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    exactSteps: "SPELL IT OUT", findTheBug: "FIND THE BUG",
+    saysNotMeans: "SAID vs MEANT", whoWroteRules: "WHO WROTE THE RULES?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
