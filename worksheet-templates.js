@@ -13861,6 +13861,245 @@ function tlmRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   TEMPLATE — NOW OR LATER? (patience_payoff)
+   MATH, Gr1-3: reasoning across TIME — the now-vs-later trade,
+   how small things compound, the manufactured-urgency trap
+   ("ACT NOW / only 3 left / buy now pay later"), and the
+   sovereign judgment of deciding ON PURPOSE what's worth the
+   wait. Not "always wait" — you own the choice; slow down so
+   nobody rushes it for you.
+   Item shape mirrors cause_effect_chains: { text, ask, answer, why }.
+   Reuses ceRowHeight; own render row for mode tags.
+============================================================ */
+window.TEMPLATES.patience_payoff = {
+  id: "patience_payoff",
+  label: "Now or Later? (patience, the long game & the urgency trap)",
+  subject: "math",
+  grades: ["1", "2", "3"],
+  topicHint: "Reasoning across time: the small-now vs bigger-later trade, how tiny repeated actions compound, spotting manufactured urgency (\"act now / only 3 left / buy now pay later\"), and deciding on purpose what's actually worth waiting for",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking mode",
+      options: [
+        { value: "nowOrLater",  label: "Now or later? (small thing now vs a bigger thing if you wait)" },
+        { value: "itAddsUp",    label: "It adds up (tiny things repeated pile up over time)" },
+        { value: "urgencyTrap", label: "The hurry trap (\"act NOW!\" is made to stop you thinking)" },
+        { value: "worthTheWait", label: "Worth the wait? (decide on purpose \u2014 not everything is)" },
+        { value: "mixed",       label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["nowOrLater", "itAddsUp", "urgencyTrap", "worthTheWait"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = ppShuffle(PATIENCE_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Now or Later?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Time is a thing you can spend, same as money \u2014 and a lot of choices are really about NOW versus LATER. A little bit now, or a bigger bit if you can wait? Tiny things you do every day quietly stack into a big pile you don't see coming. And here's the trick to watch for: when somebody yells \"HURRY! Only 3 left! Ends tonight!\", the hurry is almost always FAKE \u2014 it's there to stop you from thinking, because a person who slows down and does the math usually says no. This isn't \"always wait\" \u2014 sometimes now is exactly right. It's about YOU deciding on purpose, with your eyes open, instead of letting someone rush the choice out of your hands. On each one: figure out the real trade over time, and say WHY.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "\"Eat one cookie right now, OR wait 15 minutes and get three cookies.\"  ->  The trade is: 1 cookie NOW costs you 2 extra cookies LATER. Waiting a quarter of an hour 'earns' you two whole cookies \u2014 that's a great deal per minute. A good answer names the trade out loud: \"waiting is worth it here, because 15 minutes for 2 extra cookies is a lot of cookie for a little time.\" (But if you weren't even hungry, maybe zero cookies now is the real winner \u2014 you get to decide.)",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 128);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ceRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = ppRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- patience_payoff content banks ---- */
+function ppShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why } (same shape as cause_effect_chains)
+//   text   = the situation / offer / choice
+//   ask    = the mode-specific thinking prompt
+//   answer = one good model read (an example, not the only right answer)
+//   why    = reasoning in plain kid language, sovereign long-game voice
+const PATIENCE_BANKS = {
+  nowOrLater: [
+    { text: "You have $2. You can buy a small candy today, OR save it and next week you'll have $4 \u2014 enough for the toy you actually want.",
+      ask: "What are you really trading if you spend it now? Which choice gets you more of what you want?",
+      answer: "e.g. spending $2 now on candy trades away the toy you said you actually wanted. Waiting one week doubles your money for the thing you care about more.",
+      why: "The candy isn't free \u2014 it costs you the toy. Naming the LATER thing you're giving up (not just the money) is how you make the trade with your eyes open instead of grabbing the first thing." },
+    { text: "A friend says: \"Play video games with me right now!\" But your big test is tomorrow and you haven't studied.",
+      ask: "What does 'yes now' cost you later? What does 'a little later' cost you now?",
+      answer: "e.g. gaming now costs you a good test tomorrow; studying first costs you a bit of fun now but the game is still there after. Study first, then play with a clear head.",
+      why: "Now-fun and later-you are both real. The trick is that later-you can't shout, so now-fun always sounds louder. Speak up for later-you \u2014 they have to live with the choice too." },
+    { text: "You could watch one more show tonight, OR go to bed on time and actually feel good at your friend's big party tomorrow.",
+      ask: "One more show now vs how you'll feel all day tomorrow \u2014 which is the bigger prize?",
+      answer: "e.g. one show is 20 minutes; feeling awful and grumpy at the party is the whole next day. The show is small, the tired day is big.",
+      why: "A small thing right in front of you can feel bigger than a big thing that's far away \u2014 that's a trick of distance, not of size. Line them up honestly: 20 minutes vs a whole day." },
+    { text: "You get your allowance. You can spend it ALL today on little things, or keep half and in a few weeks have enough for something you'll keep for years.",
+      ask: "What's the trade between 'all of it now' and 'half of it grows into something bigger'?",
+      answer: "e.g. spending all of it buys a pile of small stuff that's gone by tomorrow; keeping half builds toward one thing that lasts. You don't have to pick all-or-nothing \u2014 half now, half growing is a real option.",
+      why: "It's rarely 'spend everything OR wait forever.' Splitting \u2014 a little fun now, some saved for later \u2014 lets present-you AND future-you both get a turn. You're the one who sets the split." },
+    { text: "A kid offers to trade: their old broken toy right now, for the brand-new one you're getting for your birthday next week.",
+      ask: "Is this a good now-vs-later trade? What are you actually giving up by saying yes today?",
+      answer: "e.g. bad trade \u2014 you'd hand over a new toy you're about to get for something broken, just because you don't want to wait a week. The week passes no matter what; the trade doesn't undo.",
+      why: "Someone can use your impatience against you \u2014 dangling 'right now' so you give up something much better that's only a short wait away. Ask: would this still be a deal if the wait were zero? If not, it's the hurry fooling you." }
+  ],
+  itAddsUp: [
+    { text: "You practice reading just 10 minutes a day. It feels like nothing. But there are about 30 days in a month.",
+      ask: "About how much reading is that in a whole month? Does a 'nothing' amount stay nothing when it repeats?",
+      answer: "e.g. 10 minutes \u00d7 30 days = 300 minutes = about 5 hours of reading a month \u2014 without ever doing a big scary session. Tiny + repeated = large.",
+      why: "Small things feel like zero in the moment, so we skip them. But repeated every day they quietly pile into something huge. The pile is invisible day-to-day and obvious over a month \u2014 that's the whole secret of getting good at anything." },
+    { text: "You put just one coin in a jar every single day and don't touch it.",
+      ask: "What does the jar look like after a week? After a whole year? Did any single coin feel like much?",
+      answer: "e.g. after a week, 7 coins; after a year, 365 coins \u2014 a real amount of money, built from coins that each felt too small to matter.",
+      why: "No single coin was worth stopping for \u2014 which is exactly why the pile sneaks up on you. 'Too small to bother with' + 'every day' is how big things quietly get built. Same math grows a savings jar or a skill." },
+    { text: "You skip brushing your teeth just one night. No big deal, right? Then it becomes 'just one more' night, over and over.",
+      ask: "What's the difference between skipping ONE time and the little skip becoming a daily habit? Where does the real cost hide?",
+      answer: "e.g. one night barely matters, but the habit of skipping every night stacks up into real cavities. The cost isn't in the one skip \u2014 it's in the repeat.",
+      why: "The danger of a tiny bad thing isn't the one time \u2014 it's that 'just once' quietly turns into 'always.' Same as good habits, but working against you. Watch the pattern, not just the single day." },
+    { text: "Two kids start the year the same. One does a little bit of extra math every day; the other does nothing extra. It's not noticeable for weeks.",
+      ask: "By the end of the year, who's likely way ahead \u2014 and why couldn't you see it early on?",
+      answer: "e.g. the daily-bit kid pulls far ahead, but only near the end \u2014 early on the gap is too small to notice, so it LOOKS like the daily effort is doing nothing.",
+      why: "Compounding is sneaky: for a long time it looks like your small daily effort isn't working, then suddenly the gap is huge. Most people quit during the 'looks like nothing' part \u2014 the people who keep going are the ones who trusted the pile was building." },
+    { text: "A little leak drips one drop of water at a time. One drop is basically nothing. The tap drips all night.",
+      ask: "Estimate: does 'one tiny drop' stay harmless when it repeats thousands of times overnight? What could it fill?",
+      answer: "e.g. thousands of drops fill a whole bucket, or wreck the ceiling below \u2014 one drop is nothing, a night of drops is a flood. Tiny-but-constant beats big-but-once.",
+      why: "The world is full of 'one drop' things \u2014 in money, water, habits, kindness or damage \u2014 that seem too small to count until they've repeated a thousand times. When someone says 'it's just a little,' ask 'a little, how many times?'" }
+  ],
+  urgencyTrap: [
+    { text: "A big flashing sign: \"SALE ENDS IN 10 MINUTES! BUY NOW OR MISS OUT FOREVER!\"",
+      ask: "Why would someone WANT you to hurry and not think? What usually happens to these 'ending' sales?",
+      answer: "e.g. they want you too rushed to ask 'do I even need this?' \u2014 because a person who slows down often says no. Most 'ending' sales quietly come back next week.",
+      why: "Real good deals don't need to scream at you to hurry. Manufactured urgency exists to switch OFF your thinking. The move is simple: the more someone pushes you to rush, the more you slow down. Rushing is their plan, not yours." },
+    { text: "A game pops up: \"SPECIAL OFFER! Only available for the next 5 minutes! 3 other players are looking at this right now!\"",
+      ask: "How could a game make a timer or 'other players' up out of nothing? Is the hurry real?",
+      answer: "e.g. the timer is just code \u2014 they can set it to anything or reset it; '3 others looking' can be totally made up. The hurry is a costume, not a fact.",
+      why: "On a screen, 'only 5 minutes' and 'others are looking' are just words someone programmed to make you panic-buy. A machine can invent any 'shortage' it wants. Fake scarcity is the oldest trick \u2014 and knowing it's fake makes it stop working on you." },
+    { text: "\"Buy it NOW, pay nothing today! Just a tiny bit every month \u2014 it's basically free!\"",
+      ask: "Is 'pay later' the same as 'free'? Do the math: what does 'a tiny bit every month' add up to?",
+      answer: "e.g. not free at all \u2014 'a tiny bit every month' for a long time usually adds up to MORE than the price, and now you owe it whether you still want the thing or not. Later-you pays, with extra.",
+      why: "'Buy now, pay later' uses your impatience twice: it rushes you into it AND hides the real total across many small payments (remember the coin jar \u2014 small \u00d7 many = big). Always add it all up. 'Free now' with a tail is a loan wearing a costume." },
+    { text: "A kid is trying to get you to agree to something fast: \"Come ON, decide RIGHT NOW, everyone's waiting, there's no time!\"",
+      ask: "Why the rush? What are you allowed to say when someone won't let you take a moment to think?",
+      answer: "e.g. the rush is so you'll agree before you've thought it through. You're allowed to say 'I need a minute' \u2014 and if they won't give you one, that itself is a warning.",
+      why: "'No time to think' is almost never true \u2014 it's a pressure move, the same trick as a sale timer but with a person. A good choice can handle a pause. If someone can't let you pause, they're not protecting you from missing out, they're stopping you from thinking." },
+    { text: "\"Last one! If you don't grab it this second, it's gone!\" \u2014 says the seller, standing next to a big box of the exact same item.",
+      ask: "Is it really the 'last one'? How does the rushed feeling change if you notice the full box?",
+      answer: "e.g. clearly not the last one \u2014 there's a whole box \u2014 so the 'last one!' is a lie to make you grab it. Once you see the box, the panic just... deflates.",
+      why: "Scarcity ('only one left!') is powerful because 'about to miss out' overrides thinking. The cure is to LOOK: is the shortage real, or just claimed? A claimed shortage you can check is a claimed shortage you can ignore." }
+  ],
+  worthTheWait: [
+    { text: "You're saving for a bike. A store has a wobbly cheap one on sale today, OR you could wait two more weeks for the sturdy one you actually researched.",
+      ask: "Is THIS a wait worth making, or a time to just buy? What tips it one way or the other?",
+      answer: "e.g. worth waiting \u2014 two weeks for a bike that won't break beats a wobbly one you'll regret. But if the cheap one were actually good and the wait were months, buying now could win. It depends on the real trade.",
+      why: "Patience isn't a rule that says 'always wait' \u2014 that would be silly. It's a tool: you weigh how much better the later thing is against how long and how sure the wait is. Sometimes waiting wins, sometimes now does. YOU run the numbers." },
+    { text: "Your ice cream is melting fast in the hot sun while you carefully save it 'for later.'",
+      ask: "Is 'later' actually better here? What happens to the thing you're waiting on?",
+      answer: "e.g. no \u2014 waiting just turns it into soup. Some things get WORSE if you wait, so 'now' is the smart move. Eat it before it melts.",
+      why: "Waiting only pays off if the later thing is bigger or better. If it shrinks, spoils, or disappears while you wait, then waiting is the mistake. Patience is a tool, not a personality \u2014 use it when it actually helps." },
+    { text: "You planted seeds and want carrots. Every day you dig them up to 'check if they're ready,' then plant them again.",
+      ask: "Is checking constantly helping or hurting? What does this kind of goal actually need from you?",
+      answer: "e.g. hurting \u2014 digging them up keeps breaking the roots so they never grow. Some things just need TIME and to be left alone, not more poking.",
+      why: "Certain payoffs \u2014 growing, healing, learning, trust \u2014 can't be rushed no matter how impatient you are; poking at them only sets them back. Part of the long game is knowing which things you help by leaving alone." },
+    { text: "There's a fun thing happening RIGHT NOW with your friends \u2014 and the 'later' reward you'd wait for isn't actually that great.",
+      ask: "Does waiting make sense here? When is 'now' the genuinely smart pick, not just the impatient one?",
+      answer: "e.g. take the now \u2014 a great moment with friends today beats a meh reward later. Choosing now ON PURPOSE, because it's truly worth more, is not the same as grabbing out of impatience.",
+      why: "The goal was never to always sacrifice now for later \u2014 that just trades one silly rule for another. A sovereign chooser sometimes picks now, loudly and on purpose, because they weighed it and now really is worth more. Owning the choice is the whole point." },
+    { text: "Someone says: \"Good things come to those who wait \u2014 so just keep waiting and waiting, don't ever ask for anything.\"",
+      ask: "Is that always true? Can 'be patient' ever be used to keep you from getting a fair turn?",
+      answer: "e.g. not always \u2014 sometimes 'just be patient' is used to make you stop asking for something you fairly deserve now. Patience is your choice, not a leash someone else holds.",
+      why: "'Be patient' is good advice you give YOURSELF \u2014 but it can be twisted into a tool to keep you quiet and waiting for a turn that never comes. Real patience is a move you choose; endless waiting someone imposes on you is just being put off. Know the difference." }
+  ]
+};
+
+/* ---- patience_payoff layout (mirrors ripple_effect/cause_effect_chains row layout) ---- */
+function ppRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    nowOrLater: "NOW OR LATER?", itAddsUp: "IT ADDS UP",
+    urgencyTrap: "THE HURRY TRAP", worthTheWait: "WORTH THE WAIT?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
