@@ -14100,6 +14100,355 @@ function ppRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
 }
 
 /* ============================================================
+   READ THE DATA — data & graph literacy (tallies, pictographs,
+   bar graphs, and the sovereign kicker: "is this chart HONEST?"
+   Reading a chart is a decoding skill AND a manipulation-defense
+   skill — the same true counts can be drawn honest or crooked,
+   and whoever draws the picture makes choices. Kids learn to read
+   the KEY, check where the numbers start, and decide for
+   themselves instead of being impressed or scared by a shape.
+   Deterministic — never calls AI. Draws real pictographs / bars
+   with jsPDF primitives so the crooked-axis trick is VISIBLE.
+============================================================ */
+function rtdShuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Draw a small pictograph glyph as a jsPDF primitive (NO emoji font dependency —
+// jsPDF's helvetica can't render emoji, so we draw simple shapes at (cx,cy) with radius r).
+function rtdDrawGlyph(doc, kind, cx, cy, r) {
+  doc.setDrawColor(60, 90, 120); doc.setLineWidth(0.6);
+  doc.setFillColor(120, 170, 200);
+  if (kind === "square") {
+    doc.rect(cx - r, cy - r, r * 2, r * 2, "FD");
+  } else if (kind === "star") {
+    // 5-point star via polygon lines
+    const pts = [];
+    for (let i = 0; i < 10; i++) {
+      const ang = -Math.PI / 2 + i * Math.PI / 5;
+      const rad = i % 2 === 0 ? r : r * 0.42;
+      pts.push([cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad]);
+    }
+    doc.setFillColor(240, 195, 70);
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length];
+      doc.line(a[0], a[1], b[0], b[1]);
+    }
+  } else if (kind === "apple") {
+    doc.setFillColor(210, 70, 60);
+    doc.circle(cx, cy + 1, r, "FD");
+    doc.setDrawColor(90, 120, 60); doc.setLineWidth(1.1);
+    doc.line(cx, cy - r + 1, cx + 1, cy - r - 3); // stem
+  } else { // circle (default / bugs)
+    doc.circle(cx, cy, r, "FD");
+  }
+}
+
+// Each bank item: { ask, answer, why, and mode-specific data }.
+//  tally: { text (things to count as a string of chars), symbol, categories:[{label,n}] }
+//  picto: { unit (each picture = N), rows:[{label,n}], glyph }
+//  bar:   { rows:[{label,n}], unit(label), ... }
+//  trust: { crooked (a described/drawn misleading chart), truth }
+const RTD_BANKS = {
+  tally: [
+    { categories: [{ label: "Dogs", n: 7 }, { label: "Cats", n: 4 }, { label: "Fish", n: 5 }],
+      ask: "Make a tally for each pet, then answer: which pet is most? How many pets in all?",
+      answer: "Dogs = 7 (5 + 2), Cats = 4, Fish = 5. Most = dogs. Total = 16.",
+      why: "A tally groups by 5s so a big pile becomes easy to read at a glance." },
+    { categories: [{ label: "Sunny", n: 6 }, { label: "Rainy", n: 3 }, { label: "Cloudy", n: 5 }],
+      ask: "Tally the weather days. How many more sunny days than rainy days?",
+      answer: "Sunny = 6, Rainy = 3, Cloudy = 5. Sunny - Rainy = 6 - 3 = 3 more.",
+      why: "\"How many MORE\" is a subtraction hiding inside a chart question." },
+    { categories: [{ label: "Red", n: 8 }, { label: "Blue", n: 8 }, { label: "Green", n: 2 }],
+      ask: "Tally the marbles. Two colours are tied — which? How many fewer green than red?",
+      answer: "Red = 8, Blue = 8 (tied), Green = 2. Green is 8 - 2 = 6 fewer than red.",
+      why: "A tie is real data too — the chart doesn't have to pick one winner." },
+    { categories: [{ label: "Apples", n: 5 }, { label: "Bananas", n: 6 }, { label: "Grapes", n: 9 }],
+      ask: "Tally the fruit picked. Put them in order from most to least.",
+      answer: "Grapes = 9, Bananas = 6, Apples = 5. Order: grapes, bananas, apples.",
+      why: "Ordering is what a chart is FOR — it turns a jumble into a ranking." }
+  ],
+  picto: [
+    { unit: 2, glyph: "apple", noun: "apples", rows: [{ label: "Mon", n: 3 }, { label: "Tue", n: 5 }, { label: "Wed", n: 2 }],
+      ask: "Each picture = 2 apples picked. How many apples on Tuesday? How many on all three days?",
+      answer: "Tue: 5 pictures \u00D7 2 = 10. Total: (3+5+2) \u00D7 2 = 10 \u00D7 2 = 20 apples.",
+      why: "Read the KEY first. \"5 pictures\" is NOT 5 apples when each picture is worth 2." },
+    { unit: 5, glyph: "star", noun: "votes", rows: [{ label: "Book A", n: 4 }, { label: "Book B", n: 2 }, { label: "Book C", n: 6 }],
+      ask: "Each picture = 5 votes. Which book won, and by how many votes over 2nd place?",
+      answer: "A = 20, B = 10, C = 30. C won. 2nd is A (20). C beats A by 30 - 20 = 10 votes.",
+      why: "More pictures = more votes, but you must multiply by the key to say the real number." },
+    { unit: 10, glyph: "square", noun: "cars", rows: [{ label: "Red", n: 3 }, { label: "Blue", n: 5 }, { label: "Black", n: 1 }],
+      ask: "Each picture = 10 cars counted. How many cars in all? Which colour was rarest?",
+      answer: "Red 30, Blue 50, Black 10. Total = 90. Rarest = black (only 1 picture = 10).",
+      why: "One little picture can still mean a lot — the key does the heavy lifting." },
+    { unit: 2, glyph: "circle", noun: "bugs", rows: [{ label: "Oak", n: 6 }, { label: "Pine", n: 3 }, { label: "Elm", n: 4 }],
+      ask: "Each picture = 2 bugs found. Half a picture would mean 1 bug. How many bugs on the oak?",
+      answer: "Oak: 6 pictures \u00D7 2 = 12 bugs.",
+      why: "A HALF picture means half the key (here, 1) \u2014 pictographs can show in-betweens." }
+  ],
+  bar: [
+    { unit: "scoops sold", rows: [{ label: "Choc", n: 8 }, { label: "Vanilla", n: 5 }, { label: "Mint", n: 3 }],
+      ask: "Read the bars. Which flavour sold most? How many more choc than mint?",
+      answer: "Choc = 8 (most), Vanilla = 5, Mint = 3. Choc - Mint = 8 - 3 = 5 more.",
+      why: "In a bar graph the TALLER bar = the bigger number \u2014 as long as they all start at 0." },
+    { unit: "goals", rows: [{ label: "Sam", n: 4 }, { label: "Ari", n: 7 }, { label: "Bo", n: 4 }],
+      ask: "Read the bars. Who scored most? Two players tied \u2014 who, and how many each?",
+      answer: "Ari = 7 (most). Sam and Bo tied at 4 each.",
+      why: "Equal-height bars mean equal numbers \u2014 the chart shows a tie honestly." },
+    { unit: "cm of rain", rows: [{ label: "Jan", n: 6 }, { label: "Feb", n: 9 }, { label: "Mar", n: 2 }],
+      ask: "Read the bars. Which month was wettest? Order the months driest to wettest.",
+      answer: "Feb = 9 (wettest). Driest\u2192wettest: Mar (2), Jan (6), Feb (9).",
+      why: "The bar's height IS the number \u2014 reading it is just measuring up the side." },
+    { unit: "kids", rows: [{ label: "Walk", n: 10 }, { label: "Bike", n: 4 }, { label: "Bus", n: 6 }],
+      ask: "Read the bars. How many kids in all? How many did NOT take the bus?",
+      answer: "Total = 10 + 4 + 6 = 20. Not the bus = 20 - 6 = 14 (or 10 + 4).",
+      why: "\"NOT\" questions mean everything EXCEPT one bar \u2014 add the others or subtract that one." }
+  ],
+  trust: [
+    { crooked: "A juice ad shows a bar graph: their bar is HUGE, the other brand's bar is tiny. But the numbers on the side start at 90, not 0 \u2014 and the real values are 98 vs 96.",
+      ask: "Why does the drawing look like a landslide when the real numbers are almost equal? What one fix makes it honest?",
+      answer: "Because the graph starts at 90, not 0 \u2014 a 2-point gap is drawn as if it were the whole bar. Start the numbers at 0 and the bars look nearly the same height.",
+      why: "The #1 crooked-graph trick: a cut-off (\"truncated\") bottom makes a tiny difference look giant. Always check where the numbers start." },
+    { crooked: "A pictograph says \"we planted the MOST trees!\" Their row has 5 big tree pictures; the other group's row has 5 tiny tree pictures. No key is shown.",
+      ask: "Can you tell who really planted more trees? What is missing that you need?",
+      answer: "No \u2014 you can't tell without a KEY saying how many trees each picture is worth. Making their pictures bigger is a trick; big pictures aren't the same as a bigger number.",
+      why: "No key = no truth. Picture SIZE is decoration; only the key tells you the count." },
+    { crooked: "A graph titled \"Our snacks are healthiest!\" only compares sugar \u2014 it leaves out that theirs has way more salt and fat. The bars for sugar are honest and start at 0.",
+      ask: "The bars are drawn honestly. So how is this chart still trying to fool you?",
+      answer: "By CHERRY-PICKING \u2014 it only shows the one measure they win (sugar) and hides salt and fat. An honest bar can still tell a crooked story by leaving things out.",
+      why: "Even true numbers lie by omission. Ask: what did they choose NOT to put on the chart?" },
+    { crooked: "A line graph shows video game sales going \"straight up to the sky!\" But look close: the bottom of the line only covers 3 days, and each little bump got stretched super tall and wide.",
+      ask: "Is this a real explosion of sales, or a drawing trick? What would you want to see instead?",
+      answer: "It's a drawing trick \u2014 stretching a few days super tall makes a small rise look dramatic. Ask for a longer time span and a y-axis that starts at 0 to judge it fairly.",
+      why: "A steep line can be manufactured by stretching the scale. Zoom out: how long, and starting from where?" },
+    { crooked: "A poster: \"9 out of 10 kids picked our cereal!\" In small print: they only asked 10 kids, and those kids each got a free toy for picking it.",
+      ask: "The math (9/10 = 90%) is correct. So why shouldn't this convince you?",
+      answer: "Because only 10 kids were asked (a tiny sample) AND they were paid with a toy to pick it. A true fraction from a rigged or tiny count still isn't good evidence.",
+      why: "Correct arithmetic on bad data is still bad. Always ask: how many, and who got something for answering?" }
+  ]
+};
+
+function rtdRowHeight(doc, it, w, showAnswers) {
+  doc.setFontSize(11);
+  const askLines = doc.splitTextToSize(it.ask, w - 24);
+  let h = 18;                 // number + mode tag
+  // visual/data block
+  if (it.mode === "tally")  h += it.categories.length * 20 + 10;
+  else if (it.mode === "picto") h += 18 + it.rows.length * 20 + 10;
+  else if (it.mode === "bar")   h += 118;
+  else if (it.mode === "trust") {
+    const cLines = doc.splitTextToSize(it.crooked, w - 24);
+    h += cLines.length * 13 + 12;
+  }
+  h += askLines.length * 13 + 6;
+  if (showAnswers) {
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  \u2014 " + it.why, w - 24);
+    h += ansLines.length * 12 + 6;
+  } else {
+    h += 22;
+    h += 22; // a "because..." line — reasoning is the point
+  }
+  return h + 10;
+}
+
+function rtdRenderRow(doc, it, num, x, y, w, showAnswers) {
+  const modeTag = {
+    tally: "MAKE THE TALLY", picto: "READ THE PICTOGRAPH",
+    bar: "READ THE BAR GRAPH", trust: "IS THIS CHART HONEST?"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8);
+    doc.setTextColor(it.mode === "trust" ? 200 : 231, it.mode === "trust" ? 40 : 105, it.mode === "trust" ? 40 : 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // ---- data / visual block ----
+  if (it.mode === "tally") {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(20, 20, 20);
+    it.categories.forEach(c => {
+      doc.text(c.label + ":", bx, cy + 4);
+      // draw blank tally box the child fills; on key, show the count in gray
+      doc.setDrawColor(180); doc.setLineWidth(0.5);
+      doc.line(bx + 70, cy + 6, x + w, cy + 6);
+      if (showAnswers) {
+        doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor(180, 30, 30);
+        doc.text("(" + c.n + ")", bx + 74, cy + 3);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(20, 20, 20);
+      }
+      cy += 20;
+    });
+    cy += 6;
+  } else if (it.mode === "picto") {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5); doc.setTextColor(33, 130, 130);
+    doc.text("KEY:", bx, cy + 4);
+    rtdDrawGlyph(doc, it.glyph, bx + 30, cy + 1, 5);
+    doc.setTextColor(33, 130, 130);
+    doc.text("= " + it.unit + " " + it.noun, bx + 42, cy + 4);
+    doc.setTextColor(20, 20, 20);
+    cy += 18;
+    it.rows.forEach(r => {
+      doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(20, 20, 20);
+      doc.text(r.label + ":", bx, cy + 4);
+      // draw glyph n times
+      let gx = bx + 62;
+      for (let k = 0; k < r.n; k++) { rtdDrawGlyph(doc, it.glyph, gx, cy + 1, 5); gx += 15; }
+      cy += 20;
+    });
+    cy += 6;
+  } else if (it.mode === "bar") {
+    // draw a simple honest bar graph (all bars start at 0)
+    const gTop = cy;
+    const gLeft = bx + 40;
+    const gBottom = gTop + 92;
+    const gRight = x + w - 10;
+    const maxN = Math.max.apply(null, it.rows.map(r => r.n));
+    const scale = (gBottom - gTop - 6) / Math.max(1, maxN);
+    // axes
+    doc.setDrawColor(60); doc.setLineWidth(0.8);
+    doc.line(gLeft, gTop, gLeft, gBottom);       // y-axis
+    doc.line(gLeft, gBottom, gRight, gBottom);    // x-axis (baseline = 0)
+    // y ticks (0 and max) — the honest "starts at 0" label
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(90);
+    doc.text("0", gLeft - 10, gBottom + 2);
+    doc.text(String(maxN), gLeft - 12, gTop + 6);
+    // bars
+    const slot = (gRight - gLeft) / it.rows.length;
+    const barW = Math.min(34, slot * 0.55);
+    it.rows.forEach((r, i) => {
+      const bxc = gLeft + slot * i + (slot - barW) / 2;
+      const bh = r.n * scale;
+      doc.setFillColor(120, 170, 200);
+      doc.rect(bxc, gBottom - bh, barW, bh, "F");
+      doc.setDrawColor(60, 90, 120); doc.setLineWidth(0.5);
+      doc.rect(bxc, gBottom - bh, barW, bh, "S");
+      doc.setFontSize(8); doc.setTextColor(30);
+      doc.text(r.label, bxc + barW / 2, gBottom + 10, { align: "center" });
+      if (showAnswers) { doc.setFontSize(7.5); doc.setTextColor(180, 30, 30); doc.text(String(r.n), bxc + barW / 2, gBottom - bh - 2, { align: "center" }); }
+    });
+    doc.setFontSize(7.5); doc.setTextColor(120);
+    doc.text("(" + it.unit + ")", gLeft, gTop - 2);
+    doc.setTextColor(20, 20, 20);
+    cy = gBottom + 20;
+  } else if (it.mode === "trust") {
+    doc.setFont("helvetica", "italic"); doc.setFontSize(10.5); doc.setTextColor(90, 40, 40);
+    const cLines = doc.splitTextToSize(it.crooked, bw);
+    doc.text(cLines, bx, cy + 4);
+    cy += cLines.length * 13 + 12;
+    doc.setTextColor(20, 20, 20);
+  }
+
+  // ---- the thinking question ----
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  \u2014 " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+    doc.text("because...", bx, cy);
+    doc.setTextColor(170, 170, 170);
+    doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+    cy += 14;
+    doc.setTextColor(20, 20, 20);
+  }
+  return cy;
+}
+
+window.TEMPLATES.read_the_data = {
+  id: "read_the_data",
+  label: "Read the data (tallies, pictographs & honest charts)",
+  subject: "math",
+  grades: ["1", "2", "3"],
+  topicHint: "Collecting, organizing, reading — and questioning — data",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Data mode",
+      options: [
+        { value: "tally",   label: "Make the tally (organize counts into a chart)" },
+        { value: "picto",   label: "Read the pictograph (each picture = a number)" },
+        { value: "bar",     label: "Read the bar graph (compare the bars)" },
+        { value: "trust",   label: "Is this chart honest? (spot the crooked graph)" },
+        { value: "mixed",   label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 6, min: 3, max: 12 },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(3, Math.min(12, parseInt(m.count, 10) || 6));
+    const modes = m.mode === "mixed" ? ["tally", "picto", "bar", "trust"] : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = rtdShuffle(RTD_BANKS[mode].slice());
+      const item = pools[mode].pop();
+      items.push(Object.assign({ mode }, item));
+    }
+    return { items, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "Read the Data";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "Data is just a tidy picture of what's really out there \u2014 you count the world, then draw it so a truth pops out you couldn't see in a pile. But whoever draws the picture makes choices, so the same true facts can be drawn honest or drawn crooked. Learn to BUILD your own chart and to READ someone else's slowly: check what each picture is worth, where the numbers start, and whether the drawing matches the counting. Then YOU decide \u2014 you don't get told.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (bxx, byy, bww) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", bxx, byy + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "A pictograph's KEY might say one picture = 2 apples, and Monday shows 3 pictures. How many? Not \"3\" \u2014 each picture is worth 2, so 3 \u00D7 2 = 6 apples. And on a bar graph, always check the bottom starts at 0; if it starts at 90, a tiny gap can be drawn to look like a landslide. Read the key and the starting line FIRST, then decide for yourself.",
+          bww);
+        doc.text(ex, bxx, byy + 22);
+      }, y, pageW, margin, 96);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = rtdRowHeight(doc, it, pageW - margin * 2, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = rtdRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
