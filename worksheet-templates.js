@@ -14449,6 +14449,237 @@ window.TEMPLATES.read_the_data = {
 };
 
 /* ============================================================
+   TEMPLATE: What's Left Out? (omission / the missing piece)
+   Reading, Gr1-3. Deterministic, never calls AI.
+   Item shape mirrors cause_effect_chains: { text, ask, answer, why }
+   Reuses ceRowHeight for measurement; own render row for mode tags.
+============================================================ */
+window.TEMPLATES.whats_left_out = {
+  id: "whats_left_out",
+  label: "What's Left Out? (the missing piece)",
+  subject: "reading",
+  grades: ["1", "2", "3"],
+  topicHint: "Omission literacy: spotting the fact left out, the fine print, the question nobody asked, the option not offered",
+  maxTokens: 0, // never calls AI
+
+  modifiers: [
+    { id: "mode", type: "select", label: "Thinking skill",
+      options: [
+        { value: "missingFact",  label: "What did they leave out? (the fact that changes it)" },
+        { value: "finePrint",    label: "Read the small print (the catch hiding underneath)" },
+        { value: "notAsked",     label: "The question nobody asked (what should you check?)" },
+        { value: "notOnMenu",    label: "The option not offered (they framed your choices)" },
+        { value: "mixed",        label: "Mixed (a bit of each)" }
+      ], default: "mixed" },
+    { id: "count", type: "number", label: "# of items", default: 8, min: 4, max: 16 },
+    { id: "explain", type: "boolean", label: "Ask the child to explain their thinking", default: true },
+    { id: "workedExample", type: "boolean", label: "Show a worked example at the top", default: true }
+  ],
+
+  generate(m) {
+    const count = Math.max(4, Math.min(16, parseInt(m.count, 10) || 8));
+    const modes = m.mode === "mixed"
+      ? ["missingFact", "finePrint", "notAsked", "notOnMenu"]
+      : [m.mode];
+    const pools = {};
+    const items = [];
+    for (let i = 0; i < count; i++) {
+      const mode = modes[i % modes.length];
+      if (!pools[mode] || pools[mode].length === 0) pools[mode] = wloShuffle(WLO_BANKS[mode].slice());
+      items.push(Object.assign({ mode }, pools[mode].pop()));
+    }
+    return { items, explain: m.explain !== false, workedExample: m.workedExample !== false, modifiers: m };
+  },
+
+  renderPDF(doc, content, m, kid, opts = {}) {
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 40;
+    let y = margin;
+    const title = "What's Left Out?";
+
+    y = pdfDrawNameDateLine(doc, y, pageW, margin);
+    y = pdfDrawTitleBar(doc, title, y, pageW, margin);
+    y = pdfDrawInstruction(
+      doc,
+      "The hardest trick to catch isn't a lie on the page \u2014 it's the true thing someone quietly LEFT OFF the page. A sentence can be all true words and still fool you if it skips the one fact that would change your mind. So for each of these, don't just read what's there \u2014 ask what's MISSING: what fact got left out, what's hiding in the small print, what question nobody asked, and what choice wasn't even offered. Nobody's lying to you. You're just deciding to see the whole picture before you pick.",
+      y, pageW, margin
+    );
+
+    if (content.workedExample) {
+      y = pdfDrawWorkedExampleBox(doc, (x, by, w) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.setTextColor(33, 130, 130);
+        doc.text("Worked example", x, by + 4);
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(30, 30, 30);
+        const ex = doc.splitTextToSize(
+          "A sign says: \\\"FREE puppy \u2014 today only!\\\"  Every word is true. But what got LEFT OUT? Nothing about the food, the vet bills, the walks, or who does them. The sign shows the fun part and hides the work part. The missing piece doesn't make the puppy bad \u2014 it just means you were shown half the picture. Good thinkers finish the sentence themselves: \\\"...and what ELSE do I need to know before I decide?\\\"",
+          w);
+        doc.text(ex, x, by + 22);
+      }, y, pageW, margin, 100);
+    }
+
+    content.items.forEach((it, idx) => {
+      const needed = ceRowHeight(doc, it, pageW - margin * 2, content.explain, opts.showAnswers);
+      if (pdfNeedNewPage(doc, y, needed, margin)) {
+        y = pdfAddPageWithHeader(doc, title, pageW, margin);
+      }
+      y = wloRenderRow(doc, it, idx + 1, margin, y, pageW - margin * 2, content.explain, opts.showAnswers);
+      y += 12;
+    });
+
+    pdfStampFooters(doc, kid, pageW, pageH, margin);
+  }
+};
+
+/* ---- whats_left_out content banks ---- */
+function wloShuffle(arr) { return arr.sort(() => Math.random() - 0.5); }
+
+// Each item: { text, ask, answer, why }  (same shape as cause_effect_chains)
+const WLO_BANKS = {
+  missingFact: [
+    { text: "A cereal box shouts: \"NOW WITH 30% MORE!\"",
+      ask: "What fact did they leave OFF the box that you'd want to know?",
+      answer: "30% more THAN WHAT? More than the old box? More than a rival? And does the price go up too?",
+      why: "\"More\" is only half a sentence \u2014 more than what? They leave off the thing you'd compare it to on purpose, because the missing half is where the trick lives. Finish their sentence and the excitement usually shrinks." },
+    { text: "\"Nine out of ten kids picked GlowPop as their favourite drink!\"",
+      ask: "What got left out that would change how much you trust this?",
+      answer: "How many kids were asked (maybe only ten), and whether GlowPop paid to ask them.",
+      why: "\"Nine out of ten\" sounds huge but they never say out of how many, or who did the asking. The missing number and the missing money are exactly the facts that would deflate it. Always ask: how many, and who's paying?" },
+    { text: "Your friend says: \"Mrs. Lee gave ME an extra recess, so she's the best teacher!\"",
+      ask: "What did your friend leave out that might change the story?",
+      answer: "WHY she got extra recess \u2014 maybe the class earned it, or maybe it was a one-time thing for everyone.",
+      why: "A story feels solid until you notice the piece that got skipped. \"She's the best\" is built on one fact with the reason cut off. Ask for the missing reason before you agree \u2014 it often flips the meaning." },
+    { text: "A game ad: \"Players who use SwiftBoots win MORE races!\"",
+      ask: "What important fact is missing here?",
+      answer: "Whether the good players just happen to buy SwiftBoots \u2014 the boots may not be what makes them win.",
+      why: "They leave out WHY the boot-buyers win. Skilled players buy fancy gear, so of course gear-owners win more \u2014 but the gear didn't do it. The missing cause is the whole game. Ask what ELSE those winners have in common." },
+    { text: "\"This snack is FAT FREE!\" in big letters on the front.",
+      ask: "What are they hoping you won't ask about \u2014 what's left off the front?",
+      answer: "How much SUGAR is in it. Fat-free candy can be pure sugar.",
+      why: "Bragging loudly about one thing is often a way to keep your eyes off another thing. \"Fat free\" is true and also a distraction. When a label shouts about ONE part, gently ask about the parts it's staying quiet on." }
+  ],
+  finePrint: [
+    { text: "Big print: \"WIN A FREE BIKE!\"  Tiny print underneath: \"with purchase of $200 in gift cards.\"",
+      ask: "What does the small print change about the big print?",
+      answer: "It's not free \u2014 you have to spend $200 first. The 'free' bike costs $200.",
+      why: "The big words make the promise; the tiny words take it back. They print the catch small on purpose, hoping the shiny part is all you read. The rule is simple: the small print is where the truth hides, so read it FIRST." },
+    { text: "A game: \"Play FREE forever!\"  Below in grey: \"Some features require coins. Coins cost money.\"",
+      ask: "Is it really free? What does the fine print reveal?",
+      answer: "It's free to open, but you pay for the parts that actually make it fun.",
+      why: "\"Free\" got you in the door, and the fine print quietly moved the price inside. Free-to-start is not free-to-play. Look for the little grey line \u2014 it usually tells you where they'll ask for your money." },
+    { text: "A poster: \"Everyone's welcome to the party!\"  At the bottom, small: \"Bring $5 and your own snack.\"",
+      ask: "What does the small line add that the big line hid?",
+      answer: "It costs $5 and you have to feed yourself \u2014 not quite \"everyone welcome, no strings.\"",
+      why: "The headline sells the warm feeling; the fine print carries the actual deal. It's not that the party's bad \u2014 it's that the real terms were shrunk down small. Read to the very bottom before you count yourself in." },
+    { text: "A toy box shows a huge castle. Tiny words: \"Figures sold separately. Batteries not included.\"",
+      ask: "What will surprise you later that the tiny words already warned about?",
+      answer: "The castle comes almost empty \u2014 the figures and batteries cost extra.",
+      why: "The picture is the promise your eyes believe; the fine print is the truth your eyes skip. \"Sold separately\" is them telling you the truth in the quietest voice they can. Hunt for that quiet voice before you get excited." },
+    { text: "\"30 days FREE!\"  Below: \"then $12/month, auto-charged, cancel anytime.\"",
+      ask: "What's the catch the small print is telling you?",
+      answer: "After 30 days it starts charging you every month by itself unless you remember to stop it.",
+      why: "\"Free\" is the bait; \"auto-charged\" is the hook. They count on you forgetting to cancel. The fine print isn't decoration \u2014 it's the actual deal, and reading it is how you keep your own money." }
+  ],
+  notAsked: [
+    { text: "A kid is selling their \"barely used\" scooter for a great low price and wants cash right now.",
+      ask: "What's the question NOBODY has asked yet that you should ask?",
+      answer: "\"Why are you selling it so cheap, so fast?\" \u2014 maybe it's broken, or not really theirs.",
+      why: "The deal is built to rush you past the obvious question. When something's cheap AND urgent, the missing question is usually 'what's wrong with it?' Slowing down to ask the un-asked question is your superpower." },
+    { text: "Two friends are arguing about who ran faster, but nobody timed anyone.",
+      ask: "What question would settle it that nobody thought to ask?",
+      answer: "\"How would we actually MEASURE it?\" \u2014 e.g. race again with someone timing or watching the finish.",
+      why: "People argue louder instead of asking the one question that could answer it. The missing question is often 'how could we check?' Finding a way to test it beats out-shouting each other every time." },
+    { text: "An ad says a vitamin \"helps kids grow strong.\" Everyone's talking about buying it.",
+      ask: "What should someone ask that no one in the ad is asking?",
+      answer: "\"Compared to kids who DIDN'T take it \u2014 did they grow any different?\" and \"Who made this ad?\"",
+      why: "The exciting claim floats along while the real test-question gets skipped. Growing strong might happen anyway, with or without the vitamin. The un-asked question \u2014 'compared to what?' \u2014 pops most claims like this." },
+    { text: "A sign: \"Voted #1 Pizza in Town!\"  Everyone assumes it's the best.",
+      ask: "What question is nobody asking about that \"#1\"?",
+      answer: "\"Voted by WHOM, and how many people?\" Maybe the owner and two friends voted.",
+      why: "A shiny badge gets believed before anyone checks what's behind it. The missing question is who did the voting. A ribbon anybody can print isn't proof \u2014 asking 'says who, and how many?' is." },
+    { text: "Your team wants to pick a new game. The loudest kid already shouted his choice and others nodded.",
+      ask: "What question got skipped in the rush to agree?",
+      answer: "\"What do the quiet kids actually want?\" and \"Did we even list the other games?\"",
+      why: "Loud and fast can feel like 'decided,' but the un-asked question is whether everyone was really heard. The missing voices are still real votes. Asking 'what does everyone else think?' is how a group thinks instead of follows." }
+  ],
+  notOnMenu: [
+    { text: "\"Do you want to clean your room NOW, or do you want NO screen time all week?\"",
+      ask: "They gave you two choices. What third option did they leave off the menu?",
+      answer: "\"Clean it after I finish this, in the next hour\" \u2014 a fair time, not now-or-punished.",
+      why: "When someone hands you exactly two choices and one is scary, they're steering you. Real life almost always has a door number three. Naming the option they left off puts the choosing back in your hands." },
+    { text: "A quiz online: \"Are you a GENIUS or a total BEGINNER? Take the test to find out!\"",
+      ask: "What choice between those two did they leave out?",
+      answer: "\"Somewhere in the middle\" \u2014 most people, most of the time. And: \"I don't need this quiz.\"",
+      why: "Only-two-boxes is a trap, because most true answers live in the middle they erased. They squeeze you to the ends so you'll click. Spotting the missing middle is how you refuse a rigged question." },
+    { text: "\"You're either WITH our club, or you're against us. Which is it?\"",
+      ask: "What options are missing from that 'either/or'?",
+      answer: "\"I like some of you and I'll still be my own person\" \u2014 you can be friendly without picking a team.",
+      why: "\"With us or against us\" deletes every peaceful answer on purpose, to make you pick a side fast. But you're allowed to stand off the menu entirely. The left-off option is usually the honest one." },
+    { text: "A store screen: \"Add the WARRANTY, or risk your new tablet breaking forever?\"",
+      ask: "What choice did they hide between those two?",
+      answer: "\"Buy it without the extra warranty and take normal care\" \u2014 most things don't just break forever.",
+      why: "They paint only a scary end and a paid end, and hide the calm normal one in between. Fear-plus-two-doors is a selling trick. Ask 'what's the boring middle choice they didn't show me?'" },
+    { text: "\"We can watch MY show or we can just sit here bored doing nothing.\"",
+      ask: "What better options got left off on purpose?",
+      answer: "\"Take turns,\" \"pick a show we BOTH like,\" or \"do a different fun thing together.\"",
+      why: "Framing it as 'my way or misery' makes their choice look like the only fun one. The left-off options are the fair ones \u2014 that's exactly why they got left off. Put the fair choices back on the table." }
+  ]
+};
+
+/* ---- whats_left_out layout (reuses ceRowHeight; own render row for mode tags) ---- */
+function wloRenderRow(doc, it, num, x, y, w, explain, showAnswers) {
+  const modeTag = {
+    missingFact: "WHAT DID THEY LEAVE OUT?",
+    finePrint:   "READ THE SMALL PRINT",
+    notAsked:    "THE QUESTION NOBODY ASKED",
+    notOnMenu:   "THE OPTION NOT OFFERED"
+  }[it.mode] || "";
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(33, 130, 130);
+  doc.text(String(num) + ".", x, y + 4);
+  if (modeTag) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(231, 105, 56);
+    doc.text(modeTag, x + 20, y + 4);
+  }
+  let cy = y + 18;
+  const bx = x + 20;
+  const bw = w - 24;
+
+  // The situation
+  doc.setFont("helvetica", "italic"); doc.setFontSize(11); doc.setTextColor(20, 20, 20);
+  const textLines = doc.splitTextToSize(it.text, bw);
+  doc.text(textLines, bx, cy);
+  cy += textLines.length * 13 + 6;
+
+  // The thinking question
+  doc.setFont("helvetica", "normal"); doc.setFontSize(10.5); doc.setTextColor(50, 50, 50);
+  const askLines = doc.splitTextToSize(it.ask, bw);
+  doc.text(askLines, bx, cy);
+  cy += askLines.length * 13 + 6;
+
+  if (showAnswers) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5); doc.setTextColor(180, 30, 30);
+    const ansLines = doc.splitTextToSize("Key: " + it.answer + "  \u2014 " + it.why, bw);
+    doc.text(ansLines, bx, cy);
+    cy += ansLines.length * 12 + 6;
+    doc.setTextColor(20, 20, 20);
+  } else {
+    doc.setDrawColor(170); doc.setLineWidth(0.5);
+    doc.line(bx, cy + 8, x + w, cy + 8);
+    cy += 22;
+    if (explain) {
+      doc.setFont("helvetica", "italic"); doc.setFontSize(8.5); doc.setTextColor(120, 120, 120);
+      doc.text("because...", bx, cy);
+      doc.setTextColor(170, 170, 170);
+      doc.line(bx + doc.getTextWidth("because... ") + 4, cy, x + w, cy);
+      cy += 14;
+      doc.setTextColor(20, 20, 20);
+    }
+  }
+  return cy;
+}
+
+/* ============================================================
    TEMPLATE INDEX (helper for UI)
 ============================================================ */
 window.TEMPLATES_LIST = Object.values(window.TEMPLATES);
